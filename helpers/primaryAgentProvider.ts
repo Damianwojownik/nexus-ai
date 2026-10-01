@@ -44,7 +44,7 @@ export class PrimaryAgentProvider implements AgentProviderContract {
     kind: AgentProviderKind = 'primary',
   ) {
     const config = typeof configOrId === 'string' ? undefined : configOrId;
-    this.id = typeof configOrId === 'string' ? configOrId : config.id ?? config.name ?? 'primary-agent';
+    this.id = typeof configOrId === 'string' ? configOrId : configOrId.id ?? configOrId.name ?? 'primary-agent';
     this.adapter = typeof adapterOrKind === 'object' ? adapterOrKind : undefined;
     this.kind = typeof adapterOrKind === 'string' ? adapterOrKind : kind;
   }

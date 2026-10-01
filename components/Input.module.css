@@ -1,0 +1,14 @@
+.input {
+  background: var(--surface, #0e1420);
+  border: 1px solid var(--border, #263247);
+  border-radius: 8px;
+  color: var(--foreground, #edf4ff);
+  font: 400 15px/1.4 var(--font-family-base, sans-serif);
+  min-height: 44px;
+  min-width: 0;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.input::placeholder { color: var(--muted-foreground, #8fa2ba); }
+.input:focus-visible { border-color: var(--primary, #7ce7ff); box-shadow: var(--shadow-focus, 0 0 0 3px rgba(124,231,255,.2)); outline: none; }

@@ -56,6 +56,7 @@ export default function Home() {
   const [response,setResponse]=useState('');
   const [isThinking,setIsThinking]=useState(false);
   const recognitionRef=useRef<any>(null);
+  const hubSseConnectedRef=useRef(false);
   const avatarRef=useRef<HTMLDivElement | null>(null);
   const motionStateRef=useRef<VoiceEventType>('IDLE');
   const speechStartedAtRef=useRef(0);
@@ -136,6 +137,7 @@ export default function Home() {
       void refresh();
     }, (status) => {
       if (disposed) return;
+      hubSseConnectedRef.current = status === 'CONNECTED';
       setHubStatus(status);
       if (status === 'CONNECTED') {
         if (!registered) {
@@ -161,6 +163,7 @@ export default function Home() {
     return () => {
       disposed = true;
       registered = false;
+      hubSseConnectedRef.current = false;
       window.clearInterval(heartbeatTimer);
       stopEvents();
     };
@@ -171,6 +174,7 @@ export default function Home() {
     setHubError('');
     try {
       await operation();
+      setHubStatus('CONNECTED');
       await refreshHubState();
     } catch (error) {
       setHubError(error instanceof Error ? error.message : 'Agent Hub request failed');
@@ -196,6 +200,21 @@ export default function Home() {
 
   const claimHubTask = (taskId: string) => runHubMutation(() => agentHubClient.claimTask(taskId, hubActor));
   const leaseHubTask = (taskId: string) => runHubMutation(() => agentHubClient.leaseTask(taskId, hubActor, 300000));
+  const retryHubConnection = async () => {
+    setHubBusy(true);
+    try {
+      await agentHubClient.health();
+      await refreshHubState();
+      if (!hubSseConnectedRef.current) throw new Error('Agent Hub SSE stream is reconnecting');
+      setHubError('');
+      setHubStatus('CONNECTED');
+    } catch (error) {
+      setHubError(error instanceof Error ? error.message : 'Agent Hub reconnect failed');
+      setHubStatus(error instanceof AgentHubClientError && error.statusCode ? 'ERROR' : 'DISCONNECTED');
+    } finally {
+      setHubBusy(false);
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = voiceEventBus.subscribe((event) => {
@@ -311,8 +330,10 @@ export default function Home() {
     </aside>
     <section className={styles.main}><header><div><span className={styles.dot}/> Agent online</div><div className={styles.model}>AUTO · lokalny / chmura</div></header>
       <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
-        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
-        <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div><div className={styles.status}>{status}</div>
+        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
+        <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
+        {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
+        <div className={styles.status}>{status}</div>
         <div className={styles.composer}><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder="Np. Zbuduj aplikację do rezerwacji wizyt…"/><Button onClick={run} aria-label="Wyślij"><Send size={18}/></Button></div>
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button><Button variant="secondary" onClick={()=>speak('Jestem Nexus. Słyszę Cię i jestem gotowy do rozmowy.')}><Volume2 size={18}/> Test głosu</Button></div>
       </div>
@@ -326,7 +347,10 @@ export default function Home() {
       <section aria-labelledby="agent-hub-title" style={{borderTop:'1px solid rgba(143,162,186,.24)',borderBottom:'1px solid rgba(143,162,186,.24)',padding:'20px 0',margin:'20px 0',color:'var(--foreground,#edf4ff)'}}>
         <header style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:16}}>
           <div><h3 id="agent-hub-title" style={{margin:0}}>Agent Hub</h3><span style={{fontSize:13,opacity:.72}}>Presence, zadania i zdarzenia na żywo</span></div>
-          <strong aria-live="polite" style={{color:hubStatus==='CONNECTED'?'#57d6a0':hubStatus==='ERROR'?'#ff7f8d':'#ffc66d'}}>{hubStatus}</strong>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <strong aria-live="polite" style={{color:hubStatus==='CONNECTED'?'#57d6a0':hubStatus==='ERROR'?'#ff7f8d':'#ffc66d'}}>{hubStatus}</strong>
+            {hubStatus!=='CONNECTED'&&<button type="button" disabled={hubBusy} onClick={()=>void retryHubConnection()} style={{padding:'7px 10px',borderRadius:5,border:'1px solid #263247',background:'#1c2738',color:'inherit',cursor:'pointer'}}>Ponów połączenie</button>}
+          </div>
         </header>
         <form onSubmit={submitHubTask} style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:10,marginBottom:18}}>
           <input aria-label="Cel zadania" value={hubGoal} onChange={event=>setHubGoal(event.target.value)} placeholder="Cel zadania" required style={{minWidth:0,padding:'10px 12px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}/>
@@ -369,7 +393,7 @@ export default function Home() {
         </section>
       </section>
       <div className={styles.cards}><article><Brain/><div><b>Pamięć projektu</b><span>kontekst, decyzje, pliki</span></div><strong>ON</strong></article><article><Code2/><div><b>Agent Builder</b><span>kod → test → poprawka</span></div><strong>READY</strong></article><article><Play/><div><b>Podgląd aplikacji</b><span>uruchomienie na żywo</span></div><strong>LOCAL</strong></article></div>
-      <div className={styles.characterBar}><b>Wybierz postać</b><div className={styles.characterList}>{avatars.map((a,i)=><button key={a.name} onClick={()=>chooseAvatar(i)} className={i===avatar?styles.selected:''}><img src={a.src} alt={a.name}/><span>{a.name}</span></button>)}</div></div>
+      <div className={styles.characterBar}><b>Wybierz postać</b><div className={styles.characterList}>{avatars.map((a,i)=><button key={a.name} onClick={()=>chooseAvatar(i)} className={i===avatar?styles.selected:''}><img src={a.src} alt="" onError={event=>{event.currentTarget.style.display='none'}}/><span>{a.name}</span></button>)}</div></div>
     </section>
   </main>
 }

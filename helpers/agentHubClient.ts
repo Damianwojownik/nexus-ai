@@ -6,12 +6,9 @@ export type NewAgentHubTask = Pick<AgentTask, 'goal' | 'createdBy' | 'assignedTo
 
 type AgentHubResponse<T> = T;
 
-const defaultBaseUrl = (() => {
-  if (typeof process !== 'undefined' && process.env?.NEXUS_AGENT_HUB_URL) {
-    return process.env.NEXUS_AGENT_HUB_URL;
-  }
-  return 'http://127.0.0.1:8788';
-})();
+const viteEnv = import.meta.env;
+const processEnv = typeof process !== 'undefined' ? process.env : undefined;
+const defaultBaseUrl = viteEnv?.VITE_NEXUS_AGENT_HUB_URL || processEnv?.NEXUS_AGENT_HUB_URL || 'http://127.0.0.1:8788';
 
 export class AgentHubClientError extends Error {
   readonly statusCode?: number;

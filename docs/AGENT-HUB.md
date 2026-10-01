@@ -27,4 +27,4 @@ The hub persists its task, agent and recent-event snapshot through its configure
 
 Each work item has an owner, status, scope and touched paths. Statuses: TODO, WORKING, BLOCKED, DONE. Agents claim work before editing, avoid overlapping paths, and push completed stages for review.
 
-The UI and client are wired to the real API. This stage remains WORKING until the app is launched against the runtime and live presence, task operations and post-reconnect SSE are verified in the actual UI. Do not mark `agent-hub-host-integration` DONE based only on unit tests.
+The local Vite UI has been verified in a real browser against the running Hub: it registers `nexus-ui`, displays real presence/tasks, submits/claims/leases work, renders SSE events, and shows CONNECTED, DISCONNECTED and ERROR/recovery states. The client integration test also drops active SSE connections, verifies automatic reconnect, and receives a subsequent event. Keep the hosted Floot deployment separate until its runtime URL and local-network access are configured there; do not infer hosted deployment success from local verification.

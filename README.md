@@ -6,10 +6,23 @@ Floot project ID: `155877bd-a916-4527-8a1f-63d8e09ecf79`
 
 ## Current state
 
-The existing conversation UI routes prompts through `NexusAgent`, `ModelRouter` and the local Ollama provider. Voice input, browser TTS and avatar selection remain in place. The Nexus UI now uses a real Agent Hub HTTP/SSE client for agent presence, task submission/claim/lease, task lists and live events. The hub server runs as a separate local process; final verification in the hosted app is still in progress.
+The Vite frontend is runnable locally and has been exercised in a browser against the real Agent Hub runtime. The existing conversation UI routes prompts through `NexusAgent`, `ModelRouter` and the local Ollama provider; voice input, browser TTS and avatar selection remain in place. The UI uses real Agent Hub HTTP/SSE for presence, task submission/claim/lease, task lists and live events.
 
 This repository is the shared source bridge for VS Code/Codex work. Floot-specific source is preserved under its original virtual paths.
 
+## Run locally
+
+Install dependencies with `npm install`. Configure `VITE_OLLAMA_BASE_URL` and `VITE_NEXUS_AGENT_HUB_URL` in `.env.local`; this machine's safe local defaults are `http://127.0.0.1:11435` and `http://127.0.0.1:8788`.
+
+Start the local services in separate terminals:
+
+```powershell
+npm run hub
+npm run dev
+```
+
+Open `http://127.0.0.1:5173/`. The Hub stores runtime state under the user's local app data directory when started by the current Windows setup.
+
 ## Next task
 
-Run the local Agent Hub runtime and verify the hosted Nexus UI connects, receives real agent presence and live SSE updates. See `docs/AGENT-HUB.md`.
+Configure and verify the same frontend/runtime values in the hosted Floot deployment if that environment is required. The local end-to-end path is documented in `docs/AGENT-HUB.md`.

@@ -24,26 +24,20 @@ export type OllamaHealthResult = {
   models?: OllamaModel[];
 };
 
-const envBaseUrl = (() => {
-  if (typeof process !== 'undefined' && process.env && process.env.OLLAMA_BASE_URL) {
-    return process.env.OLLAMA_BASE_URL;
-  }
-  return 'http://127.0.0.1:11434';
-})();
+const buildEnv = import.meta.env;
+const processEnv = typeof process !== 'undefined' ? process.env : undefined;
 
-const envModel = (() => {
-  if (typeof process !== 'undefined' && process.env && process.env.OLLAMA_MODEL) {
-    return process.env.OLLAMA_MODEL;
-  }
-  return 'llama3.1';
-})();
+const envBaseUrl = buildEnv?.VITE_OLLAMA_BASE_URL || processEnv?.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+
+const envModel = buildEnv?.VITE_OLLAMA_MODEL || processEnv?.OLLAMA_MODEL || 'llama3.1';
+const envTimeout = Number(buildEnv?.VITE_OLLAMA_TIMEOUT_MS || processEnv?.OLLAMA_TIMEOUT_MS || 30000);
 
 export class OllamaClient {
   public baseUrl: string;
   public defaultModel: string;
   public timeoutMs: number;
 
-  constructor(baseUrl = envBaseUrl, defaultModel = envModel, timeoutMs = Number(process?.env?.OLLAMA_TIMEOUT_MS ?? 30000)) {
+  constructor(baseUrl = envBaseUrl, defaultModel = envModel, timeoutMs = envTimeout) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.defaultModel = defaultModel;
     this.timeoutMs = Number.isFinite(timeoutMs) ? timeoutMs : 30000;

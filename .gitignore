@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.nexus-build/
+.tools/
+.env.local
+.nexus-agent-state.json
+.nexus-memory.json
