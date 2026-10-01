@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, Play, Sparkles, Code2, Brain, Send, Volume2, MessageCircle, ListChecks, Wrench, FolderKanban } from 'lucide-react';
+import { Mic, Play, Sparkles, Code2, Brain, Send, Volume2, MessageCircle, ListChecks, Wrench, FolderKanban, Plus } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import styles from './_index.module.css';
 import { OllamaClient } from '../helpers/ollamaClient';
-import { OllamaProvider, ModelRouter, AIModelMode } from '../helpers/modelRouter';
+import { OllamaProvider, ModelRouter } from '../helpers/modelRouter';
 import { NexusAgent } from '../helpers/nexusAgent';
+import { NexusOrchestrator } from '../helpers/nexusOrchestrator';
+import type { NexusApprovalRequest, NexusWorkflowProgress, NexusWorkflowState } from '../helpers/nexusOrchestrator';
 import { MemoryStore } from '../helpers/memoryStore';
 import { ToolRegistry, registerDefaultTools } from '../helpers/toolRegistry';
 import { VoiceEventBus } from '../helpers/voiceEventBus';
@@ -14,7 +16,6 @@ import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
 import { LocalCapabilitiesClient } from '../helpers/localCapabilitiesClient';
-import type { InstallCatalog, InstallOperation, WebSearchResult } from '../helpers/localCapabilitiesClient';
 import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
 import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
@@ -33,6 +34,7 @@ const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
 const voiceEventBus = new VoiceEventBus();
 const agentHubClient = new AgentHubClient();
 const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
+const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
 export default function Home() {
   const avatars=[{name:'Kosmiczny',src:'/_cdn/static/8c1cadbc-855e-4488-a72b-e88cb715d899.png'},{name:'Luna',src:'/_cdn/static/cc2dde88-daa2-48c9-acc8-1ea16f85990d.png'},{name:'Kai',src:'/_cdn/static/6a74b8c4-e09a-4776-a01a-156edac8441f.png'},{name:'Nova',src:'/_cdn/static/364da496-a271-4b0c-b40e-e23f14fad3a2.png'},{name:'Orbit',src:'/_cdn/static/17f6bda3-9fc8-4e2d-9b46-fec5fc2d91d4.png'},{name:'Void',src:'/_cdn/static/2405769f-a406-4390-9af2-8b74c0fda46c.png'}];
@@ -41,7 +43,6 @@ export default function Home() {
   const [status,setStatus]=useState('Gotowa do rozmowy');
   const [listening,setListening]=useState(false);
   const [speaking,setSpeaking]=useState(false);
-  const [aiMode,setAiMode]=useState<AIModelMode>('AUTO');
   const [selectedModel,setSelectedModel]=useState<string>(ollamaClient.defaultModel);
   const [ollamaStatus,setOllamaStatus]=useState<'CONNECTED'|'OFFLINE'|'NO_MODEL'|'ERROR'>('OFFLINE');
   const [primaryStatus,setPrimaryStatus]=useState<'CONNECTED'|'DISCONNECTED'|'NOT_CONFIGURED'|'ERROR'>('NOT_CONFIGURED');
@@ -50,31 +51,17 @@ export default function Home() {
   const [hubAgents,setHubAgents]=useState<Array<Awaited<ReturnType<AgentHubClient['getAgents']>>[number]>>([]);
   const [hubTasks,setHubTasks]=useState<Array<Awaited<ReturnType<AgentHubClient['getTasks']>>[number]>>([]);
   const [hubEvents,setHubEvents]=useState<AgentEvent[]>([]);
-  const [hubGoal,setHubGoal]=useState('');
-  const [hubScope,setHubScope]=useState('workspace');
-  const [hubAssignee,setHubAssignee]=useState('nexus-ui');
-  const [hubActor,setHubActor]=useState('nexus-ui');
   const [hubError,setHubError]=useState('');
-  const [hubBusy,setHubBusy]=useState(false);
-  const [webQuery,setWebQuery]=useState('');
-  const [webResults,setWebResults]=useState<WebSearchResult[]>([]);
-  const [webProvider,setWebProvider]=useState('');
-  const [webBusy,setWebBusy]=useState(false);
-  const [webError,setWebError]=useState('');
-  const [uploadFile,setUploadFile]=useState<File|null>(null);
-  const [uploadBusy,setUploadBusy]=useState(false);
-  const [uploadMessage,setUploadMessage]=useState('');
-  const [uploadError,setUploadError]=useState('');
-  const [installCatalog,setInstallCatalog]=useState<InstallCatalog|null>(null);
-  const [installCatalogError,setInstallCatalogError]=useState('');
-  const [selectedInstallApp,setSelectedInstallApp]=useState('');
-  const [installConfirmed,setInstallConfirmed]=useState(false);
-  const [installBusy,setInstallBusy]=useState(false);
-  const [installOperation,setInstallOperation]=useState<InstallOperation|null>(null);
-  const [installError,setInstallError]=useState('');
+  const [workflowProgress,setWorkflowProgress]=useState<NexusWorkflowProgress|null>(null);
+  const [approvalRequest,setApprovalRequest]=useState<NexusApprovalRequest|null>(null);
+  const [approvalBusy,setApprovalBusy]=useState(false);
+  const [attachments,setAttachments]=useState<File[]>([]);
   const [response,setResponse]=useState('');
   const [isThinking,setIsThinking]=useState(false);
+  const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>([]);
+  const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
   const recognitionRef=useRef<any>(null);
+  const attachmentInputRef=useRef<HTMLInputElement|null>(null);
   const hubSseConnectedRef=useRef(false);
   const avatarRef=useRef<HTMLDivElement | null>(null);
   const motionStateRef=useRef<VoiceEventType>('IDLE');
@@ -105,12 +92,6 @@ export default function Home() {
       setMemoryReady(true);
     })();
   }, []);
-
-  const refreshHubState = async () => {
-    const [agents, tasks] = await Promise.all([agentHubClient.getAgents(), agentHubClient.getTasks()]);
-    setHubAgents(agents);
-    setHubTasks(tasks);
-  };
 
   useEffect(() => {
     let disposed = false;
@@ -189,123 +170,95 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    let disposed = false;
-    void localCapabilitiesClient.getInstallCatalog().then((catalog) => {
-      if (disposed) return;
-      setInstallCatalog(catalog);
-      setSelectedInstallApp(catalog.apps[0]?.id ?? '');
-    }).catch((error) => {
-      if (!disposed) setInstallCatalogError(error instanceof Error ? error.message : 'Nie można odczytać katalogu instalacji');
-    });
-    return () => { disposed = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!installOperation || installOperation.status !== 'RUNNING') return;
+    if (!approvalRequest || approvalRequest.kind !== 'INSTALLER_SETUP') return;
     let disposed = false;
     const timer = window.setInterval(() => {
-      void localCapabilitiesClient.getInstallOperation(installOperation.id).then((operation) => {
-        if (!disposed) setInstallOperation(operation);
-      }).catch((error) => {
-        if (!disposed) setInstallError(error instanceof Error ? error.message : 'Nie można odczytać statusu instalacji');
-      });
-    }, 2000);
+      void nexusOrchestrator.refreshApproval(approvalRequest.taskId).then((approval) => {
+        if (!disposed && approval?.kind === 'INSTALL_APP') setApprovalRequest(approval);
+      }).catch(() => undefined);
+    }, 4000);
     return () => { disposed = true; window.clearInterval(timer); };
-  }, [installOperation?.id, installOperation?.status]);
+  }, [approvalRequest?.taskId, approvalRequest?.kind]);
 
-  const runHubMutation = async (operation: () => Promise<unknown>) => {
-    setHubBusy(true);
-    setHubError('');
+  const publishWorkflowProgress = (progress: NexusWorkflowProgress) => {
+    setWorkflowProgress(progress);
+    setStatus(progress.message);
+    const eventType: VoiceEventType = progress.state === 'SEARCHING'
+      ? 'THINKING'
+      : progress.state === 'TESTING' || progress.state === 'WORKING'
+        ? 'EXECUTING'
+        : progress.state === 'DONE' ? 'IDLE' : progress.state;
+    voiceEventBus.emit(eventType, 'nexus', progress.message, progress.taskId, { source: 'orchestrator' });
+  };
+
+  const runNexusConversation = async () => {
+    const messageText = prompt.trim() || (attachments.length ? 'Przeanalizuj załączone pliki i zdjęcia.' : '');
+    if (!messageText) return;
+    setIsThinking(true);
+    setApprovalRequest(null);
+    setResponse('');
+    const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-12);
     try {
-      await operation();
-      setHubStatus('CONNECTED');
-      await refreshHubState();
+      const result = await nexusOrchestrator.start({
+        text: messageText,
+        history: conversationHistory.slice(-10),
+        projectContext: 'Nexus local-first workspace. Route through available local capabilities; do not claim unavailable access.',
+        attachments,
+      }, publishWorkflowProgress);
+      setResponse(result.text);
+      setLastSources(result.searchResults);
+      setConversationHistory(result.status === 'DONE'
+        ? [...nextHistory, { role: 'assistant' as const, content: result.text }].slice(-12)
+        : nextHistory);
+      setPrompt('');
+      setAttachments([]);
+      if (result.status === 'WAITING_FOR_APPROVAL') setApprovalRequest(result.approval);
+      else if (result.text.trim()) speak(result.text);
     } catch (error) {
-      setHubError(error instanceof Error ? error.message : 'Agent Hub request failed');
-      setHubStatus(error instanceof AgentHubClientError && error.statusCode ? 'ERROR' : 'DISCONNECTED');
+      const message = error instanceof Error ? error.message : 'Nexus nie mógł wykonać zadania';
+      setResponse(message);
+      setStatus('Wystąpił błąd');
+      voiceEventBus.emit('ERROR', 'nexus', message, workflowProgress?.taskId, { source: 'orchestrator' });
     } finally {
-      setHubBusy(false);
+      setIsThinking(false);
     }
   };
 
-  const submitHubTask = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!hubGoal.trim() || !hubAssignee) return;
-    await runHubMutation(async () => {
-      await agentHubClient.submitTask({
-        goal: hubGoal.trim(),
-        createdBy: 'nexus-ui',
-        assignedTo: hubAssignee,
-        scope: hubScope.trim() || 'workspace',
-      });
-      setHubGoal('');
-    });
-  };
-
-  const claimHubTask = (taskId: string) => runHubMutation(() => agentHubClient.claimTask(taskId, hubActor));
-  const leaseHubTask = (taskId: string) => runHubMutation(() => agentHubClient.leaseTask(taskId, hubActor, 300000));
-  const retryHubConnection = async () => {
-    setHubBusy(true);
+  const approveNexusRequest = async () => {
+    if (!approvalRequest) return;
+    setApprovalBusy(true);
     try {
-      await agentHubClient.health();
-      await refreshHubState();
-      if (!hubSseConnectedRef.current) throw new Error('Agent Hub SSE stream is reconnecting');
-      setHubError('');
-      setHubStatus('CONNECTED');
+      const result = await nexusOrchestrator.approve(approvalRequest.taskId, publishWorkflowProgress);
+      setResponse(result.text);
+      if (result.status === 'WAITING_FOR_APPROVAL') {
+        setApprovalRequest(result.approval);
+      } else {
+        setApprovalRequest(null);
+        setConversationHistory((history) => [...history, { role: 'assistant' as const, content: result.text }].slice(-12));
+        if (result.text.trim()) speak(result.text);
+      }
     } catch (error) {
-      setHubError(error instanceof Error ? error.message : 'Agent Hub reconnect failed');
-      setHubStatus(error instanceof AgentHubClientError && error.statusCode ? 'ERROR' : 'DISCONNECTED');
+      const message = error instanceof Error ? error.message : 'Zatwierdzona operacja nie powiodła się';
+      setResponse(message);
+      setStatus('Wystąpił błąd');
+      voiceEventBus.emit('ERROR', 'nexus', message, approvalRequest.taskId, { source: 'orchestrator' });
     } finally {
-      setHubBusy(false);
+      setApprovalBusy(false);
     }
   };
 
-  const searchWeb = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (webQuery.trim().length < 2) return;
-    setWebBusy(true);
-    setWebError('');
-    try {
-      const result = await localCapabilitiesClient.searchWeb(webQuery.trim());
-      setWebProvider(result.provider);
-      setWebResults(result.results);
-    } catch (error) {
-      setWebError(error instanceof Error ? error.message : 'Wyszukiwanie internetowe nie powiodło się');
-      setWebResults([]);
-    } finally {
-      setWebBusy(false);
-    }
+  const cancelNexusRequest = async () => {
+    if (!approvalRequest) return;
+    await nexusOrchestrator.cancel(approvalRequest.taskId);
+    setApprovalRequest(null);
+    setResponse('Anulowałem tę operację.');
+    setStatus('Gotowe');
+    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałem tę operację.' }].slice(-12));
   };
 
-  const importWorkspaceFile = async () => {
-    if (!uploadFile) return;
-    setUploadBusy(true);
-    setUploadError('');
-    setUploadMessage('');
-    try {
-      const imported = await localCapabilitiesClient.importFile(uploadFile);
-      setUploadMessage(`${imported.filename} · ${imported.bytes.toLocaleString()} B · ${imported.location}`);
-      setUploadFile(null);
-    } catch (error) {
-      setUploadError(error instanceof Error ? error.message : 'Import pliku nie powiódł się');
-    } finally {
-      setUploadBusy(false);
-    }
-  };
-
-  const installSelectedApp = async () => {
-    if (!selectedInstallApp || !installConfirmed) return;
-    setInstallBusy(true);
-    setInstallError('');
-    try {
-      const operation = await localCapabilitiesClient.startInstall(selectedInstallApp, true);
-      setInstallOperation(operation);
-      setInstallConfirmed(false);
-    } catch (error) {
-      setInstallError(error instanceof Error ? error.message : 'Instalacja nie mogła zostać uruchomiona');
-    } finally {
-      setInstallBusy(false);
-    }
+  const addAttachments = (files: FileList|null) => {
+    if (!files?.length) return;
+    setAttachments((current) => [...current, ...Array.from(files)].slice(0, 8));
   };
 
   useEffect(() => {
@@ -355,7 +308,7 @@ export default function Home() {
     return () => { unsubscribe(); cancelAnimationFrame(frameId); };
   }, []);
 
-  const emitVoiceEvent = (type: 'LISTENING' | 'THINKING' | 'SPEAKING' | 'EXECUTING' | 'INTERRUPTED' | 'ERROR' | 'IDLE', message: string) => {
+  const emitVoiceEvent = (type: VoiceEventType, message: string) => {
     voiceEventBus.emit(type, 'nexus', message, undefined, { source: 'ui' });
   };
 
@@ -387,155 +340,43 @@ export default function Home() {
     r.onerror=(e:any)=>{emitVoiceEvent('ERROR', e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu':'Błąd mikrofonu — spróbuj ponownie'); setStatus(e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu':'Błąd mikrofonu — spróbuj ponownie');};
     r.onend=()=>{setListening(false); emitVoiceEvent('IDLE','Voice input ended');}; r.start();
   };
-  const run = async () => {
-    if(!prompt.trim()) return;
-    setIsThinking(true);
-    emitVoiceEvent('THINKING', 'Nexus analizuje wiadomość…');
-    setStatus('Nexus analizuje wiadomość…');
-
-    try {
-      const result = await nexusAgent.send({
-        text: prompt,
-        mode: aiMode,
-        projectContext: 'Nexus UI local agent; voice pipeline active; UI has avatar, memory, and task scaffolding.',
-        history: [{ role: 'user', content: prompt }],
-      });
-
-      setResponse(result.text);
-      setStatus(`Nexus — ${aiMode === 'LOCAL' ? 'lokalny' : aiMode === 'AUTO' ? 'auto' : 'cloud'} • ${selectedModel}`);
-      setPrompt('');
-      if (result.text.trim()) {
-        speak(result.text);
-      }
-      emitVoiceEvent('EXECUTING', `Handled task with ${aiMode} mode`);
-    } catch (error: any) {
-      setStatus(error?.message || 'Błąd połączenia z lokalnym AI');
-      setOllamaStatus('ERROR');
-      emitVoiceEvent('ERROR', error?.message || 'Błąd połączenia z lokalnym AI');
-    } finally {
-      setIsThinking(false);
-    }
-  };
+  const run = runNexusConversation;
   return <main className={styles.shell}>
-    <aside className={styles.side}><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>TWÓJ ASYSTENT AI</span></div></div>
-      <nav className={styles.menu}><button><MessageCircle/><span>Czat</span></button><button className={styles.active}><Mic/><span>Rozmowa</span></button><button><Brain/><span>Pamięć</span></button><button><ListChecks/><span>Zadania</span></button><button><FolderKanban/><span>Projekty</span></button><button><Wrench/><span>Narzędzia</span></button></nav>
-    </aside>
-    <section className={styles.main}><header><div><span className={styles.dot}/> Agent online</div><div className={styles.model}>AUTO · lokalny / chmura</div></header>
+    <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
       <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
         <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
         {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
         <div className={styles.status}>{status}</div>
-        <div className={styles.composer}><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder="Np. Zbuduj aplikację do rezerwacji wizyt…"/><Button onClick={run} aria-label="Wyślij"><Send size={18}/></Button></div>
-        <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button><Button variant="secondary" onClick={()=>speak('Jestem Nexus. Słyszę Cię i jestem gotowy do rozmowy.')}><Volume2 size={18}/> Test głosu</Button></div>
+        <input ref={attachmentInputRef} type="file" multiple hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.xlsx,.pptx" onChange={event=>{addAttachments(event.target.files);event.currentTarget.value=''}}/>
+        {attachments.length>0&&<div className={styles.attachmentList}>{attachments.map((file,index)=><span key={`${file.name}-${index}`} className={styles.attachmentChip}>{file.name}<button type="button" aria-label={`Usuń ${file.name}`} onClick={()=>setAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))}>×</button></span>)}</div>}
+        <div className={styles.composer}><Button variant="secondary" onClick={()=>attachmentInputRef.current?.click()} aria-label="Dodaj załączniki"><Plus size={18}/> Dodaj</Button><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&run()} placeholder="Powiedz Nexusowi, co chcesz osiągnąć…"/><Button onClick={run} disabled={isThinking||(!prompt.trim()&&!attachments.length)} aria-label="Wyślij"><Send size={18}/></Button></div>
+        {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
+        <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button></div>
       </div>
-      <div className={styles.settingsPanel}>
-        <h3>NEXUS</h3>
-        <div className={styles.settingsRow}><span>Primary Agent</span><strong>{primaryStatus}</strong></div>
-        <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama • {selectedModel || 'not selected'}</strong></div>
-        <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady ? 'ready' : 'loading'}</strong></div>
-        <div className={styles.settingsRow}><span>Agents</span><strong>{hubAgents.filter(agent => agent.presence !== 'offline').length} online · Hub {hubStatus}</strong></div>
-      </div>
-      <section aria-labelledby="agent-hub-title" style={{borderTop:'1px solid rgba(143,162,186,.24)',borderBottom:'1px solid rgba(143,162,186,.24)',padding:'20px 0',margin:'20px 0',color:'var(--foreground,#edf4ff)'}}>
-        <header style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:16}}>
-          <div><h3 id="agent-hub-title" style={{margin:0}}>Agent Hub</h3><span style={{fontSize:13,opacity:.72}}>Presence, zadania i zdarzenia na żywo</span></div>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <strong aria-live="polite" style={{color:hubStatus==='CONNECTED'?'#57d6a0':hubStatus==='ERROR'?'#ff7f8d':'#ffc66d'}}>{hubStatus}</strong>
-            {hubStatus!=='CONNECTED'&&<button type="button" disabled={hubBusy} onClick={()=>void retryHubConnection()} style={{padding:'7px 10px',borderRadius:5,border:'1px solid #263247',background:'#1c2738',color:'inherit',cursor:'pointer'}}>Ponów połączenie</button>}
-          </div>
-        </header>
-        <form onSubmit={submitHubTask} style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:10,marginBottom:18}}>
-          <input aria-label="Cel zadania" value={hubGoal} onChange={event=>setHubGoal(event.target.value)} placeholder="Cel zadania" required style={{minWidth:0,padding:'10px 12px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}/>
-          <input aria-label="Zakres zadania" value={hubScope} onChange={event=>setHubScope(event.target.value)} placeholder="Zakres" style={{minWidth:0,padding:'10px 12px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}/>
-          <select aria-label="Agent docelowy" value={hubAssignee} onChange={event=>setHubAssignee(event.target.value)} style={{minWidth:0,padding:'10px 12px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}>
-            {hubAgents.map(agent=><option key={agent.agentId} value={agent.agentId}>{agent.agentId} · {agent.presence}</option>)}
-          </select>
-          <button type="submit" disabled={hubBusy||hubStatus!=='CONNECTED'} style={{padding:'10px 14px',border:0,borderRadius:6,background:'#7ce7ff',color:'#041116',fontWeight:600,cursor:'pointer',opacity:hubBusy||hubStatus!=='CONNECTED'?.55:1}}>Wyślij zadanie</button>
-        </form>
-        {hubError&&<p role="alert" style={{color:'#ff7f8d',margin:'0 0 14px'}}>{hubError}</p>}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(250px,1fr))',gap:24}}>
-          <section aria-labelledby="hub-agents-title">
-            <h4 id="hub-agents-title" style={{margin:'0 0 8px'}}>Agenci ({hubAgents.length})</h4>
-            {hubAgents.length===0?<p style={{opacity:.72}}>Brak zarejestrowanych agentów.</p>:hubAgents.map(agent=><div key={agent.agentId} style={{padding:'9px 0',borderBottom:'1px solid rgba(143,162,186,.16)'}}>
-              <div style={{display:'flex',justifyContent:'space-between',gap:12}}><strong>{agent.agentId}</strong><span>{agent.presence?.toUpperCase()??'UNKNOWN'}</span></div>
-              <small style={{opacity:.72}}>{agent.kind} · {agent.capabilities.join(', ')||'bez capabilities'} · heartbeat {new Date(agent.lastHeartbeat).toLocaleTimeString()}</small>
-            </div>)}
-            {hubAgents.length>0&&<label style={{display:'grid',gap:5,marginTop:12,fontSize:13}}>Działaj jako
-              <select value={hubActor} onChange={event=>setHubActor(event.target.value)} style={{padding:'8px 10px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}>
-                {hubAgents.map(agent=><option key={agent.agentId} value={agent.agentId}>{agent.agentId}</option>)}
-              </select>
-            </label>}
-          </section>
-          <section aria-labelledby="hub-tasks-title">
-            <h4 id="hub-tasks-title" style={{margin:'0 0 8px'}}>Zadania ({hubTasks.length})</h4>
-            {hubTasks.length===0?<p style={{opacity:.72}}>Brak zadań.</p>:hubTasks.map(task=><div key={task.id} style={{padding:'10px 0',borderBottom:'1px solid rgba(143,162,186,.16)'}}>
-              <div style={{display:'flex',justifyContent:'space-between',gap:12}}><strong>{task.goal}</strong><span>{task.status}</span></div>
-              <small style={{opacity:.72}}>{task.scope} · przypisano: {task.assignedTo}{task.lease?` · lease: ${task.lease.owner} do ${new Date(task.lease.expiresAt).toLocaleTimeString()}`:''}</small>
-              {task.error&&<div style={{color:'#ff7f8d',fontSize:13}}>{task.error}</div>}
-              <div style={{display:'flex',gap:8,marginTop:8}}>
-                <button type="button" disabled={hubBusy||hubStatus!=='CONNECTED'||task.status==='DONE'} onClick={()=>void claimHubTask(task.id)} style={{padding:'6px 9px',borderRadius:5,border:'1px solid #263247',background:'#1c2738',color:'inherit',cursor:'pointer'}}>Claim</button>
-                <button type="button" disabled={hubBusy||hubStatus!=='CONNECTED'||task.status==='DONE'} onClick={()=>void leaseHubTask(task.id)} style={{padding:'6px 9px',borderRadius:5,border:'1px solid #263247',background:'#1c2738',color:'inherit',cursor:'pointer'}}>Lease 5 min</button>
-              </div>
-            </div>)}
-          </section>
+      <details className={styles.nexusDetails}>
+        <summary>Co robi Nexus</summary>
+        <div className={styles.workflowSummary}>
+          <p>{workflowProgress?.message??'Brak aktywnego zadania.'}</p>
+          {workflowProgress&&<ol>{workflowProgress.plan.map(step=><li key={step.id} data-step-state={step.state}>{step.label} · {step.state}</li>)}</ol>}
+          {lastSources.length>0&&<div className={styles.workflowSources}><b>Źródła sprawdzone przez Nexusa</b>{lastSources.map(source=><a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title} · {new URL(source.url).hostname}</a>)}</div>}
         </div>
-        <section aria-labelledby="hub-events-title" style={{marginTop:18}}>
-          <h4 id="hub-events-title" style={{margin:'0 0 8px'}}>Live events</h4>
-          {hubEvents.length===0?<p style={{opacity:.72}}>Oczekiwanie na zdarzenia z Huba.</p>:hubEvents.map(event=><div key={event.id} style={{display:'flex',gap:10,padding:'5px 0',fontSize:13}}><time style={{opacity:.62}}>{new Date(event.at).toLocaleTimeString()}</time><strong>{event.type}</strong><span>{event.agentId}: {event.message}</span></div>)}
-        </section>
-      </section>
-      <section aria-labelledby="local-capabilities-title" className={styles.capabilityPanel}>
-        <header className={styles.capabilityHeader}>
-          <div><h3 id="local-capabilities-title">Narzędzia lokalne</h3><span>Wyszukiwanie · pliki · oprogramowanie</span></div>
-          <span className={styles.capabilityBadge}>WEB / LOCAL</span>
-        </header>
-        <div className={styles.capabilityGrid}>
-          <section aria-labelledby="web-search-title" className={styles.capabilityGroup}>
-            <h4 id="web-search-title">Szukaj w internecie</h4>
-            <form onSubmit={searchWeb} className={styles.capabilityForm}>
-              <input type="search" aria-label="Fraza wyszukiwania" value={webQuery} onChange={event=>setWebQuery(event.target.value)} placeholder="Wpisz frazę" minLength={2} maxLength={300} required/>
-              <button type="submit" disabled={webBusy}>{webBusy?'Szukam…':'Szukaj'}</button>
-            </form>
-            {webProvider&&<small className={styles.capabilityMeta}>Źródło wyszukiwania: {webProvider}</small>}
-            {webError&&<p role="alert" className={styles.capabilityError}>{webError}</p>}
-            {webResults.length===0&&webProvider&&!webError&&<p className={styles.capabilityMeta}>Brak wyników.</p>}
-            <div className={styles.searchResults}>
-              {webResults.map((result)=><article key={result.url} className={styles.searchResult}>
-                <a href={result.url} target="_blank" rel="noreferrer">{result.title}</a>
-                <small>{new URL(result.url).hostname}</small>
-                {result.snippet&&<p>{result.snippet}</p>}
-              </article>)}
-            </div>
+        <div className={styles.diagnosticsContent} inert={true}>
+          <section className={styles.settingsPanel}>
+            <h3>NEXUS</h3>
+            <div className={styles.settingsRow}><span>Primary Agent</span><strong>{primaryStatus}</strong></div>
+            <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama · {selectedModel} · {ollamaStatus}</strong></div>
+            <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady?'ready':'loading'}</strong></div>
+            <div className={styles.settingsRow}><span>Hub</span><strong>{hubStatus} · {hubAgents.filter(agent=>agent.presence!=='offline').length} online</strong></div>
           </section>
-          <section aria-labelledby="workspace-import-title" className={styles.capabilityGroup}>
-            <h4 id="workspace-import-title">Importuj plik do workspace</h4>
-            <input type="file" aria-label="Wybierz plik do importu" onChange={event=>{setUploadFile(event.target.files?.[0]??null);setUploadError('');setUploadMessage('')}}/>
-            <button type="button" disabled={!uploadFile||uploadBusy} onClick={()=>void importWorkspaceFile()}>{uploadBusy?'Importuję…':'Importuj plik'}</button>
-            <small className={styles.capabilityMeta}>Limit 10 MB. Pliki wykonywalne są blokowane i żaden import nie jest uruchamiany.</small>
-            {uploadMessage&&<p role="status" className={styles.capabilitySuccess}>{uploadMessage}</p>}
-            {uploadError&&<p role="alert" className={styles.capabilityError}>{uploadError}</p>}
+          <section className={styles.diagnosticLists}>
+            <div><h4>Agenci</h4>{hubAgents.map(agent=><p key={agent.agentId}>{agent.agentId} · {agent.presence} · {agent.kind}</p>)}</div>
+            <div><h4>Zadania</h4>{hubTasks.map(task=><p key={task.id}>{task.status} · {task.goal}</p>)}</div>
+            <div><h4>Zdarzenia</h4>{hubEvents.slice(0,6).map(event=><p key={event.id}>{event.type} · {event.agentId}: {event.message}</p>)}</div>
           </section>
-          <section aria-labelledby="software-install-title" className={styles.capabilityGroup}>
-            <h4 id="software-install-title">Instaluj oprogramowanie</h4>
-            {installCatalog?.supported&&installCatalog.available&&installCatalog.apps.length>0?<>
-              <select aria-label="Program do instalacji" value={selectedInstallApp} onChange={event=>{setSelectedInstallApp(event.target.value);setInstallConfirmed(false)}}>
-                {installCatalog.apps.map(app=><option key={app.id} value={app.id}>{app.name} · {app.publisher}</option>)}
-              </select>
-              <small className={styles.capabilityMeta}>{installCatalog.apps.find(app=>app.id===selectedInstallApp)?.description} {installCatalog.packageManagerVersion?`(${installCatalog.packageManager} ${installCatalog.packageManagerVersion})`:`(${installCatalog.packageManager})`}</small>
-              <label className={styles.installConsent}><input type="checkbox" checked={installConfirmed} onChange={event=>setInstallConfirmed(event.target.checked)}/> Potwierdzam instalację na tym komputerze</label>
-              <button type="button" disabled={!installConfirmed||installBusy||installOperation?.status==='RUNNING'} onClick={()=>void installSelectedApp()}>{installBusy?'Uruchamiam…':'Instaluj wybrany program'}</button>
-              {installOperation&&<div role="status" className={installOperation.status==='FAILED'?styles.capabilityError:styles.capabilityMeta}>
-                {installOperation.app.name}: {installOperation.status}
-                {installOperation.error&&<p>{installOperation.error}</p>}
-              </div>}
-            </>:<p className={styles.capabilityMeta}>{installCatalogError||(installCatalog?.supported?'Instalator winget nie jest dostępny na tym komputerze. Import plików pozostaje aktywny.':'Instalowanie programów z Huba jest obsługiwane tylko w Windows.')}</p>}
-            {installError&&<p role="alert" className={styles.capabilityError}>{installError}</p>}
-            <small className={styles.capabilityMeta}>Tylko zatwierdzone aplikacje z katalogu. Każda instalacja wymaga osobnej zgody.</small>
-          </section>
+          {hubError&&<p role="alert" className={styles.capabilityError}>{hubError}</p>}
         </div>
-      </section>
-      <div className={styles.cards}><article><Brain/><div><b>Pamięć projektu</b><span>kontekst, decyzje, pliki</span></div><strong>ON</strong></article><article><Code2/><div><b>Agent Builder</b><span>kod → test → poprawka</span></div><strong>READY</strong></article><article><Play/><div><b>Podgląd aplikacji</b><span>uruchomienie na żywo</span></div><strong>LOCAL</strong></article></div>
-      <div className={styles.characterBar}><b>Wybierz postać</b><div className={styles.characterList}>{avatars.map((a,i)=><button key={a.name} onClick={()=>chooseAvatar(i)} className={i===avatar?styles.selected:''}><img src={a.src} alt="" onError={event=>{event.currentTarget.style.display='none'}}/><span>{a.name}</span></button>)}</div></div>
+      </details>
     </section>
   </main>
 }

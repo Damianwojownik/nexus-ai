@@ -22,6 +22,7 @@ export interface InstallCatalog {
   packageManager: string;
   available: boolean;
   packageManagerVersion?: string;
+  setupFallback?: 'MICROSOFT_STORE_APP_INSTALLER';
   requiresConfirmation: boolean;
   apps: InstallableApp[];
 }
@@ -104,6 +105,24 @@ export class LocalCapabilitiesClient {
     return result.file;
   }
 
+  async listWorkspaceFiles(): Promise<string[]> {
+    const result = await this.request<{ files: string[] }>('/api/workspace/files');
+    return result.files;
+  }
+
+  async readWorkspaceFile(path: string): Promise<{ path: string; content: string }> {
+    const result = await this.request<{ file: { path: string; content: string } }>(`/api/workspace/file?path=${encodeURIComponent(path)}`);
+    return result.file;
+  }
+
+  async writeWorkspaceFile(path: string, content: string, confirmed: boolean): Promise<{ path: string; bytes: number }> {
+    const result = await this.request<{ file: { path: string; bytes: number } }>('/api/workspace/file', {
+      method: 'POST',
+      body: JSON.stringify({ path, content, confirmed }),
+    });
+    return result.file;
+  }
+
   async getInstallCatalog(): Promise<InstallCatalog> {
     return this.request('/api/install/catalog');
   }
@@ -116,8 +135,16 @@ export class LocalCapabilitiesClient {
     return result.operation;
   }
 
+  async openInstallerSetup(confirmed: boolean): Promise<{ opened: boolean; available: boolean; packageManager: string }> {
+    return this.request('/api/install/setup', {
+      method: 'POST',
+      body: JSON.stringify({ confirmed }),
+    });
+  }
+
   async getInstallOperation(operationId: string): Promise<InstallOperation> {
     const result = await this.request<{ operation: InstallOperation }>(`/api/install/${encodeURIComponent(operationId)}`);
     return result.operation;
   }
+
 }

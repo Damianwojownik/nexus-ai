@@ -3,7 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { AgentHub } from './agentHub.ts';
 import { createTask } from './agentProtocol.ts';
-import type { AgentKind, AgentTaskStatus } from './agentProtocol.ts';
+import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
@@ -183,8 +183,32 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         return;
       }
 
+      if (method === 'GET' && url.pathname === '/api/workspace/files') {
+        sendJson(response, 200, { files: await localCapabilities.listWorkspaceFiles() });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/workspace/file') {
+        const file = await localCapabilities.readWorkspaceFile(url.searchParams.get('path'));
+        sendJson(response, 200, { file });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/workspace/file') {
+        const body = await readJson(request, 512 * 1024);
+        const file = await localCapabilities.writeWorkspaceFile(body.path, body.content, body.confirmed);
+        sendJson(response, 200, { file });
+        return;
+      }
+
       if (method === 'GET' && url.pathname === '/api/install/catalog') {
         sendJson(response, 200, await localCapabilities.getInstallCatalog());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/install/setup') {
+        const body = await readJson(request);
+        sendJson(response, 202, await localCapabilities.openInstallerSetup(body.confirmed));
         return;
       }
 
@@ -268,6 +292,24 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         if (action === 'claim') {
           const task = await hub.claimTask(taskId, requiredString(body, 'agentId'));
           if (!task) throw new HttpError(409, 'Task is missing or leased by another agent');
+          sendJson(response, 200, { task });
+          return;
+        }
+        if (action === 'complete') {
+          const result = body.result;
+          if (!isRecord(result)
+            || !['SUCCESS', 'ERROR', 'PARTIAL'].includes(String(result.status))
+            || typeof result.summary !== 'string') {
+            throw new HttpError(400, 'result must include a valid status and summary');
+          }
+          const task = await hub.completeTask(taskId, result as unknown as AgentResult);
+          if (!task) throw new HttpError(404, 'Task not found');
+          sendJson(response, 200, { task });
+          return;
+        }
+        if (action === 'fail') {
+          const task = await hub.failTask(taskId, requiredString(body, 'error'));
+          if (!task) throw new HttpError(404, 'Task not found');
           sendJson(response, 200, { task });
           return;
         }

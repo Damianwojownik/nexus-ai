@@ -14,6 +14,7 @@ export type OllamaGenerateOptions = {
   context?: number[];
   signal?: AbortSignal;
   timeoutMs?: number;
+  numPredict?: number;
 };
 
 export type OllamaHealthResult = {
@@ -89,12 +90,12 @@ export class OllamaClient {
   }
 
   async generate(options: OllamaGenerateOptions): Promise<string> {
-    const { prompt, model = this.defaultModel, stream = false, system, signal, timeoutMs = this.timeoutMs } = options;
+    const { prompt, model = this.defaultModel, stream = false, system, signal, timeoutMs = this.timeoutMs, numPredict } = options;
 
     const response = await fetch(`${this.baseUrl}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, prompt, stream, system, options: { temperature: 0.2 } }),
+      body: JSON.stringify({ model, prompt, stream, system, options: { temperature: 0.2, ...(numPredict ? { num_predict: numPredict } : {}) } }),
       signal: signal ?? AbortSignal.timeout(timeoutMs),
     });
 

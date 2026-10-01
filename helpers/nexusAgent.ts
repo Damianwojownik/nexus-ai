@@ -1,4 +1,5 @@
-import { AIModelMode, ModelRouter } from './modelRouter.ts';
+import { ModelRouter } from './modelRouter.ts';
+import type { AIModelMode } from './modelRouter.ts';
 import { MemoryStore } from './memoryStore.ts';
 import { ToolRegistry } from './toolRegistry.ts';
 
@@ -7,6 +8,7 @@ export type NexusMessageInput = {
   mode?: AIModelMode;
   projectContext?: string;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  maxOutputTokens?: number;
 };
 
 export type NexusAgentResult = {
@@ -16,12 +18,22 @@ export type NexusAgentResult = {
 };
 
 export class NexusAgent {
+  private readonly router: ModelRouter;
+  private readonly memoryStore: MemoryStore;
+  private readonly toolRegistry: ToolRegistry;
+  private readonly options: { systemPrompt?: string };
+
   constructor(
-    private readonly router: ModelRouter,
-    private readonly memoryStore: MemoryStore,
-    private readonly toolRegistry: ToolRegistry,
-    private readonly options: { systemPrompt?: string } = {},
-  ) {}
+    router: ModelRouter,
+    memoryStore: MemoryStore,
+    toolRegistry: ToolRegistry,
+    options: { systemPrompt?: string } = {},
+  ) {
+    this.router = router;
+    this.memoryStore = memoryStore;
+    this.toolRegistry = toolRegistry;
+    this.options = options;
+  }
 
   async send(input: NexusMessageInput): Promise<NexusAgentResult> {
     const mode = input.mode || 'AUTO';
@@ -49,7 +61,10 @@ export class NexusAgent {
       `User message: ${input.text}`,
     ].join('\n\n');
 
-    const responseText = await this.router.route(prompt, { temperature: 0.2 });
+    const responseText = await this.router.route(prompt, {
+      temperature: 0.2,
+      numPredict: input.maxOutputTokens,
+    });
 
     await this.memoryStore.saveMemory({
       kind: 'conversation',

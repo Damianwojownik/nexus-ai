@@ -72,7 +72,11 @@ export class ModelRouter {
     if (this.primaryProvider && this.preferredMode === 'AUTO') {
       const primaryHealth = await this.primaryProvider.checkHealth();
       if (primaryHealth.status === 'CONNECTED') {
-        return this.primaryProvider.generate(prompt, options);
+        try {
+          return await this.primaryProvider.generate(prompt, options);
+        } catch {
+          // Token/quota exhaustion or transient primary failures fall back to the free local provider.
+        }
       }
     }
 

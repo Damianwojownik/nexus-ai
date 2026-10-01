@@ -2,7 +2,7 @@ export type AgentTaskStatus = 'TODO' | 'WORKING' | 'BLOCKED' | 'DONE';
 export type AgentPresenceStatus = 'online' | 'offline' | 'busy';
 export type AgentKind = 'orchestrator' | 'primary' | 'codex' | 'ollama' | 'reviewer' | 'researcher' | 'memory' | 'tool';
 export type AgentMessageType = 'message' | 'task' | 'event' | 'result';
-export type VoiceEventType = 'IDLE' | 'LISTENING' | 'THINKING' | 'DELEGATING' | 'EXECUTING' | 'SPEAKING' | 'INTERRUPTED' | 'ERROR';
+export type VoiceEventType = 'IDLE' | 'LISTENING' | 'THINKING' | 'DELEGATING' | 'EXECUTING' | 'SPEAKING' | 'WAITING_FOR_APPROVAL' | 'INTERRUPTED' | 'ERROR';
 export type AgentPriority = 'low' | 'normal' | 'high' | 'critical';
 
 export interface AgentCapability {

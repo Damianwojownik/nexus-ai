@@ -1,5 +1,5 @@
 import type { AgentRegistration } from './agentHub.ts';
-import type { AgentEvent, AgentPresence, AgentTask, AgentTaskStatus } from './agentProtocol.ts';
+import type { AgentEvent, AgentPresence, AgentResult, AgentTask, AgentTaskStatus } from './agentProtocol.ts';
 
 export type AgentHubConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
 export type NewAgentHubTask = Pick<AgentTask, 'goal' | 'createdBy' | 'assignedTo' | 'scope'> & { contextRefs?: string[] };
@@ -111,6 +111,22 @@ export class AgentHubClient {
       body: JSON.stringify({ owner, ttlMs }),
     });
     return result.task;
+  }
+
+  async completeTask(taskId: string, result: AgentResult): Promise<AgentTask> {
+    const response = await this.request<{ task: AgentTask }>(`/api/tasks/${encodeURIComponent(taskId)}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ result }),
+    });
+    return response.task;
+  }
+
+  async failTask(taskId: string, error: string): Promise<AgentTask> {
+    const response = await this.request<{ task: AgentTask }>(`/api/tasks/${encodeURIComponent(taskId)}/fail`, {
+      method: 'POST',
+      body: JSON.stringify({ error }),
+    });
+    return response.task;
   }
 
   subscribeEvents(

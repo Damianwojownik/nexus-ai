@@ -93,13 +93,15 @@ export function registerDefaultTools(registry: ToolRegistry) {
     name: 'write_file',
     description: 'Write a file to disk.',
     permissionLevel: 'write',
+    requiredPermissions: ['write'],
     destructive: false,
     timeoutMs: 15000,
     inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] },
     validate: ({ path, content }) => (!path || typeof content !== 'string' ? { ok: false, error: 'path and content are required' } : { ok: true }),
     execute: async ({ path, content }) => {
       const fs = await import('node:fs/promises');
-      await fs.mkdir(require('node:path').dirname(path), { recursive: true });
+      const pathApi = await import('node:path');
+      await fs.mkdir(pathApi.dirname(path), { recursive: true });
       await fs.writeFile(path, content, 'utf8');
       return { ok: true, path };
     },

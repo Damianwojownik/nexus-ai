@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { basename, extname, join, resolve, sep } from 'node:path';
+import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { load } from 'cheerio';
+import { ToolRegistry, registerDefaultTools } from './toolRegistry.ts';
 
 const maxImportBytes = 10 * 1024 * 1024;
 const blockedExtensions = new Set([
   '.appx', '.bat', '.cmd', '.com', '.dll', '.exe', '.lnk', '.msi', '.msix', '.ps1', '.psm1', '.reg', '.scr', '.sh', '.sys', '.url',
 ]);
+const readableExtensions = new Set(['.cjs', '.css', '.html', '.java', '.js', '.jsx', '.json', '.md', '.mjs', '.py', '.rs', '.sql', '.toml', '.ts', '.tsx', '.txt', '.xml', '.yaml', '.yml']);
+const maxReadableFileBytes = 128 * 1024;
 
 export class LocalCapabilityError extends Error {
   readonly statusCode: number;
@@ -93,10 +96,96 @@ function wingetVersion(): Promise<string | undefined> {
 
 export class LocalCapabilities {
   private readonly workspaceDir: string;
+  private readonly tools = new ToolRegistry();
   private readonly installOperations = new Map<string, InstallOperation>();
 
   constructor(workspaceDir: string) {
     this.workspaceDir = resolve(workspaceDir);
+    registerDefaultTools(this.tools);
+  }
+
+  async listWorkspaceFiles(): Promise<string[]> {
+    await mkdir(this.workspaceDir, { recursive: true });
+    const root = await realpath(this.workspaceDir);
+    const pending: Array<{ directory: string; depth: number }> = [{ directory: root, depth: 0 }];
+    const files: string[] = [];
+
+    while (pending.length && files.length < 200) {
+      const current = pending.shift()!;
+      const names = await this.tools.execute('list_files', { path: current.directory }) as string[];
+      for (const name of names) {
+        if (name === 'node_modules' || name === '.git' || name === '.venv' || name.startsWith('.')) continue;
+        const target = resolve(current.directory, name);
+        const relativePath = relative(root, target);
+        if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) continue;
+        const info = await lstat(target);
+        if (info.isSymbolicLink()) continue;
+        if (info.isDirectory() && current.depth < 3) {
+          pending.push({ directory: target, depth: current.depth + 1 });
+        } else if (info.isFile() && info.size <= maxReadableFileBytes && readableExtensions.has(extname(name).toLowerCase())) {
+          files.push(relativePath.split(sep).join('/'));
+          if (files.length >= 200) break;
+        }
+      }
+    }
+
+    return files.sort((left, right) => left.localeCompare(right));
+  }
+
+  async readWorkspaceFile(relativePath: unknown): Promise<{ path: string; content: string }> {
+    if (typeof relativePath !== 'string' || !relativePath.trim() || isAbsolute(relativePath)) {
+      throw new LocalCapabilityError(400, 'Workspace-relative path is required');
+    }
+    const root = await realpath(this.workspaceDir);
+    const target = resolve(root, relativePath);
+    const safeRelativePath = relative(root, target);
+    if (!safeRelativePath || safeRelativePath.startsWith('..') || isAbsolute(safeRelativePath)) {
+      throw new LocalCapabilityError(400, 'Path is outside the Nexus workspace');
+    }
+    const info = await lstat(target);
+    if (!info.isFile() || info.isSymbolicLink()) throw new LocalCapabilityError(400, 'Only regular workspace files can be read');
+    if (!readableExtensions.has(extname(target).toLowerCase())) throw new LocalCapabilityError(415, 'This file type is not readable by the project inspector');
+    if (info.size > maxReadableFileBytes) throw new LocalCapabilityError(413, 'Project inspection limit is 128 KB per file');
+
+    const content = await this.tools.execute('read_file', { path: target }) as string;
+    return { path: safeRelativePath.split(sep).join('/'), content };
+  }
+
+  async writeWorkspaceFile(relativePath: unknown, contentValue: unknown, confirmed: unknown): Promise<{ path: string; bytes: number }> {
+    if (confirmed !== true) throw new LocalCapabilityError(403, 'Explicit approval is required to modify a workspace file');
+    if (typeof relativePath !== 'string' || !relativePath.trim() || isAbsolute(relativePath)) {
+      throw new LocalCapabilityError(400, 'Workspace-relative path is required');
+    }
+    if (typeof contentValue !== 'string' || Buffer.byteLength(contentValue, 'utf8') > maxReadableFileBytes) {
+      throw new LocalCapabilityError(413, 'Generated source changes are limited to 128 KB per file');
+    }
+
+    const root = await realpath(this.workspaceDir);
+    const target = resolve(root, relativePath);
+    const safeRelativePath = relative(root, target);
+    if (!safeRelativePath || safeRelativePath.startsWith('..') || isAbsolute(safeRelativePath)) {
+      throw new LocalCapabilityError(400, 'Path is outside the Nexus workspace');
+    }
+    if (!readableExtensions.has(extname(target).toLowerCase())) {
+      throw new LocalCapabilityError(415, 'Only approved text/source files can be modified');
+    }
+
+    let info;
+    try {
+      info = await lstat(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new LocalCapabilityError(404, 'Only existing workspace files can be modified');
+      throw error;
+    }
+    if (!info.isFile() || info.isSymbolicLink()) throw new LocalCapabilityError(400, 'Only regular workspace files can be modified');
+    const canonicalTarget = await realpath(target);
+    const canonicalRelativePath = relative(root, canonicalTarget);
+    if (!canonicalRelativePath || canonicalRelativePath.startsWith('..') || isAbsolute(canonicalRelativePath)) {
+      throw new LocalCapabilityError(400, 'Path is outside the Nexus workspace');
+    }
+
+    await this.tools.execute('write_file', { path: canonicalTarget, content: contentValue }, { permissions: ['write'] });
+    return { path: canonicalRelativePath.split(sep).join('/'), bytes: Buffer.byteLength(contentValue, 'utf8') };
   }
 
   async searchWeb(query: string): Promise<{ query: string; provider: string; results: WebSearchResult[] }> {
@@ -171,9 +260,24 @@ export class LocalCapabilities {
       packageManager: 'winget',
       available: !!version,
       packageManagerVersion: version,
+      setupFallback: process.platform === 'win32' && !version ? 'MICROSOFT_STORE_APP_INSTALLER' as const : undefined,
       requiresConfirmation: true,
       apps: installableApps,
     };
+  }
+
+  async openInstallerSetup(confirmed: unknown): Promise<{ opened: boolean; available: boolean; packageManager: string }> {
+    if (confirmed !== true) throw new LocalCapabilityError(403, 'Explicit confirmation is required to open the installer setup');
+    if (process.platform !== 'win32') throw new LocalCapabilityError(501, 'Installer setup is only supported on Windows');
+    if (await wingetVersion()) return { opened: false, available: true, packageManager: 'winget' };
+
+    await new Promise<void>((resolveOpen, rejectOpen) => {
+      execFile('explorer.exe', ['ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1'], { timeout: 10000, windowsHide: true }, (error) => {
+        if (error) rejectOpen(new LocalCapabilityError(502, `Could not open Microsoft Store: ${error.message}`));
+        else resolveOpen();
+      });
+    });
+    return { opened: true, available: false, packageManager: 'winget' };
   }
 
   startInstall(packageId: unknown, confirmed: unknown): InstallOperation {
