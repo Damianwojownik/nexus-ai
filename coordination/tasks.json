@@ -4,14 +4,14 @@
     {
       "id": "ollama-integration",
       "owner": "codex",
-      "status": "WORKING",
+      "status": "DONE",
       "scope": "Ollama provider, local bridge, model router, UI wiring and tests",
       "avoidPaths": ["docs/AGENT-HUB.md", "coordination/tasks.json"]
     },
     {
       "id": "floot-sync",
       "owner": "chatgpt",
-      "status": "WORKING",
+      "status": "DONE",
       "scope": "Synchronize missing Nexus/Floot source into GitHub without overwriting Codex work",
       "avoidPaths": []
     },
