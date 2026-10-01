@@ -10,6 +10,8 @@ export type AvatarMotionFrame = {
   blink: number;
   mouthOpen: number;
   speechEnergy: number;
+  shoulderSway: number;
+  nod: number;
   expression: 'neutral' | 'attentive' | 'thinking' | 'speaking' | 'focused' | 'error';
 };
 
@@ -54,6 +56,8 @@ export function createAvatarMotionFrame(input: AvatarMotionInput): AvatarMotionF
     blink,
     mouthOpen,
     speechEnergy: energy,
+    shoulderSway: Math.sin(t * (speaking ? 1.35 : 0.42) + 0.4) * (speaking ? 0.85 : listening ? 0.38 : 0.22),
+    nod: (listening ? Math.max(0, Math.sin(t * 0.72 - 1.1)) ** 8 * 1.15 : speaking ? Math.sin(t * 1.18) * 0.16 : 0),
     expression:
       input.state === 'ERROR' ? 'error'
       : speaking ? 'speaking'
@@ -74,5 +78,7 @@ export function avatarMotionCssVars(frame: AvatarMotionFrame): Record<string, st
     '--nexus-blink': frame.blink.toFixed(3),
     '--nexus-mouth': frame.mouthOpen.toFixed(3),
     '--nexus-speech-energy': frame.speechEnergy.toFixed(3),
+    '--nexus-shoulder-sway': `${frame.shoulderSway.toFixed(2)}deg`,
+    '--nexus-nod': `${frame.nod.toFixed(2)}deg`,
   };
 }
