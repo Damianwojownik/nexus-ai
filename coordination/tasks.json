@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "ollama-integration",
+      "owner": "codex",
+      "status": "WORKING",
+      "scope": "Ollama provider, local bridge, model router, UI wiring and tests",
+      "avoidPaths": ["docs/AGENT-HUB.md", "coordination/tasks.json"]
+    },
+    {
+      "id": "floot-sync",
+      "owner": "chatgpt",
+      "status": "WORKING",
+      "scope": "Synchronize missing Nexus/Floot source into GitHub without overwriting Codex work",
+      "avoidPaths": []
+    },
+    {
+      "id": "agent-hub-runtime",
+      "owner": "unassigned",
+      "status": "TODO",
+      "scope": "Real-time agent coordination API/WebSocket, leases, presence and event log",
+      "dependsOn": ["ollama-integration", "floot-sync"]
+    }
+  ]
+}
