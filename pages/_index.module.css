@@ -26,3 +26,11 @@
 .avatar[data-motion-state="speaking"] .person{transform:rotate(var(--nexus-shoulder-sway,0deg)) translateY(calc(var(--nexus-breath,0) * -2px))}
 .avatar[data-motion-state="executing"] .person{transform:rotate(calc(var(--nexus-shoulder-sway,0deg) * .55)) translateY(calc(var(--nexus-breath,0) * -1px))}
 @media(prefers-reduced-motion:reduce){.person,.avatar,.orbit,.wave i{animation:none!important;transition:none!important}.faceRig{display:none}}
+
+/* Micro-expressions layered on the procedural face rig. */
+.faceRig::before,.faceRig::after{content:"";position:absolute;top:31.5%;width:12%;height:1.2%;border-top:2px solid rgba(15,22,30,.5);border-radius:50%;transition:transform .18s ease,opacity .18s ease;opacity:.55}
+.faceRig::before{left:29%}.faceRig::after{right:29%}
+.avatar[data-motion-state="listening"] .faceRig::before{transform:rotate(-5deg) translateY(-2px)}.avatar[data-motion-state="listening"] .faceRig::after{transform:rotate(5deg) translateY(-2px)}
+.avatar[data-motion-state="thinking"] .faceRig::before{transform:rotate(7deg) translateY(-1px)}.avatar[data-motion-state="thinking"] .faceRig::after{transform:rotate(-2deg) translateY(1px)}
+.avatar[data-motion-state="error"] .faceRig::before{transform:rotate(10deg) translateY(2px)}.avatar[data-motion-state="error"] .faceRig::after{transform:rotate(-10deg) translateY(2px)}
+.avatar[data-motion-state="speaking"] .mouthRig{transition:height 55ms linear,transform 70ms ease-out}
