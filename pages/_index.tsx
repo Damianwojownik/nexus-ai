@@ -14,6 +14,8 @@ import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
 import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
+import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
+import type { VisemeCue } from '../helpers/visemeEngine';
 import type { VoiceEventType } from '../helpers/agentProtocol';
 
 const ollamaClient = new OllamaClient();
@@ -58,6 +60,7 @@ export default function Home() {
   const motionStateRef=useRef<VoiceEventType>('IDLE');
   const speechStartedAtRef=useRef(0);
   const speechBoundaryRef=useRef({at:0,intensity:0});
+  const speechVisemePlanRef=useRef<VisemeCue[]>([]);
   const pointerRef=useRef({x:0,y:0});
 
   useEffect(()=>{
@@ -210,14 +213,26 @@ export default function Home() {
       const speechEnergy = speakingNow
         ? Math.min(1, 0.18 + boundaryPulse + 0.22 * Math.abs(Math.sin(speechPhase * 9.7)) + 0.12 * Math.abs(Math.sin(speechPhase * 5.3 + 0.7)))
         : 0;
-      const frame = createAvatarMotionFrame({ state, nowMs, speechEnergy });
+      const visemeCue = speakingNow
+        ? sampleVisemeAt(speechVisemePlanRef.current, Math.max(0, nowMs - speechStartedAtRef.current))
+        : undefined;
+      const mouthShape = visemeCue ? mouthShapeForViseme(visemeCue.viseme) : undefined;
+      const frame = createAvatarMotionFrame({
+        state,
+        nowMs,
+        speechEnergy,
+        visemeOpen: mouthShape ? mouthShape.open * visemeCue!.intensity : undefined,
+      });
       frame.gazeX += pointerRef.current.x * 2.2;
       frame.gazeY += pointerRef.current.y * 1.4;
       const node = avatarRef.current;
       if (node) {
         const vars = avatarMotionCssVars(frame);
         Object.entries(vars).forEach(([name, value]) => node.style.setProperty(name, value));
-        node.style.transform = `perspective(900px) rotateX(\${frame.headY.toFixed(2)}deg) rotateY(\${frame.headX.toFixed(2)}deg) translateY(\${(frame.breath * 1.5).toFixed(2)}px) scale(\${(1 + frame.breath * 0.003).toFixed(4)})`;
+        node.style.setProperty('--nexus-mouth-wide', (mouthShape?.wide ?? 0.15).toFixed(3));
+        node.style.setProperty('--nexus-mouth-round', (mouthShape?.round ?? 0.05).toFixed(3));
+        node.style.setProperty('--nexus-mouth-press', (mouthShape?.press ?? 0.1).toFixed(3));
+        node.style.transform = `perspective(900px) rotateX(${frame.headY.toFixed(2)}deg) rotateY(${frame.headX.toFixed(2)}deg) translateY(${(frame.breath * 1.5).toFixed(2)}px) scale(${(1 + frame.breath * 0.003).toFixed(4)})`;
         node.style.transformOrigin = '50% 58%';
         node.style.willChange = 'transform';
         node.dataset.motionState = state.toLowerCase();
@@ -242,6 +257,7 @@ export default function Home() {
     window.speechSynthesis.cancel();
     const u=new SpeechSynthesisUtterance(text);
     u.lang='pl-PL'; u.rate=.96;
+    speechVisemePlanRef.current=estimateVisemePlan(text,{charactersPerSecond:14/u.rate});
     u.onstart=()=>{speechStartedAtRef.current=performance.now();setSpeaking(true);setStatus('Nexus mówi…')};
     u.onboundary=(event:any)=>{const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
     u.onend=()=>{setSpeaking(false); emitVoiceEvent('IDLE', 'Nexus ready'); setStatus('Gotowy do rozmowy')};
