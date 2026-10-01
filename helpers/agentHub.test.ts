@@ -5,11 +5,74 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AgentHub } from './agentHub.ts';
+import { createAgentHubServer } from './agentHubServer.ts';
 import { InMemoryMemoryBackend, MemoryStore } from './memoryStore.ts';
 import { createTask } from './agentProtocol.ts';
 import { PrimaryAgentProvider } from './primaryAgentProvider.ts';
 import { ToolRegistry, registerDefaultTools } from './toolRegistry.ts';
 import { ModelRouter } from './modelRouter.ts';
+
+test('agent hub API exposes presence and streams task events', { timeout: 15000 }, async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'nexus-hub-api-'));
+  const hub = new AgentHub({ stateFilePath: join(tempDir, 'hub-state.json') });
+  const server = createAgentHubServer(hub);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const streamController = new AbortController();
+
+  try {
+    const registration = await fetch(`${baseUrl}/api/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: 'codex', kind: 'codex', capabilities: ['code'] }),
+    });
+    assert.equal(registration.status, 201);
+
+    const heartbeat = await fetch(`${baseUrl}/api/agents/codex/heartbeat`, { method: 'POST' });
+    assert.equal(heartbeat.status, 200);
+    assert.equal((await heartbeat.json()).presence.connected, true);
+
+    const eventStream = await fetch(`${baseUrl}/api/events`, {
+      headers: { Accept: 'text/event-stream' },
+      signal: streamController.signal,
+    });
+    assert.equal(eventStream.status, 200);
+    assert.match(eventStream.headers.get('content-type') ?? '', /text\/event-stream/);
+    const reader = eventStream.body!.getReader();
+
+    const submission = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        goal: 'Verify live task events',
+        createdBy: 'nexus',
+        assignedTo: 'codex',
+        scope: 'helpers',
+      }),
+    });
+    assert.equal(submission.status, 201);
+
+    let eventText = '';
+    const decoder = new TextDecoder();
+    while (!eventText.includes('Task submitted: Verify live task events')) {
+      const chunk = await reader.read();
+      assert.equal(chunk.done, false);
+      eventText += decoder.decode(chunk.value, { stream: true });
+    }
+    assert.match(eventText, /Task submitted: Verify live task events/);
+
+    const eventHistoryResponse = await fetch(`${baseUrl}/api/events?limit=10`);
+    const eventHistory = await eventHistoryResponse.json() as { events: Array<{ message: string }> };
+    assert.ok(eventHistory.events.some((event) => event.message === 'Task submitted: Verify live task events'));
+    streamController.abort();
+  } finally {
+    streamController.abort();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test('agent hub registers, leases, and completes tasks safely', async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'nexus-hub-'));
