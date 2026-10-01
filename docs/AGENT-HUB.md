@@ -4,7 +4,16 @@ Nexus uses GitHub as the shared source of truth for code while agents may execut
 
 ## Runtime API
 
-`createAgentHubServer(hub)` in `helpers/agentHubServer.ts` creates a Node HTTP server around the existing `AgentHub`. The host must bind and run the returned server; this repository does not yet mount it in the app runtime.
+`createAgentHubServer(hub)` in `helpers/agentHubServer.ts` creates a Node HTTP server around the existing `AgentHub`. Run the local host from the repository root with:
+
+```powershell
+node --experimental-strip-types helpers/agentHubRuntime.ts
+```
+
+The runtime binds to `127.0.0.1:8788` by default and persists state in `.nexus-agent-state.json`.
+Set `NEXUS_AGENT_HUB_HOST`, `NEXUS_AGENT_HUB_PORT`, `NEXUS_AGENT_HUB_STATE` or comma-separated `NEXUS_AGENT_HUB_ALLOWED_ORIGINS` to override those defaults. The browser client uses `http://127.0.0.1:8788`; set `NEXUS_AGENT_HUB_URL` in the frontend build environment to use another host.
+
+The UI registers the actual `nexus-ui` agent, heartbeats it every 15 seconds, fetches agents/tasks from the API, and consumes new events over SSE. Native reconnect is not assumed: the client retries with bounded exponential backoff. The server allows local browser origins and HTTPS `*.sandbox.floot.app` origins, including Private Network Access preflight. Keep the service on loopback unless authentication and an explicit origin policy are added.
 
 - `GET /api/health` reports server health.
 - `GET` and `POST /api/agents` list and register agents; `POST /api/agents/:id/heartbeat` updates presence.
@@ -18,4 +27,4 @@ The hub persists its task, agent and recent-event snapshot through its configure
 
 Each work item has an owner, status, scope and touched paths. Statuses: TODO, WORKING, BLOCKED, DONE. Agents claim work before editing, avoid overlapping paths, and push completed stages for review.
 
-The app UI is not yet connected to this API: agent count and hub activity are not currently driven by server presence or SSE events. The next task is to mount the server and wire the UI to presence, task lifecycle and live events.
+The UI and client are wired to the real API. This stage remains WORKING until the app is launched against the runtime and live presence, task operations and post-reconnect SSE are verified in the actual UI. Do not mark `agent-hub-host-integration` DONE based only on unit tests.

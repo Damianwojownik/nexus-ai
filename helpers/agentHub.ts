@@ -19,6 +19,7 @@ export interface AgentRegistration {
 
 export interface AgentHubOptions {
   stateFilePath?: string;
+  presenceTimeoutMs?: number;
 }
 
 export class AgentHub {
@@ -27,10 +28,12 @@ export class AgentHub {
   private readonly agents = new Map<string, AgentRegistration & { lastHeartbeat: string }>();
   private readonly listeners = new Set<(event: AgentEvent) => void>();
   private readonly stateFilePath: string;
+  private readonly presenceTimeoutMs: number;
   private ready: Promise<void>;
 
   constructor(options: AgentHubOptions = {}) {
     this.stateFilePath = options.stateFilePath ?? `${process.cwd()}/.nexus-agent-state.json`;
+    this.presenceTimeoutMs = options.presenceTimeoutMs ?? 45000;
     this.ready = this.loadState();
   }
 
@@ -110,7 +113,11 @@ export class AgentHub {
 
   async getAgents(): Promise<Array<AgentRegistration & { lastHeartbeat: string }>> {
     await this.ready;
-    return [...this.agents.values()];
+    const now = Date.now();
+    return [...this.agents.values()].map((agent) => ({
+      ...agent,
+      presence: now - new Date(agent.lastHeartbeat).getTime() > this.presenceTimeoutMs ? 'offline' : agent.presence,
+    }));
   }
 
   async submitTask(task: AgentTask): Promise<AgentTask> {

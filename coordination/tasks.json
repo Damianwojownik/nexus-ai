@@ -30,9 +30,9 @@
     },
     {
       "id": "agent-hub-host-integration",
-      "owner": "unassigned",
-      "status": "TODO",
-      "scope": "Mount the agent hub in the app runtime and connect UI presence, tasks and SSE events",
+      "owner": "chatgpt",
+      "status": "WORKING",
+      "scope": "Connect the Nexus UI to the local Agent Hub runtime and verify live presence, task actions and SSE in the app",
       "dependsOn": [
         "agent-hub-runtime"
       ]

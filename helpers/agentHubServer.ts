@@ -7,6 +7,10 @@ import type { AgentKind, AgentTaskStatus } from './agentProtocol.ts';
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
 
+export interface AgentHubServerOptions {
+  allowedOrigins?: string[];
+}
+
 class HttpError extends Error {
   readonly statusCode: number;
 
@@ -85,8 +89,41 @@ function streamEvents(hub: AgentHub, request: IncomingMessage, response: ServerR
   response.flushHeaders();
 }
 
-export function createAgentHubServer(hub: AgentHub): Server {
+function isAllowedOrigin(origin: string, configuredOrigins: string[]): boolean {
+  if (configuredOrigins.includes(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')) return true;
+    return url.protocol === 'https:' && url.hostname.endsWith('.sandbox.floot.app');
+  } catch {
+    return false;
+  }
+}
+
+export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   return createServer(async (request, response) => {
+    const origin = request.headers.origin;
+    const corsAllowed = !!origin && isAllowedOrigin(origin, options.allowedOrigins ?? []);
+    if (corsAllowed) {
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      response.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type, Last-Event-ID');
+      response.setHeader('Vary', 'Origin');
+      if (request.headers['access-control-request-private-network'] === 'true') {
+        response.setHeader('Access-Control-Allow-Private-Network', 'true');
+      }
+    }
+
+    if (request.method === 'OPTIONS') {
+      if (origin && !corsAllowed) {
+        sendJson(response, 403, { error: 'Origin is not allowed to access the local Agent Hub' });
+        return;
+      }
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+
     try {
       const url = new URL(request.url ?? '/', 'http://nexus.local');
       const segments = url.pathname.split('/').filter(Boolean).map((segment) => {

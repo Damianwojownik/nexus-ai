@@ -10,6 +10,9 @@ import { MemoryStore } from '../helpers/memoryStore';
 import { ToolRegistry, registerDefaultTools } from '../helpers/toolRegistry';
 import { VoiceEventBus } from '../helpers/voiceEventBus';
 import { PrimaryAgentProvider } from '../helpers/primaryAgentProvider';
+import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
+import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
+import type { AgentEvent } from '../helpers/agentProtocol';
 import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
 import type { VoiceEventType } from '../helpers/agentProtocol';
 
@@ -24,6 +27,7 @@ const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
   systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
 });
 const voiceEventBus = new VoiceEventBus();
+const agentHubClient = new AgentHubClient();
 
 export default function Home() {
   const avatars=[{name:'Kosmiczny',src:'/_cdn/static/8c1cadbc-855e-4488-a72b-e88cb715d899.png'},{name:'Luna',src:'/_cdn/static/cc2dde88-daa2-48c9-acc8-1ea16f85990d.png'},{name:'Kai',src:'/_cdn/static/6a74b8c4-e09a-4776-a01a-156edac8441f.png'},{name:'Nova',src:'/_cdn/static/364da496-a271-4b0c-b40e-e23f14fad3a2.png'},{name:'Orbit',src:'/_cdn/static/17f6bda3-9fc8-4e2d-9b46-fec5fc2d91d4.png'},{name:'Void',src:'/_cdn/static/2405769f-a406-4390-9af2-8b74c0fda46c.png'}];
@@ -37,7 +41,16 @@ export default function Home() {
   const [ollamaStatus,setOllamaStatus]=useState<'CONNECTED'|'OFFLINE'|'NO_MODEL'|'ERROR'>('OFFLINE');
   const [primaryStatus,setPrimaryStatus]=useState<'CONNECTED'|'DISCONNECTED'|'NOT_CONFIGURED'|'ERROR'>('NOT_CONFIGURED');
   const [memoryReady,setMemoryReady]=useState(false);
-  const [agentCount,setAgentCount]=useState(1);
+  const [hubStatus,setHubStatus]=useState<AgentHubConnectionStatus>('DISCONNECTED');
+  const [hubAgents,setHubAgents]=useState<Array<Awaited<ReturnType<AgentHubClient['getAgents']>>[number]>>([]);
+  const [hubTasks,setHubTasks]=useState<Array<Awaited<ReturnType<AgentHubClient['getTasks']>>[number]>>([]);
+  const [hubEvents,setHubEvents]=useState<AgentEvent[]>([]);
+  const [hubGoal,setHubGoal]=useState('');
+  const [hubScope,setHubScope]=useState('workspace');
+  const [hubAssignee,setHubAssignee]=useState('nexus-ui');
+  const [hubActor,setHubActor]=useState('nexus-ui');
+  const [hubError,setHubError]=useState('');
+  const [hubBusy,setHubBusy]=useState(false);
   const [response,setResponse]=useState('');
   const [isThinking,setIsThinking]=useState(false);
   const recognitionRef=useRef<any>(null);
@@ -66,9 +79,119 @@ export default function Home() {
       const primaryHealth = await primaryProvider.health();
       setPrimaryStatus(primaryHealth.status);
       setMemoryReady(true);
-      setAgentCount(1);
     })();
   }, []);
+
+  const refreshHubState = async () => {
+    const [agents, tasks] = await Promise.all([agentHubClient.getAgents(), agentHubClient.getTasks()]);
+    setHubAgents(agents);
+    setHubTasks(tasks);
+  };
+
+  useEffect(() => {
+    let disposed = false;
+    let registered = false;
+
+    const refresh = async () => {
+      try {
+        const [agents, tasks] = await Promise.all([agentHubClient.getAgents(), agentHubClient.getTasks()]);
+        if (!disposed) {
+          setHubAgents(agents);
+          setHubTasks(tasks);
+          setHubError('');
+        }
+      } catch (error) {
+        if (!disposed) {
+          setHubError(error instanceof Error ? error.message : 'Agent Hub request failed');
+          if (error instanceof AgentHubClientError && error.statusCode) setHubStatus('ERROR');
+        }
+      }
+    };
+
+    const registerNexusUi = async () => {
+      try {
+        await agentHubClient.registerAgent({
+          agentId: 'nexus-ui',
+          kind: 'orchestrator',
+          capabilities: ['conversation', 'task-submit', 'task-claim', 'task-lease'],
+        });
+        await agentHubClient.heartbeat('nexus-ui');
+        await refresh();
+      } catch (error) {
+        registered = false;
+        if (!disposed) {
+          setHubError(error instanceof Error ? error.message : 'Nexus UI registration failed');
+          setHubStatus(error instanceof AgentHubClientError && error.statusCode ? 'ERROR' : 'DISCONNECTED');
+        }
+      }
+    };
+
+    const stopEvents = agentHubClient.subscribeEvents((event) => {
+      if (disposed) return;
+      if (event.message !== 'Heartbeat') setHubEvents((current) => [event, ...current].slice(0, 8));
+      void refresh();
+    }, (status) => {
+      if (disposed) return;
+      setHubStatus(status);
+      if (status === 'CONNECTED') {
+        if (!registered) {
+          registered = true;
+          void registerNexusUi();
+        }
+      } else {
+        registered = false;
+      }
+    });
+
+    const heartbeatTimer = window.setInterval(() => {
+      if (!registered || disposed) return;
+      void agentHubClient.heartbeat('nexus-ui').catch((error) => {
+        registered = false;
+        if (!disposed) {
+          setHubError(error instanceof Error ? error.message : 'Agent Hub heartbeat failed');
+          setHubStatus(error instanceof AgentHubClientError && error.statusCode ? 'ERROR' : 'DISCONNECTED');
+        }
+      });
+    }, 15000);
+
+    return () => {
+      disposed = true;
+      registered = false;
+      window.clearInterval(heartbeatTimer);
+      stopEvents();
+    };
+  }, []);
+
+  const runHubMutation = async (operation: () => Promise<unknown>) => {
+    setHubBusy(true);
+    setHubError('');
+    try {
+      await operation();
+      await refreshHubState();
+    } catch (error) {
+      setHubError(error instanceof Error ? error.message : 'Agent Hub request failed');
+      setHubStatus(error instanceof AgentHubClientError && error.statusCode ? 'ERROR' : 'DISCONNECTED');
+    } finally {
+      setHubBusy(false);
+    }
+  };
+
+  const submitHubTask = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!hubGoal.trim() || !hubAssignee) return;
+    await runHubMutation(async () => {
+      await agentHubClient.submitTask({
+        goal: hubGoal.trim(),
+        createdBy: 'nexus-ui',
+        assignedTo: hubAssignee,
+        scope: hubScope.trim() || 'workspace',
+      });
+      setHubGoal('');
+    });
+  };
+
+  const claimHubTask = (taskId: string) => runHubMutation(() => agentHubClient.claimTask(taskId, hubActor));
+  const leaseHubTask = (taskId: string) => runHubMutation(() => agentHubClient.leaseTask(taskId, hubActor, 300000));
 
   useEffect(() => {
     const unsubscribe = voiceEventBus.subscribe((event) => {
@@ -178,8 +301,53 @@ export default function Home() {
         <div className={styles.settingsRow}><span>Primary Agent</span><strong>{primaryStatus}</strong></div>
         <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama • {selectedModel || 'not selected'}</strong></div>
         <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady ? 'ready' : 'loading'}</strong></div>
-        <div className={styles.settingsRow}><span>Agents</span><strong>{agentCount} online</strong></div>
+        <div className={styles.settingsRow}><span>Agents</span><strong>{hubAgents.filter(agent => agent.presence !== 'offline').length} online · Hub {hubStatus}</strong></div>
       </div>
+      <section aria-labelledby="agent-hub-title" style={{borderTop:'1px solid rgba(143,162,186,.24)',borderBottom:'1px solid rgba(143,162,186,.24)',padding:'20px 0',margin:'20px 0',color:'var(--foreground,#edf4ff)'}}>
+        <header style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:16}}>
+          <div><h3 id="agent-hub-title" style={{margin:0}}>Agent Hub</h3><span style={{fontSize:13,opacity:.72}}>Presence, zadania i zdarzenia na żywo</span></div>
+          <strong aria-live="polite" style={{color:hubStatus==='CONNECTED'?'#57d6a0':hubStatus==='ERROR'?'#ff7f8d':'#ffc66d'}}>{hubStatus}</strong>
+        </header>
+        <form onSubmit={submitHubTask} style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:10,marginBottom:18}}>
+          <input aria-label="Cel zadania" value={hubGoal} onChange={event=>setHubGoal(event.target.value)} placeholder="Cel zadania" required style={{minWidth:0,padding:'10px 12px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}/>
+          <input aria-label="Zakres zadania" value={hubScope} onChange={event=>setHubScope(event.target.value)} placeholder="Zakres" style={{minWidth:0,padding:'10px 12px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}/>
+          <select aria-label="Agent docelowy" value={hubAssignee} onChange={event=>setHubAssignee(event.target.value)} style={{minWidth:0,padding:'10px 12px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}>
+            {hubAgents.map(agent=><option key={agent.agentId} value={agent.agentId}>{agent.agentId} · {agent.presence}</option>)}
+          </select>
+          <button type="submit" disabled={hubBusy||hubStatus!=='CONNECTED'} style={{padding:'10px 14px',border:0,borderRadius:6,background:'#7ce7ff',color:'#041116',fontWeight:600,cursor:'pointer',opacity:hubBusy||hubStatus!=='CONNECTED'?.55:1}}>Wyślij zadanie</button>
+        </form>
+        {hubError&&<p role="alert" style={{color:'#ff7f8d',margin:'0 0 14px'}}>{hubError}</p>}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(250px,1fr))',gap:24}}>
+          <section aria-labelledby="hub-agents-title">
+            <h4 id="hub-agents-title" style={{margin:'0 0 8px'}}>Agenci ({hubAgents.length})</h4>
+            {hubAgents.length===0?<p style={{opacity:.72}}>Brak zarejestrowanych agentów.</p>:hubAgents.map(agent=><div key={agent.agentId} style={{padding:'9px 0',borderBottom:'1px solid rgba(143,162,186,.16)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',gap:12}}><strong>{agent.agentId}</strong><span>{agent.presence?.toUpperCase()??'UNKNOWN'}</span></div>
+              <small style={{opacity:.72}}>{agent.kind} · {agent.capabilities.join(', ')||'bez capabilities'} · heartbeat {new Date(agent.lastHeartbeat).toLocaleTimeString()}</small>
+            </div>)}
+            {hubAgents.length>0&&<label style={{display:'grid',gap:5,marginTop:12,fontSize:13}}>Działaj jako
+              <select value={hubActor} onChange={event=>setHubActor(event.target.value)} style={{padding:'8px 10px',borderRadius:6,border:'1px solid #263247',background:'#111927',color:'inherit'}}>
+                {hubAgents.map(agent=><option key={agent.agentId} value={agent.agentId}>{agent.agentId}</option>)}
+              </select>
+            </label>}
+          </section>
+          <section aria-labelledby="hub-tasks-title">
+            <h4 id="hub-tasks-title" style={{margin:'0 0 8px'}}>Zadania ({hubTasks.length})</h4>
+            {hubTasks.length===0?<p style={{opacity:.72}}>Brak zadań.</p>:hubTasks.map(task=><div key={task.id} style={{padding:'10px 0',borderBottom:'1px solid rgba(143,162,186,.16)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',gap:12}}><strong>{task.goal}</strong><span>{task.status}</span></div>
+              <small style={{opacity:.72}}>{task.scope} · przypisano: {task.assignedTo}{task.lease?` · lease: ${task.lease.owner} do ${new Date(task.lease.expiresAt).toLocaleTimeString()}`:''}</small>
+              {task.error&&<div style={{color:'#ff7f8d',fontSize:13}}>{task.error}</div>}
+              <div style={{display:'flex',gap:8,marginTop:8}}>
+                <button type="button" disabled={hubBusy||hubStatus!=='CONNECTED'||task.status==='DONE'} onClick={()=>void claimHubTask(task.id)} style={{padding:'6px 9px',borderRadius:5,border:'1px solid #263247',background:'#1c2738',color:'inherit',cursor:'pointer'}}>Claim</button>
+                <button type="button" disabled={hubBusy||hubStatus!=='CONNECTED'||task.status==='DONE'} onClick={()=>void leaseHubTask(task.id)} style={{padding:'6px 9px',borderRadius:5,border:'1px solid #263247',background:'#1c2738',color:'inherit',cursor:'pointer'}}>Lease 5 min</button>
+              </div>
+            </div>)}
+          </section>
+        </div>
+        <section aria-labelledby="hub-events-title" style={{marginTop:18}}>
+          <h4 id="hub-events-title" style={{margin:'0 0 8px'}}>Live events</h4>
+          {hubEvents.length===0?<p style={{opacity:.72}}>Oczekiwanie na zdarzenia z Huba.</p>:hubEvents.map(event=><div key={event.id} style={{display:'flex',gap:10,padding:'5px 0',fontSize:13}}><time style={{opacity:.62}}>{new Date(event.at).toLocaleTimeString()}</time><strong>{event.type}</strong><span>{event.agentId}: {event.message}</span></div>)}
+        </section>
+      </section>
       <div className={styles.cards}><article><Brain/><div><b>Pamięć projektu</b><span>kontekst, decyzje, pliki</span></div><strong>ON</strong></article><article><Code2/><div><b>Agent Builder</b><span>kod → test → poprawka</span></div><strong>READY</strong></article><article><Play/><div><b>Podgląd aplikacji</b><span>uruchomienie na żywo</span></div><strong>LOCAL</strong></article></div>
       <div className={styles.characterBar}><b>Wybierz postać</b><div className={styles.characterList}>{avatars.map((a,i)=><button key={a.name} onClick={()=>chooseAvatar(i)} className={i===avatar?styles.selected:''}><img src={a.src} alt={a.name}/><span>{a.name}</span></button>)}</div></div>
     </section>

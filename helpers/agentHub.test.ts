@@ -5,12 +5,82 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AgentHub } from './agentHub.ts';
+import { AgentHubClient } from './agentHubClient.ts';
 import { createAgentHubServer } from './agentHubServer.ts';
 import { InMemoryMemoryBackend, MemoryStore } from './memoryStore.ts';
 import { createTask } from './agentProtocol.ts';
 import { PrimaryAgentProvider } from './primaryAgentProvider.ts';
 import { ToolRegistry, registerDefaultTools } from './toolRegistry.ts';
 import { ModelRouter } from './modelRouter.ts';
+
+test('agent hub client uses the real API and reconnects SSE after disconnect', { timeout: 20000 }, async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'nexus-hub-client-'));
+  const hub = new AgentHub({ stateFilePath: join(tempDir, 'hub-state.json') });
+  const server = createAgentHubServer(hub);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const client = new AgentHubClient(`http://127.0.0.1:${address.port}`, 100, 500);
+  let connectionCount = 0;
+  let resolveFirstConnection!: () => void;
+  let resolveReconnection!: () => void;
+  let resolveTaskEvent!: () => void;
+  const firstConnection = new Promise<void>((resolve) => { resolveFirstConnection = resolve; });
+  const reconnection = new Promise<void>((resolve) => { resolveReconnection = resolve; });
+  const taskEvent = new Promise<void>((resolve) => { resolveTaskEvent = resolve; });
+  const withTimeout = (promise: Promise<void>, message: string) => new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(message)), 5000);
+    promise.then(() => {
+      clearTimeout(timeout);
+      resolve();
+    }, (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+  const disconnectEvents = client.subscribeEvents((event) => {
+    if (event.message === 'Task submitted: Verify client SSE recovery') resolveTaskEvent();
+  }, (status) => {
+    if (status === 'CONNECTED') {
+      connectionCount += 1;
+      if (connectionCount === 1) resolveFirstConnection();
+      if (connectionCount === 2) resolveReconnection();
+    }
+  });
+
+  try {
+    await withTimeout(firstConnection, 'Timed out waiting for initial SSE connection');
+    await client.registerAgent({ agentId: 'nexus-ui', kind: 'orchestrator', capabilities: ['tasks'] });
+    assert.equal((await client.heartbeat('nexus-ui')).connected, true);
+    assert.ok((await client.getAgents()).some((agent) => agent.agentId === 'nexus-ui'));
+
+    const submitted = await client.submitTask({
+      goal: 'Verify client SSE recovery',
+      createdBy: 'nexus-ui',
+      assignedTo: 'nexus-ui',
+      scope: 'helpers',
+    });
+    assert.equal((await client.getTasks('TODO')).some((task) => task.id === submitted.id), true);
+    assert.equal((await client.claimTask(submitted.id, 'nexus-ui')).status, 'WORKING');
+    assert.equal((await client.leaseTask(submitted.id, 'nexus-ui', 60000)).lease?.owner, 'nexus-ui');
+
+    server.closeAllConnections();
+    await withTimeout(reconnection, 'Timed out waiting for SSE reconnection');
+    await client.submitTask({
+      goal: 'Verify client SSE recovery',
+      createdBy: 'nexus-ui',
+      assignedTo: 'nexus-ui',
+      scope: 'helpers',
+    });
+    await withTimeout(taskEvent, 'Timed out waiting for an event after reconnection');
+    assert.ok(connectionCount >= 2);
+  } finally {
+    disconnectEvents();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test('agent hub API exposes presence and streams task events', { timeout: 15000 }, async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'nexus-hub-api-'));
@@ -23,6 +93,19 @@ test('agent hub API exposes presence and streams task events', { timeout: 15000 
   const streamController = new AbortController();
 
   try {
+    const preflight = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://nexus.sandbox.floot.app',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type',
+        'Access-Control-Request-Private-Network': 'true',
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('access-control-allow-origin'), 'https://nexus.sandbox.floot.app');
+    assert.equal(preflight.headers.get('access-control-allow-private-network'), 'true');
+
     const registration = await fetch(`${baseUrl}/api/agents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -100,6 +183,19 @@ test('agent hub registers, leases, and completes tasks safely', async () => {
   const completed = await hub.completeTask(task.id, { status: 'SUCCESS', summary: 'Provider wired' });
   assert.equal(completed?.status, 'DONE');
   assert.equal(completed?.result?.summary, 'Provider wired');
+
+  rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('agent presence expires after missed heartbeats and recovers on heartbeat', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'nexus-hub-presence-'));
+  const hub = new AgentHub({ stateFilePath: join(tempDir, 'hub-state.json'), presenceTimeoutMs: 10 });
+  await hub.registerAgent({ agentId: 'worker', kind: 'codex', capabilities: ['code'] });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal((await hub.getAgents())[0].presence, 'offline');
+  assert.equal((await hub.heartbeat('worker')).connected, true);
+  assert.equal((await hub.getAgents())[0].presence, 'online');
 
   rmSync(tempDir, { recursive: true, force: true });
 });
