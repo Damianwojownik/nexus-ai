@@ -24,19 +24,28 @@ export class NexusAgent {
   ) {}
 
   async send(input: NexusMessageInput): Promise<NexusAgentResult> {
+    const mode = input.mode || 'AUTO';
+    this.router.setPreferredMode(mode);
+
     const relevantMemories = await this.memoryStore.getRelevantMemories(input.text, 3);
     const toolHints = this.toolRegistry.list().slice(0, 5).map((tool) => tool.name).join(', ');
+    const history = (input.history || []).slice(-12);
 
     const memoryContext = relevantMemories.length
       ? `Relevant memories:\n${relevantMemories.map((m) => `- ${m.text}`).join('\n')}`
       : 'No relevant memories yet.';
 
+    const historyContext = history.length
+      ? `Recent conversation:\n${history.map((item) => `${item.role}: ${item.content}`).join('\n')}`
+      : 'No recent conversation history provided.';
+
     const prompt = [
       this.options.systemPrompt || 'You are Nexus, a local-first AI assistant for product work and coding.',
       `Project context: ${input.projectContext || 'No project context provided.'}`,
-      `Current AI mode: ${input.mode || 'AUTO'}`,
+      `Current AI mode: ${mode}`,
       `Available tools: ${toolHints || 'none'}`,
       memoryContext,
+      historyContext,
       `User message: ${input.text}`,
     ].join('\n\n');
 
@@ -56,11 +65,11 @@ export class NexusAgent {
 
     return {
       text: responseText,
-      mode: input.mode || 'AUTO',
+      mode,
       reasoning: [
-        'Selected local-first model routing',
+        `Applied requested model mode: ${mode}`,
         'Retrieved the most relevant memory snippets',
-        'Prepared tool-aware context for the next response',
+        'Included recent conversation history and tool-aware context',
       ],
     };
   }
