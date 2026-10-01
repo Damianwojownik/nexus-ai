@@ -1,14 +1,17 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import { AgentHub } from './agentHub.ts';
 import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentTaskStatus } from './agentProtocol.ts';
+import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
 
 export interface AgentHubServerOptions {
   allowedOrigins?: string[];
+  workspaceDir?: string;
 }
 
 class HttpError extends Error {
@@ -29,14 +32,14 @@ function sendJson(response: ServerResponse, statusCode: number, value: unknown):
   response.end(JSON.stringify(value));
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(request: IncomingMessage, maxBytes = 1024 * 1024): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
 
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > 1024 * 1024) throw new HttpError(413, 'Request body exceeds 1 MB');
+    if (size > maxBytes) throw new HttpError(413, `Request body exceeds ${Math.floor(maxBytes / 1024 / 1024)} MB`);
     chunks.push(buffer);
   }
 
@@ -100,7 +103,18 @@ function isAllowedOrigin(origin: string, configuredOrigins: string[]): boolean {
   }
 }
 
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+  } catch {
+    return false;
+  }
+}
+
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
+  const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
+
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
     const corsAllowed = !!origin && isAllowedOrigin(origin, options.allowedOrigins ?? []);
@@ -135,6 +149,10 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       });
       const method = request.method ?? 'GET';
 
+      if (segments[0] === 'api' && segments[1] === 'install' && origin && !isLoopbackOrigin(origin)) {
+        throw new LocalCapabilityError(403, 'Software installation is only available from the local Nexus frontend');
+      }
+
       if (method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true });
         return;
@@ -149,6 +167,38 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         const requestedLimit = Number(url.searchParams.get('limit') ?? 20);
         const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, Math.floor(requestedLimit))) : 20;
         sendJson(response, 200, { events: hub.getEventLog(limit) });
+        return;
+      }
+
+      if (method === 'GET' && segments.length === 2 && segments[0] === 'api' && segments[1] === 'search') {
+        const query = url.searchParams.get('q') ?? '';
+        sendJson(response, 200, await localCapabilities.searchWeb(query));
+        return;
+      }
+
+      if (method === 'POST' && segments.length === 3 && segments[0] === 'api' && segments[1] === 'workspace' && segments[2] === 'import') {
+        const body = await readJson(request, 15 * 1024 * 1024);
+        const file = await localCapabilities.importFile(body.filename, body.contentBase64);
+        sendJson(response, 201, { file });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/install/catalog') {
+        sendJson(response, 200, await localCapabilities.getInstallCatalog());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/install') {
+        const body = await readJson(request);
+        const operation = localCapabilities.startInstall(body.packageId, body.confirmed);
+        sendJson(response, 202, { operation });
+        return;
+      }
+
+      if (method === 'GET' && segments.length === 3 && segments[0] === 'api' && segments[1] === 'install') {
+        const operation = localCapabilities.getInstallOperation(segments[2]);
+        if (!operation) throw new HttpError(404, 'Installation operation not found');
+        sendJson(response, 200, { operation });
         return;
       }
 
@@ -240,7 +290,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         response.destroy();
         return;
       }
-      const statusCode = error instanceof HttpError ? error.statusCode : 500;
+      const statusCode = error instanceof HttpError || error instanceof LocalCapabilityError ? error.statusCode : 500;
       const message = error instanceof Error ? error.message : 'Internal server error';
       sendJson(response, statusCode, { error: message });
     }

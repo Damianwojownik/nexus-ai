@@ -13,6 +13,8 @@ import { PrimaryAgentProvider } from '../helpers/primaryAgentProvider';
 import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
+import { LocalCapabilitiesClient } from '../helpers/localCapabilitiesClient';
+import type { InstallCatalog, InstallOperation, WebSearchResult } from '../helpers/localCapabilitiesClient';
 import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
 import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
@@ -30,6 +32,7 @@ const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
 });
 const voiceEventBus = new VoiceEventBus();
 const agentHubClient = new AgentHubClient();
+const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
 
 export default function Home() {
   const avatars=[{name:'Kosmiczny',src:'/_cdn/static/8c1cadbc-855e-4488-a72b-e88cb715d899.png'},{name:'Luna',src:'/_cdn/static/cc2dde88-daa2-48c9-acc8-1ea16f85990d.png'},{name:'Kai',src:'/_cdn/static/6a74b8c4-e09a-4776-a01a-156edac8441f.png'},{name:'Nova',src:'/_cdn/static/364da496-a271-4b0c-b40e-e23f14fad3a2.png'},{name:'Orbit',src:'/_cdn/static/17f6bda3-9fc8-4e2d-9b46-fec5fc2d91d4.png'},{name:'Void',src:'/_cdn/static/2405769f-a406-4390-9af2-8b74c0fda46c.png'}];
@@ -53,6 +56,22 @@ export default function Home() {
   const [hubActor,setHubActor]=useState('nexus-ui');
   const [hubError,setHubError]=useState('');
   const [hubBusy,setHubBusy]=useState(false);
+  const [webQuery,setWebQuery]=useState('');
+  const [webResults,setWebResults]=useState<WebSearchResult[]>([]);
+  const [webProvider,setWebProvider]=useState('');
+  const [webBusy,setWebBusy]=useState(false);
+  const [webError,setWebError]=useState('');
+  const [uploadFile,setUploadFile]=useState<File|null>(null);
+  const [uploadBusy,setUploadBusy]=useState(false);
+  const [uploadMessage,setUploadMessage]=useState('');
+  const [uploadError,setUploadError]=useState('');
+  const [installCatalog,setInstallCatalog]=useState<InstallCatalog|null>(null);
+  const [installCatalogError,setInstallCatalogError]=useState('');
+  const [selectedInstallApp,setSelectedInstallApp]=useState('');
+  const [installConfirmed,setInstallConfirmed]=useState(false);
+  const [installBusy,setInstallBusy]=useState(false);
+  const [installOperation,setInstallOperation]=useState<InstallOperation|null>(null);
+  const [installError,setInstallError]=useState('');
   const [response,setResponse]=useState('');
   const [isThinking,setIsThinking]=useState(false);
   const recognitionRef=useRef<any>(null);
@@ -169,6 +188,31 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+    void localCapabilitiesClient.getInstallCatalog().then((catalog) => {
+      if (disposed) return;
+      setInstallCatalog(catalog);
+      setSelectedInstallApp(catalog.apps[0]?.id ?? '');
+    }).catch((error) => {
+      if (!disposed) setInstallCatalogError(error instanceof Error ? error.message : 'Nie można odczytać katalogu instalacji');
+    });
+    return () => { disposed = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!installOperation || installOperation.status !== 'RUNNING') return;
+    let disposed = false;
+    const timer = window.setInterval(() => {
+      void localCapabilitiesClient.getInstallOperation(installOperation.id).then((operation) => {
+        if (!disposed) setInstallOperation(operation);
+      }).catch((error) => {
+        if (!disposed) setInstallError(error instanceof Error ? error.message : 'Nie można odczytać statusu instalacji');
+      });
+    }, 2000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [installOperation?.id, installOperation?.status]);
+
   const runHubMutation = async (operation: () => Promise<unknown>) => {
     setHubBusy(true);
     setHubError('');
@@ -213,6 +257,54 @@ export default function Home() {
       setHubStatus(error instanceof AgentHubClientError && error.statusCode ? 'ERROR' : 'DISCONNECTED');
     } finally {
       setHubBusy(false);
+    }
+  };
+
+  const searchWeb = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (webQuery.trim().length < 2) return;
+    setWebBusy(true);
+    setWebError('');
+    try {
+      const result = await localCapabilitiesClient.searchWeb(webQuery.trim());
+      setWebProvider(result.provider);
+      setWebResults(result.results);
+    } catch (error) {
+      setWebError(error instanceof Error ? error.message : 'Wyszukiwanie internetowe nie powiodło się');
+      setWebResults([]);
+    } finally {
+      setWebBusy(false);
+    }
+  };
+
+  const importWorkspaceFile = async () => {
+    if (!uploadFile) return;
+    setUploadBusy(true);
+    setUploadError('');
+    setUploadMessage('');
+    try {
+      const imported = await localCapabilitiesClient.importFile(uploadFile);
+      setUploadMessage(`${imported.filename} · ${imported.bytes.toLocaleString()} B · ${imported.location}`);
+      setUploadFile(null);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Import pliku nie powiódł się');
+    } finally {
+      setUploadBusy(false);
+    }
+  };
+
+  const installSelectedApp = async () => {
+    if (!selectedInstallApp || !installConfirmed) return;
+    setInstallBusy(true);
+    setInstallError('');
+    try {
+      const operation = await localCapabilitiesClient.startInstall(selectedInstallApp, true);
+      setInstallOperation(operation);
+      setInstallConfirmed(false);
+    } catch (error) {
+      setInstallError(error instanceof Error ? error.message : 'Instalacja nie mogła zostać uruchomiona');
+    } finally {
+      setInstallBusy(false);
     }
   };
 
@@ -391,6 +483,56 @@ export default function Home() {
           <h4 id="hub-events-title" style={{margin:'0 0 8px'}}>Live events</h4>
           {hubEvents.length===0?<p style={{opacity:.72}}>Oczekiwanie na zdarzenia z Huba.</p>:hubEvents.map(event=><div key={event.id} style={{display:'flex',gap:10,padding:'5px 0',fontSize:13}}><time style={{opacity:.62}}>{new Date(event.at).toLocaleTimeString()}</time><strong>{event.type}</strong><span>{event.agentId}: {event.message}</span></div>)}
         </section>
+      </section>
+      <section aria-labelledby="local-capabilities-title" className={styles.capabilityPanel}>
+        <header className={styles.capabilityHeader}>
+          <div><h3 id="local-capabilities-title">Narzędzia lokalne</h3><span>Wyszukiwanie · pliki · oprogramowanie</span></div>
+          <span className={styles.capabilityBadge}>WEB / LOCAL</span>
+        </header>
+        <div className={styles.capabilityGrid}>
+          <section aria-labelledby="web-search-title" className={styles.capabilityGroup}>
+            <h4 id="web-search-title">Szukaj w internecie</h4>
+            <form onSubmit={searchWeb} className={styles.capabilityForm}>
+              <input type="search" aria-label="Fraza wyszukiwania" value={webQuery} onChange={event=>setWebQuery(event.target.value)} placeholder="Wpisz frazę" minLength={2} maxLength={300} required/>
+              <button type="submit" disabled={webBusy}>{webBusy?'Szukam…':'Szukaj'}</button>
+            </form>
+            {webProvider&&<small className={styles.capabilityMeta}>Źródło wyszukiwania: {webProvider}</small>}
+            {webError&&<p role="alert" className={styles.capabilityError}>{webError}</p>}
+            {webResults.length===0&&webProvider&&!webError&&<p className={styles.capabilityMeta}>Brak wyników.</p>}
+            <div className={styles.searchResults}>
+              {webResults.map((result)=><article key={result.url} className={styles.searchResult}>
+                <a href={result.url} target="_blank" rel="noreferrer">{result.title}</a>
+                <small>{new URL(result.url).hostname}</small>
+                {result.snippet&&<p>{result.snippet}</p>}
+              </article>)}
+            </div>
+          </section>
+          <section aria-labelledby="workspace-import-title" className={styles.capabilityGroup}>
+            <h4 id="workspace-import-title">Importuj plik do workspace</h4>
+            <input type="file" aria-label="Wybierz plik do importu" onChange={event=>{setUploadFile(event.target.files?.[0]??null);setUploadError('');setUploadMessage('')}}/>
+            <button type="button" disabled={!uploadFile||uploadBusy} onClick={()=>void importWorkspaceFile()}>{uploadBusy?'Importuję…':'Importuj plik'}</button>
+            <small className={styles.capabilityMeta}>Limit 10 MB. Pliki wykonywalne są blokowane i żaden import nie jest uruchamiany.</small>
+            {uploadMessage&&<p role="status" className={styles.capabilitySuccess}>{uploadMessage}</p>}
+            {uploadError&&<p role="alert" className={styles.capabilityError}>{uploadError}</p>}
+          </section>
+          <section aria-labelledby="software-install-title" className={styles.capabilityGroup}>
+            <h4 id="software-install-title">Instaluj oprogramowanie</h4>
+            {installCatalog?.supported&&installCatalog.available&&installCatalog.apps.length>0?<>
+              <select aria-label="Program do instalacji" value={selectedInstallApp} onChange={event=>{setSelectedInstallApp(event.target.value);setInstallConfirmed(false)}}>
+                {installCatalog.apps.map(app=><option key={app.id} value={app.id}>{app.name} · {app.publisher}</option>)}
+              </select>
+              <small className={styles.capabilityMeta}>{installCatalog.apps.find(app=>app.id===selectedInstallApp)?.description} {installCatalog.packageManagerVersion?`(${installCatalog.packageManager} ${installCatalog.packageManagerVersion})`:`(${installCatalog.packageManager})`}</small>
+              <label className={styles.installConsent}><input type="checkbox" checked={installConfirmed} onChange={event=>setInstallConfirmed(event.target.checked)}/> Potwierdzam instalację na tym komputerze</label>
+              <button type="button" disabled={!installConfirmed||installBusy||installOperation?.status==='RUNNING'} onClick={()=>void installSelectedApp()}>{installBusy?'Uruchamiam…':'Instaluj wybrany program'}</button>
+              {installOperation&&<div role="status" className={installOperation.status==='FAILED'?styles.capabilityError:styles.capabilityMeta}>
+                {installOperation.app.name}: {installOperation.status}
+                {installOperation.error&&<p>{installOperation.error}</p>}
+              </div>}
+            </>:<p className={styles.capabilityMeta}>{installCatalogError||(installCatalog?.supported?'Instalator winget nie jest dostępny na tym komputerze. Import plików pozostaje aktywny.':'Instalowanie programów z Huba jest obsługiwane tylko w Windows.')}</p>}
+            {installError&&<p role="alert" className={styles.capabilityError}>{installError}</p>}
+            <small className={styles.capabilityMeta}>Tylko zatwierdzone aplikacje z katalogu. Każda instalacja wymaga osobnej zgody.</small>
+          </section>
+        </div>
       </section>
       <div className={styles.cards}><article><Brain/><div><b>Pamięć projektu</b><span>kontekst, decyzje, pliki</span></div><strong>ON</strong></article><article><Code2/><div><b>Agent Builder</b><span>kod → test → poprawka</span></div><strong>READY</strong></article><article><Play/><div><b>Podgląd aplikacji</b><span>uruchomienie na żywo</span></div><strong>LOCAL</strong></article></div>
       <div className={styles.characterBar}><b>Wybierz postać</b><div className={styles.characterList}>{avatars.map((a,i)=><button key={a.name} onClick={()=>chooseAvatar(i)} className={i===avatar?styles.selected:''}><img src={a.src} alt="" onError={event=>{event.currentTarget.style.display='none'}}/><span>{a.name}</span></button>)}</div></div>

@@ -23,6 +23,13 @@ npm run dev
 
 Open `http://127.0.0.1:5173/`. The Hub stores runtime state under the user's local app data directory when started by the current Windows setup.
 
+## Local capabilities
+
+- Web search runs through DuckDuckGo from the local Hub and returns clickable source links/snippets.
+- File import accepts one file up to 10 MB into `%LOCALAPPDATA%/NexusAI/workspace` (or `NEXUS_WORKSPACE_DIR`). Executable/installer extensions are blocked; imports are never launched.
+- Windows software installs are restricted to the Hub's approved `winget` catalog and require an explicit UI confirmation for every app. The installer is disabled if `winget` is unavailable; Nexus does not install a package manager automatically.
+- The Primary Agent remains `NOT_CONFIGURED`. No remote ChatGPT credentials or connection are enabled.
+
 ## Next task
 
 Configure and verify the same frontend/runtime values in the hosted Floot deployment if that environment is required. The local end-to-end path is documented in `docs/AGENT-HUB.md`.

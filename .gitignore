@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .nexus-build/
+.vite/
 .tools/
 .env.local
 .nexus-agent-state.json

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -76,6 +76,62 @@ test('agent hub client uses the real API and reconnects SSE after disconnect', {
     assert.ok(connectionCount >= 2);
   } finally {
     disconnectEvents();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('workspace import is path-safe and installs require explicit confirmation', { timeout: 15000 }, async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'nexus-local-capabilities-'));
+  const hub = new AgentHub({ stateFilePath: join(tempDir, 'hub-state.json') });
+  const server = createAgentHubServer(hub, { workspaceDir: join(tempDir, 'workspace') });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const catalogResponse = await fetch(`${baseUrl}/api/install/catalog`);
+    const catalog = await catalogResponse.json() as { requiresConfirmation: boolean; apps: Array<{ id: string }> };
+    assert.equal(catalog.requiresConfirmation, true);
+    assert.ok(catalog.apps.some((app) => app.id === 'Microsoft.VisualStudioCode'));
+
+    const deniedInstall = await fetch(`${baseUrl}/api/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageId: 'Microsoft.VisualStudioCode', confirmed: false }),
+    });
+    assert.equal(deniedInstall.status, 403);
+
+    const remoteInstall = await fetch(`${baseUrl}/api/install`, {
+      method: 'POST',
+      headers: {
+        Origin: 'https://nexus.sandbox.floot.app',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ packageId: 'Microsoft.VisualStudioCode', confirmed: true }),
+    });
+    assert.equal(remoteInstall.status, 403);
+
+    const content = 'Imported through the real Nexus workspace endpoint.';
+    const imported = await fetch(`${baseUrl}/api/workspace/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: 'capability-smoke.txt', contentBase64: Buffer.from(content).toString('base64') }),
+    });
+    assert.equal(imported.status, 201);
+    const details = await imported.json() as { file: { filename: string; bytes: number } };
+    assert.equal(details.file.filename, 'capability-smoke.txt');
+    assert.equal(readFileSync(join(tempDir, 'workspace', details.file.filename), 'utf8'), content);
+
+    const traversal = await fetch(`${baseUrl}/api/workspace/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: '../outside.txt', contentBase64: Buffer.from(content).toString('base64') }),
+    });
+    assert.equal(traversal.status, 400);
+  } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     rmSync(tempDir, { recursive: true, force: true });

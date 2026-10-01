@@ -10,8 +10,8 @@ Nexus uses GitHub as the shared source of truth for code while agents may execut
 node --experimental-strip-types helpers/agentHubRuntime.ts
 ```
 
-The runtime binds to `127.0.0.1:8788` by default and persists state in `.nexus-agent-state.json`.
-Set `NEXUS_AGENT_HUB_HOST`, `NEXUS_AGENT_HUB_PORT`, `NEXUS_AGENT_HUB_STATE` or comma-separated `NEXUS_AGENT_HUB_ALLOWED_ORIGINS` to override those defaults. The browser client uses `http://127.0.0.1:8788`; set `NEXUS_AGENT_HUB_URL` in the frontend build environment to use another host.
+The runtime binds to `127.0.0.1:8788` by default and persists state under `%LOCALAPPDATA%/NexusAI`. The imported-file workspace is `%LOCALAPPDATA%/NexusAI/workspace` by default.
+Set `NEXUS_AGENT_HUB_HOST`, `NEXUS_AGENT_HUB_PORT`, `NEXUS_AGENT_HUB_STATE`, `NEXUS_WORKSPACE_DIR` or comma-separated `NEXUS_AGENT_HUB_ALLOWED_ORIGINS` to override those defaults. The browser client uses `http://127.0.0.1:8788`; set `VITE_NEXUS_AGENT_HUB_URL` in `.env.local` to use another host.
 
 The UI registers the actual `nexus-ui` agent, heartbeats it every 15 seconds, fetches agents/tasks from the API, and consumes new events over SSE. Native reconnect is not assumed: the client retries with bounded exponential backoff. The server allows local browser origins and HTTPS `*.sandbox.floot.app` origins, including Private Network Access preflight. Keep the service on loopback unless authentication and an explicit origin policy are added.
 
@@ -20,6 +20,11 @@ The UI registers the actual `nexus-ui` agent, heartbeats it every 15 seconds, fe
 - `GET` and `POST /api/tasks` list and submit tasks; `GET /api/tasks/:id` reads a task.
 - `POST /api/tasks/:id/claim` and `/lease` claim or lease work.
 - `GET /api/events` returns recent events as JSON. With `Accept: text/event-stream`, it streams new events over SSE.
+- `GET /api/search?q=...` performs DuckDuckGo web search and returns source URLs/snippets.
+- `POST /api/workspace/import` stores one file up to 10 MB in the configured workspace; path segments and executable/installer extensions are rejected, and existing files are not overwritten.
+- `GET /api/install/catalog`, `POST /api/install` and `GET /api/install/:id` expose the Windows `winget` allowlist and asynchronous operation status. Every start requires `confirmed: true`, and the endpoint rejects browser origins other than loopback. No arbitrary package IDs or shell commands are accepted.
+
+The browser exposes search, import and install controls. Installation is disabled when `winget` is missing; the runtime will not install the package manager or another app without the individual UI confirmation. This machine currently has no `winget`, so installation execution is not verified. Search and workspace import have been exercised against the live local runtime.
 
 The hub persists its task, agent and recent-event snapshot through its configured state file. Task leases prevent a second agent from claiming work while the current lease is active.
 
