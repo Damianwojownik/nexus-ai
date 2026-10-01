@@ -1,54 +1,53 @@
 import type { AgentCapability, AgentMessage, AgentResult, AgentTask } from './agentProtocol.ts';
 
-export interface AgentProviderContract {
-  id: string;
-  kind: 'primary' | 'local' | 'specialist';
+export type PrimaryAgentStatus = 'CONNECTED' | 'DISCONNECTED' | 'NOT_CONFIGURED' | 'ERROR';
+
+export interface PrimaryAgentAdapter {
   sendTask(task: AgentTask): Promise<AgentResult>;
   sendMessage(message: AgentMessage): Promise<AgentMessage>;
-  stream(taskId: string, onChunk: (chunk: string) => void): Promise<void>;
-  cancel(taskId: string): Promise<void>;
-  health(): Promise<{ status: 'online' | 'offline'; ok: boolean; message?: string }>;
-  capabilities(): Promise<AgentCapability[]>;
+  stream?(taskId: string, onChunk: (chunk: string) => void): Promise<void>;
+  cancel?(taskId: string): Promise<void>;
+  health(): Promise<{ status: PrimaryAgentStatus; ok: boolean; message?: string }>;
+  capabilities?(): Promise<AgentCapability[]>;
 }
 
-export class PrimaryAgentProvider implements AgentProviderContract {
+export class PrimaryAgentProvider {
   readonly id: string;
-  readonly kind: 'primary' | 'local' | 'specialist';
+  readonly kind = 'primary' as const;
 
-  constructor(id = 'primary-agent', kind: 'primary' | 'local' | 'specialist' = 'primary') {
+  constructor(id = 'primary-agent', private readonly adapter?: PrimaryAgentAdapter) {
     this.id = id;
-    this.kind = kind;
   }
 
-  async sendTask(task: AgentTask): Promise<AgentResult> {
-    return {
-      status: 'SUCCESS',
-      summary: `Task ${task.id} accepted by ${this.id}`,
-      payload: { task },
-    };
+  private requireAdapter(): PrimaryAgentAdapter {
+    if (!this.adapter) throw new Error('Primary agent is not configured. Connect an official provider bridge.');
+    return this.adapter;
   }
 
-  async sendMessage(message: AgentMessage): Promise<AgentMessage> {
-    return message;
+  sendTask(task: AgentTask) { return this.requireAdapter().sendTask(task); }
+  sendMessage(message: AgentMessage) { return this.requireAdapter().sendMessage(message); }
+
+  async stream(taskId: string, onChunk: (chunk: string) => void) {
+    const adapter = this.requireAdapter();
+    if (!adapter.stream) throw new Error('Primary agent streaming is not configured.');
+    await adapter.stream(taskId, onChunk);
   }
 
-  async stream(taskId: string, onChunk: (chunk: string) => void): Promise<void> {
-    onChunk(`Task ${taskId} is ready for streaming.`);
+  async cancel(taskId: string) {
+    await this.requireAdapter().cancel?.(taskId);
   }
 
-  async cancel(taskId: string): Promise<void> {
-    void taskId;
-  }
-
-  async health(): Promise<{ status: 'online' | 'offline'; ok: boolean; message?: string }> {
-    return { status: 'online', ok: true, message: `${this.id} is ready` };
+  async health(): Promise<{ status: PrimaryAgentStatus; ok: boolean; message?: string }> {
+    if (!this.adapter) return { status: 'NOT_CONFIGURED', ok: false, message: 'Official primary-agent bridge is not configured.' };
+    try {
+      return await this.adapter.health();
+    } catch (error: any) {
+      return { status: 'ERROR', ok: false, message: error?.message || 'Primary-agent health check failed' };
+    }
   }
 
   async capabilities(): Promise<AgentCapability[]> {
-    return [
-      { name: 'sendTask', description: 'Dispatch a work item to the primary provider', supported: true },
-      { name: 'sendMessage', description: 'Send a standard agent message', supported: true },
-      { name: 'stream', description: 'Stream updates from the provider', supported: true },
-    ];
+    if (!this.adapter) return [];
+    return this.adapter.capabilities?.() ?? [];
   }
 }
