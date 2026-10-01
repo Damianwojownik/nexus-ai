@@ -19,3 +19,10 @@
 .avatar[data-motion-state="listening"] .eye{height:3.8%}.avatar[data-motion-state="thinking"] .eyeLeft{transform:translate(var(--nexus-gaze-x,0),var(--nexus-gaze-y,0)) rotate(-3deg) scaleY(calc(1 - var(--nexus-blink,0) * .96))}.avatar[data-motion-state="thinking"] .eyeRight{transform:translate(var(--nexus-gaze-x,0),var(--nexus-gaze-y,0)) rotate(3deg) scaleY(calc(1 - var(--nexus-blink,0) * .96))}
 .avatar[data-motion-state="idle"] .faceRig{opacity:.58}.avatar[data-motion-state="speaking"] .faceRig{opacity:.82}
 @media(max-width:760px){.faceRig{opacity:.68}}
+
+/* Embodied motion: subtle torso/shoulder movement and listening nods. */
+.person{transform:rotate(var(--nexus-shoulder-sway,0deg)) translateY(calc(var(--nexus-breath,0) * -1.5px));will-change:transform}
+.avatar[data-motion-state="listening"] .person{transform:rotate(var(--nexus-shoulder-sway,0deg)) translateY(calc(var(--nexus-breath,0) * -1.5px)) perspective(800px) rotateX(var(--nexus-nod,0deg))}
+.avatar[data-motion-state="speaking"] .person{transform:rotate(var(--nexus-shoulder-sway,0deg)) translateY(calc(var(--nexus-breath,0) * -2px))}
+.avatar[data-motion-state="executing"] .person{transform:rotate(calc(var(--nexus-shoulder-sway,0deg) * .55)) translateY(calc(var(--nexus-breath,0) * -1px))}
+@media(prefers-reduced-motion:reduce){.person,.avatar,.orbit,.wave i{animation:none!important;transition:none!important}.faceRig{display:none}}
