@@ -10,6 +10,8 @@ import { MemoryStore } from '../helpers/memoryStore';
 import { ToolRegistry, registerDefaultTools } from '../helpers/toolRegistry';
 import { VoiceEventBus } from '../helpers/voiceEventBus';
 import { PrimaryAgentProvider } from '../helpers/primaryAgentProvider';
+import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
+import type { VoiceEventType } from '../helpers/agentProtocol';
 
 const ollamaClient = new OllamaClient();
 const memoryStore = new MemoryStore();
@@ -39,6 +41,9 @@ export default function Home() {
   const [response,setResponse]=useState('');
   const [isThinking,setIsThinking]=useState(false);
   const recognitionRef=useRef<any>(null);
+  const avatarRef=useRef<HTMLDivElement | null>(null);
+  const motionStateRef=useRef<VoiceEventType>('IDLE');
+  const speechStartedAtRef=useRef(0);
 
   useEffect(()=>{
     const saved=localStorage.getItem('nexus-avatar');
@@ -62,6 +67,37 @@ export default function Home() {
       setMemoryReady(true);
       setAgentCount(1);
     })();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = voiceEventBus.subscribe((event) => {
+      motionStateRef.current = event.type as VoiceEventType;
+      if (event.type === 'SPEAKING') speechStartedAtRef.current = performance.now();
+    });
+
+    let frameId = 0;
+    const animate = (nowMs: number) => {
+      const state = motionStateRef.current;
+      const speakingNow = state === 'SPEAKING';
+      const speechPhase = Math.max(0, nowMs - speechStartedAtRef.current) / 1000;
+      const speechEnergy = speakingNow
+        ? 0.35 + 0.35 * Math.abs(Math.sin(speechPhase * 11.7)) + 0.2 * Math.abs(Math.sin(speechPhase * 6.1 + 0.7))
+        : 0;
+      const frame = createAvatarMotionFrame({ state, nowMs, speechEnergy });
+      const node = avatarRef.current;
+      if (node) {
+        const vars = avatarMotionCssVars(frame);
+        Object.entries(vars).forEach(([name, value]) => node.style.setProperty(name, value));
+        node.style.transform = `perspective(900px) rotateX(\${frame.headY.toFixed(2)}deg) rotateY(\${frame.headX.toFixed(2)}deg) translateY(\${(frame.breath * 1.5).toFixed(2)}px) scale(\${(1 + frame.breath * 0.003).toFixed(4)})`;
+        node.style.transformOrigin = '50% 58%';
+        node.style.willChange = 'transform';
+        node.dataset.motionState = state.toLowerCase();
+        node.dataset.expression = frame.expression;
+      }
+      frameId = requestAnimationFrame(animate);
+    };
+    frameId = requestAnimationFrame(animate);
+    return () => { unsubscribe(); cancelAnimationFrame(frameId); };
   }, []);
 
   const emitVoiceEvent = (type: 'LISTENING' | 'THINKING' | 'SPEAKING' | 'EXECUTING' | 'INTERRUPTED' | 'ERROR' | 'IDLE', message: string) => {
@@ -127,7 +163,7 @@ export default function Home() {
     </aside>
     <section className={styles.main}><header><div><span className={styles.dot}/> Agent online</div><div className={styles.model}>AUTO · lokalny / chmura</div></header>
       <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
-        <div className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name}/><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
+        <div ref={avatarRef} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name}/><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div><div className={styles.status}>{status}</div>
         <div className={styles.composer}><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder="Np. Zbuduj aplikację do rezerwacji wizyt…"/><Button onClick={run} aria-label="Wyślij"><Send size={18}/></Button></div>
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button><Button variant="secondary" onClick={()=>speak('Jestem Nexus. Słyszę Cię i jestem gotowy do rozmowy.')}><Volume2 size={18}/> Test głosu</Button></div>
