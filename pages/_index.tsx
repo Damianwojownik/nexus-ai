@@ -57,6 +57,7 @@ export default function Home() {
   const avatarRef=useRef<HTMLDivElement | null>(null);
   const motionStateRef=useRef<VoiceEventType>('IDLE');
   const speechStartedAtRef=useRef(0);
+  const speechBoundaryRef=useRef({at:0,intensity:0});
   const pointerRef=useRef({x:0,y:0});
 
   useEffect(()=>{
@@ -204,8 +205,10 @@ export default function Home() {
       const state = motionStateRef.current;
       const speakingNow = state === 'SPEAKING';
       const speechPhase = Math.max(0, nowMs - speechStartedAtRef.current) / 1000;
+      const boundaryAge = Math.max(0, nowMs - speechBoundaryRef.current.at);
+      const boundaryPulse = boundaryAge < 180 ? speechBoundaryRef.current.intensity * (1 - boundaryAge / 180) : 0;
       const speechEnergy = speakingNow
-        ? 0.35 + 0.35 * Math.abs(Math.sin(speechPhase * 11.7)) + 0.2 * Math.abs(Math.sin(speechPhase * 6.1 + 0.7))
+        ? Math.min(1, 0.18 + boundaryPulse + 0.22 * Math.abs(Math.sin(speechPhase * 9.7)) + 0.12 * Math.abs(Math.sin(speechPhase * 5.3 + 0.7)))
         : 0;
       const frame = createAvatarMotionFrame({ state, nowMs, speechEnergy });
       frame.gazeX += pointerRef.current.x * 2.2;
@@ -239,7 +242,8 @@ export default function Home() {
     window.speechSynthesis.cancel();
     const u=new SpeechSynthesisUtterance(text);
     u.lang='pl-PL'; u.rate=.96;
-    u.onstart=()=>{setSpeaking(true);setStatus('Nexus mówi…')};
+    u.onstart=()=>{speechStartedAtRef.current=performance.now();setSpeaking(true);setStatus('Nexus mówi…')};
+    u.onboundary=(event:any)=>{const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
     u.onend=()=>{setSpeaking(false); emitVoiceEvent('IDLE', 'Nexus ready'); setStatus('Gotowy do rozmowy')};
     window.speechSynthesis.speak(u);
   };
