@@ -10,61 +10,114 @@ import type {
   AgentTaskStatus,
 } from './agentProtocol.ts';
 
-export interface AgentHubOptions {
+export interface AgentRegistration {
   agentId: string;
   kind: AgentKind;
   capabilities: string[];
   presence?: AgentPresenceStatus;
 }
 
+export interface AgentHubOptions {
+  stateFilePath?: string;
+}
+
 export class AgentHub {
   private readonly tasks = new Map<string, AgentTask>();
   private readonly eventLog: AgentEvent[] = [];
-  private readonly agentId: string;
-  private readonly kind: AgentKind;
-  private readonly capabilities: string[];
-  private presence: AgentPresenceStatus;
+  private readonly agents = new Map<string, AgentRegistration & { lastHeartbeat: string }>();
+  private readonly listeners = new Set<(event: AgentEvent) => void>();
+  private readonly stateFilePath: string;
+  private ready: Promise<void>;
 
-  constructor(options: AgentHubOptions) {
-    this.agentId = options.agentId;
-    this.kind = options.kind;
-    this.capabilities = options.capabilities;
-    this.presence = options.presence ?? 'online';
+  constructor(options: AgentHubOptions = {}) {
+    this.stateFilePath = options.stateFilePath ?? `${process.cwd()}/.nexus-agent-state.json`;
+    this.ready = this.loadState();
   }
 
-  getPresence(): AgentPresence {
-    return {
-      agentId: this.agentId,
-      status: this.presence,
-      capabilities: this.capabilities,
-      heartbeatAt: new Date().toISOString(),
-      connected: this.presence !== 'offline',
-    };
+  private async loadState(): Promise<void> {
+    try {
+      const fs = await import('node:fs/promises');
+      const raw = await fs.readFile(this.stateFilePath, 'utf8');
+      if (!raw.trim()) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.tasks)) {
+        for (const task of parsed.tasks) this.tasks.set(task.id, task as AgentTask);
+      }
+      if (Array.isArray(parsed.events)) {
+        for (const event of parsed.events) this.eventLog.push(event as AgentEvent);
+      }
+      if (Array.isArray(parsed.agents)) {
+        for (const agent of parsed.agents) this.agents.set(agent.agentId, { ...agent, lastHeartbeat: agent.lastHeartbeat ?? new Date().toISOString() });
+      }
+    } catch {
+      // state file may not exist yet; ignore and continue
+    }
   }
 
-  heartbeat(): AgentPresence {
-    this.presence = 'online';
-    return this.getPresence();
+  private async persistState(): Promise<void> {
+    try {
+      const fs = await import('node:fs/promises');
+      const snapshot = {
+        tasks: [...this.tasks.values()],
+        events: this.eventLog.slice(0, 50),
+        agents: [...this.agents.values()],
+      };
+      await fs.writeFile(this.stateFilePath, JSON.stringify(snapshot, null, 2));
+    } catch {
+      // keep runtime working even if persistence is unavailable
+    }
   }
 
-  setPresence(status: AgentPresenceStatus) {
-    this.presence = status;
-    this.logEvent('IDLE', this.agentId, `Presence changed to ${status}`);
+  subscribe(listener: (event: AgentEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
-  logEvent(type: AgentEvent['type'], agentId: string, message: string, taskId?: string, metadata?: Record<string, unknown>) {
-    const event = createAgentEvent(type, agentId, message, taskId, metadata);
+  private emit(event: AgentEvent): AgentEvent {
     this.eventLog.unshift(event);
+    this.listeners.forEach((listener) => listener(event));
+    void this.persistState();
     return event;
   }
 
-  getEventLog(limit = 20): AgentEvent[] {
-    return this.eventLog.slice(0, limit);
+  async registerAgent(agent: AgentRegistration): Promise<AgentRegistration & { lastHeartbeat: string }> {
+    await this.ready;
+    const item = { ...agent, presence: agent.presence ?? 'online', lastHeartbeat: new Date().toISOString() };
+    this.agents.set(agent.agentId, item);
+    this.emit(createAgentEvent('IDLE', agent.agentId, `Agent registered: ${agent.kind}`));
+    await this.persistState();
+    return item;
   }
 
-  submitTask(task: AgentTask): AgentTask {
+  async heartbeat(agentId: string): Promise<AgentPresence> {
+    await this.ready;
+    const agent = this.agents.get(agentId);
+    const status = agent?.presence ?? 'online';
+    const presence: AgentPresence = {
+      agentId,
+      status,
+      capabilities: agent?.capabilities ?? [],
+      heartbeatAt: new Date().toISOString(),
+      connected: status !== 'offline',
+    };
+
+    if (agent) {
+      agent.lastHeartbeat = presence.heartbeatAt;
+    }
+    this.emit(createAgentEvent('IDLE', agentId, 'Heartbeat', undefined, { status }));
+    return presence;
+  }
+
+  async getAgents(): Promise<Array<AgentRegistration & { lastHeartbeat: string }>> {
+    await this.ready;
+    return [...this.agents.values()];
+  }
+
+  async submitTask(task: AgentTask): Promise<AgentTask> {
+    await this.ready;
     this.tasks.set(task.id, task);
-    this.logEvent('EXECUTING', task.assignedTo, `Task accepted: ${task.goal}`, task.id, { scope: task.scope });
+    this.emit(createAgentEvent('DELEGATING', task.assignedTo, `Task submitted: ${task.goal}`, task.id, { scope: task.scope }));
+    await this.persistState();
     return task;
   }
 
@@ -77,7 +130,7 @@ export class AgentHub {
     return status ? tasks.filter((task) => task.status === status) : tasks;
   }
 
-  updateTask(taskId: string, patch: Partial<AgentTask>): AgentTask | undefined {
+  async updateTask(taskId: string, patch: Partial<AgentTask>): Promise<AgentTask | undefined> {
     const task = this.tasks.get(taskId);
     if (!task) return undefined;
 
@@ -87,79 +140,125 @@ export class AgentHub {
       updatedAt: new Date().toISOString(),
     };
     this.tasks.set(taskId, next);
+    await this.persistState();
     return next;
   }
 
-  leaseTask(taskId: string, owner: string, ttlMs = 300000): AgentTask | undefined {
-    const task = this.getTask(taskId);
+  async claimTask(taskId: string, agentId: string): Promise<AgentTask | undefined> {
+    await this.ready;
+    const task = this.tasks.get(taskId);
     if (!task) return undefined;
+    if (task.status === 'DONE') return task;
 
-    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
-    const next = this.updateTask(taskId, {
-      assignedTo: owner,
-      lease: { owner, expiresAt },
+    const activeLease = task.lease && new Date(task.lease.expiresAt).getTime() > Date.now();
+    if (activeLease && task.lease?.owner !== agentId) {
+      return undefined;
+    }
+
+    const updated = await this.updateTask(taskId, {
+      assignedTo: agentId,
       status: 'WORKING',
+      progress: Math.max(task.progress ?? 0, 10),
+      attempt: (task.attempt ?? 0) + 1,
+      lease: { owner: agentId, expiresAt: new Date(Date.now() + 300000).toISOString() },
     });
-    this.logEvent('EXECUTING', owner, `Task leased: ${task.goal}`, taskId, { expiresAt });
+    this.emit(createAgentEvent('EXECUTING', agentId, `Task claimed: ${task.goal}`, taskId));
+    return updated;
+  }
+
+  async leaseTask(taskId: string, owner: string, ttlMs = 300000): Promise<AgentTask | undefined> {
+    await this.ready;
+    const task = this.tasks.get(taskId);
+    if (!task) return undefined;
+    if (task.lease && task.lease.owner !== owner && new Date(task.lease.expiresAt).getTime() > Date.now()) {
+      return undefined;
+    }
+    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+    const next = await this.updateTask(taskId, {
+      assignedTo: owner,
+      status: 'WORKING',
+      lease: { owner, expiresAt },
+    });
+    this.emit(createAgentEvent('EXECUTING', owner, `Task leased: ${task.goal}`, taskId, { expiresAt }));
     return next;
   }
 
-  transferTask(taskId: string, nextOwner: string): AgentTask | undefined {
-    const task = this.getTask(taskId);
-    if (!task) return undefined;
+  async expireLeases(): Promise<AgentTask[]> {
+    await this.ready;
+    const expired: AgentTask[] = [];
+    for (const task of this.tasks.values()) {
+      if (task.lease && new Date(task.lease.expiresAt).getTime() <= Date.now()) {
+        const refreshed = await this.updateTask(task.id, {
+          status: 'BLOCKED',
+          error: 'Lease expired',
+          lease: null,
+        });
+        if (refreshed) expired.push(refreshed);
+      }
+    }
+    return expired;
+  }
 
-    this.logEvent('EXECUTING', nextOwner, `Task reassigned from ${task.assignedTo} to ${nextOwner}`, taskId);
-    return this.updateTask(taskId, {
+  async transferTask(taskId: string, nextOwner: string): Promise<AgentTask | undefined> {
+    const task = this.tasks.get(taskId);
+    if (!task) return undefined;
+    const next = await this.updateTask(taskId, {
       assignedTo: nextOwner,
       status: 'TODO',
       lease: null,
     });
+    this.emit(createAgentEvent('DELEGATING', nextOwner, `Task transferred from ${task.assignedTo} to ${nextOwner}`, taskId));
+    return next;
   }
 
-  completeTask(taskId: string, result: AgentResult): AgentTask | undefined {
-    const task = this.getTask(taskId);
+  async completeTask(taskId: string, result: AgentResult): Promise<AgentTask | undefined> {
+    const task = this.tasks.get(taskId);
     if (!task) return undefined;
-
-    const next = this.updateTask(taskId, {
+    const next = await this.updateTask(taskId, {
       status: 'DONE',
+      progress: 100,
       result,
       error: undefined,
       lease: null,
     });
-    this.logEvent('SPEAKING', task.assignedTo, `Task complete: ${result.summary}`, taskId, { result });
+    this.emit(createAgentEvent('SPEAKING', task.assignedTo, `Task complete: ${result.summary}`, taskId, { result }));
     return next;
   }
 
-  failTask(taskId: string, error: string): AgentTask | undefined {
-    const task = this.getTask(taskId);
+  async failTask(taskId: string, error: string): Promise<AgentTask | undefined> {
+    const task = this.tasks.get(taskId);
     if (!task) return undefined;
-
-    const next = this.updateTask(taskId, {
+    const next = await this.updateTask(taskId, {
       status: 'BLOCKED',
       error,
+      lease: null,
     });
-    this.logEvent('ERROR', task.assignedTo, `Task blocked: ${error}`, taskId, { error });
+    this.emit(createAgentEvent('ERROR', task.assignedTo, `Task blocked: ${error}`, taskId, { error }));
     return next;
   }
 
-  cancelTask(taskId: string): AgentTask | undefined {
-    const task = this.getTask(taskId);
+  async cancelTask(taskId: string): Promise<AgentTask | undefined> {
+    const task = this.tasks.get(taskId);
     if (!task) return undefined;
-
-    const next = this.updateTask(taskId, {
+    const next = await this.updateTask(taskId, {
       status: 'BLOCKED',
       error: 'Cancelled by owner',
       lease: null,
     });
-    this.logEvent('INTERRUPTED', this.agentId, `Task cancelled: ${task.goal}`, taskId);
+    this.emit(createAgentEvent('INTERRUPTED', task.assignedTo, `Task cancelled: ${task.goal}`, taskId));
     return next;
   }
 
+  getEventLog(limit = 20): AgentEvent[] {
+    return this.eventLog.slice(0, limit);
+  }
+
   capabilities(): AgentCapability[] {
-    return this.capabilities.map((name) => ({
-      name,
-      description: `Agent capability: ${name}`,
-      supported: true,
-    }));
+    return [
+      { name: 'presence', description: 'Presence updates', supported: true },
+      { name: 'task-submit', description: 'Submit and assign work', supported: true },
+      { name: 'task-lease', description: 'Lease and transfer tasks', supported: true },
+      { name: 'events', description: 'Event stream and log', supported: true },
+    ];
   }
 }

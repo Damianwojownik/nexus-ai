@@ -52,15 +52,27 @@ export class NexusAgent {
     const responseText = await this.router.route(prompt, { temperature: 0.2 });
 
     await this.memoryStore.saveMemory({
+      kind: 'conversation',
       text: input.text,
       category: 'user-turn',
       tags: ['user', 'conversation'],
+      owner: 'nexus',
+      scope: 'chat',
+      source: 'user-input',
+      relevance: 0.6,
+      sensitive: false,
     });
 
     await this.memoryStore.saveMemory({
+      kind: 'conversation',
       text: responseText,
       category: 'assistant-turn',
       tags: ['assistant', 'conversation'],
+      owner: 'nexus',
+      scope: 'chat',
+      source: 'agent-output',
+      relevance: 0.7,
+      sensitive: false,
     });
 
     return {

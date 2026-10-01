@@ -1,8 +1,9 @@
 export type AgentTaskStatus = 'TODO' | 'WORKING' | 'BLOCKED' | 'DONE';
 export type AgentPresenceStatus = 'online' | 'offline' | 'busy';
-export type AgentKind = 'orchestrator' | 'codex' | 'ollama' | 'reviewer' | 'researcher' | 'tool';
+export type AgentKind = 'orchestrator' | 'primary' | 'codex' | 'ollama' | 'reviewer' | 'researcher' | 'memory' | 'tool';
 export type AgentMessageType = 'message' | 'task' | 'event' | 'result';
-export type VoiceEventType = 'LISTENING' | 'THINKING' | 'SPEAKING' | 'EXECUTING' | 'INTERRUPTED' | 'ERROR' | 'IDLE';
+export type VoiceEventType = 'IDLE' | 'LISTENING' | 'THINKING' | 'DELEGATING' | 'EXECUTING' | 'SPEAKING' | 'INTERRUPTED' | 'ERROR';
+export type AgentPriority = 'low' | 'normal' | 'high' | 'critical';
 
 export interface AgentCapability {
   name: string;
@@ -48,8 +49,11 @@ export interface AgentTask {
     owner: string;
     expiresAt: string;
   } | null;
+  progress: number;
   result?: AgentResult;
   error?: string;
+  attempt: number;
+  priority: AgentPriority;
 }
 
 export interface AgentEvent {
@@ -77,8 +81,11 @@ export function createTask(params: Partial<AgentTask> & Pick<AgentTask, 'goal' |
     createdAt: params.createdAt ?? now,
     updatedAt: params.updatedAt ?? now,
     lease: params.lease ?? null,
+    progress: params.progress ?? 0,
     result: params.result,
     error: params.error,
+    attempt: params.attempt ?? 0,
+    priority: params.priority ?? 'normal',
   };
 }
 

@@ -1,8 +1,10 @@
 export type AIModelMode = 'LOCAL' | 'AUTO' | 'CLOUD';
+export type ProviderRole = 'PRIMARY_ORCHESTRATOR' | 'SUBAGENT';
 
 export interface ModelProvider {
   readonly name: string;
   readonly mode: AIModelMode;
+  readonly role: ProviderRole;
   generate(prompt: string, options?: Record<string, any>): Promise<string>;
   checkHealth(): Promise<{ status: 'CONNECTED' | 'OFFLINE' | 'NO_MODEL' | 'ERROR'; model?: string; error?: string; models?: any[] }>;
   listModels(): Promise<any[]>;
@@ -11,6 +13,7 @@ export interface ModelProvider {
 export class OllamaProvider implements ModelProvider {
   readonly name = 'Ollama';
   readonly mode: AIModelMode = 'LOCAL';
+  readonly role: ProviderRole = 'SUBAGENT';
 
   private client: any;
 
@@ -34,14 +37,20 @@ export class OllamaProvider implements ModelProvider {
 export class ModelRouter {
   private providers: ModelProvider[];
   private preferredMode: AIModelMode;
+  private primaryProvider?: ModelProvider;
 
-  constructor(preferredMode: AIModelMode = 'AUTO', providers: ModelProvider[] = []) {
+  constructor(preferredMode: AIModelMode = 'AUTO', providers: ModelProvider[] = [], primaryProvider?: ModelProvider) {
     this.preferredMode = preferredMode;
     this.providers = providers;
+    this.primaryProvider = primaryProvider;
   }
 
   setPreferredMode(mode: AIModelMode) {
     this.preferredMode = mode;
+  }
+
+  setPrimaryProvider(provider: ModelProvider) {
+    this.primaryProvider = provider;
   }
 
   register(provider: ModelProvider) {
@@ -50,14 +59,21 @@ export class ModelRouter {
 
   async route(prompt: string, options: Record<string, any> = {}) {
     if (this.preferredMode === 'LOCAL') {
-      const provider = this.providers.find((p) => p.name === 'Ollama');
-      if (!provider) throw new Error('Ollama provider is not registered.');
+      const provider = this.providers.find((p) => p.name === 'Ollama' || p.role === 'SUBAGENT');
+      if (!provider) throw new Error('Local provider is not registered.');
       return provider.generate(prompt, options);
     }
 
-    const localProvider = this.providers.find((p) => p.name === 'Ollama');
+    const localProvider = this.providers.find((p) => p.name === 'Ollama' || p.role === 'SUBAGENT');
     if (!localProvider) {
       throw new Error('No provider available.');
+    }
+
+    if (this.primaryProvider && this.preferredMode === 'AUTO') {
+      const primaryHealth = await this.primaryProvider.checkHealth();
+      if (primaryHealth.status === 'CONNECTED') {
+        return this.primaryProvider.generate(prompt, options);
+      }
     }
 
     const health = await localProvider.checkHealth();

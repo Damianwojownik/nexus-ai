@@ -7,14 +7,17 @@ import { OllamaClient } from '../helpers/ollamaClient';
 import { OllamaProvider, ModelRouter, AIModelMode } from '../helpers/modelRouter';
 import { NexusAgent } from '../helpers/nexusAgent';
 import { MemoryStore } from '../helpers/memoryStore';
-import { ToolRegistry } from '../helpers/toolRegistry';
+import { ToolRegistry, registerDefaultTools } from '../helpers/toolRegistry';
 import { VoiceEventBus } from '../helpers/voiceEventBus';
+import { PrimaryAgentProvider } from '../helpers/primaryAgentProvider';
 
 const ollamaClient = new OllamaClient();
 const memoryStore = new MemoryStore();
 const toolRegistry = new ToolRegistry();
+registerDefaultTools(toolRegistry);
 const ollamaProvider = new OllamaProvider(ollamaClient);
-const modelRouter = new ModelRouter('AUTO', [ollamaProvider]);
+const primaryProvider = new PrimaryAgentProvider({ id: 'chatgpt-primary', name: 'chatgpt-primary' });
+const modelRouter = new ModelRouter('AUTO', [ollamaProvider], ollamaProvider);
 const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
   systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
 });
@@ -30,6 +33,9 @@ export default function Home() {
   const [aiMode,setAiMode]=useState<AIModelMode>('AUTO');
   const [selectedModel,setSelectedModel]=useState<string>(ollamaClient.defaultModel);
   const [ollamaStatus,setOllamaStatus]=useState<'CONNECTED'|'OFFLINE'|'NO_MODEL'|'ERROR'>('OFFLINE');
+  const [primaryStatus,setPrimaryStatus]=useState<'CONNECTED'|'DISCONNECTED'|'NOT_CONFIGURED'|'ERROR'>('NOT_CONFIGURED');
+  const [memoryReady,setMemoryReady]=useState(false);
+  const [agentCount,setAgentCount]=useState(1);
   const [response,setResponse]=useState('');
   const [isThinking,setIsThinking]=useState(false);
   const recognitionRef=useRef<any>(null);
@@ -50,6 +56,11 @@ export default function Home() {
         setSelectedModel(health.model);
         setStatus(`Ollama — połączono (${health.model})`);
       }
+
+      const primaryHealth = await primaryProvider.health();
+      setPrimaryStatus(primaryHealth.status);
+      setMemoryReady(true);
+      setAgentCount(1);
     })();
   }, []);
 
@@ -120,6 +131,13 @@ export default function Home() {
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div><div className={styles.status}>{status}</div>
         <div className={styles.composer}><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder="Np. Zbuduj aplikację do rezerwacji wizyt…"/><Button onClick={run} aria-label="Wyślij"><Send size={18}/></Button></div>
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button><Button variant="secondary" onClick={()=>speak('Jestem Nexus. Słyszę Cię i jestem gotowy do rozmowy.')}><Volume2 size={18}/> Test głosu</Button></div>
+      </div>
+      <div className={styles.settingsPanel}>
+        <h3>NEXUS</h3>
+        <div className={styles.settingsRow}><span>Primary Agent</span><strong>{primaryStatus}</strong></div>
+        <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama • {selectedModel || 'not selected'}</strong></div>
+        <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady ? 'ready' : 'loading'}</strong></div>
+        <div className={styles.settingsRow}><span>Agents</span><strong>{agentCount} online</strong></div>
       </div>
       <div className={styles.cards}><article><Brain/><div><b>Pamięć projektu</b><span>kontekst, decyzje, pliki</span></div><strong>ON</strong></article><article><Code2/><div><b>Agent Builder</b><span>kod → test → poprawka</span></div><strong>READY</strong></article><article><Play/><div><b>Podgląd aplikacji</b><span>uruchomienie na żywo</span></div><strong>LOCAL</strong></article></div>
       <div className={styles.characterBar}><b>Wybierz postać</b><div className={styles.characterList}>{avatars.map((a,i)=><button key={a.name} onClick={()=>chooseAvatar(i)} className={i===avatar?styles.selected:''}><img src={a.src} alt={a.name}/><span>{a.name}</span></button>)}</div></div>
