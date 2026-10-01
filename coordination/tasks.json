@@ -6,7 +6,10 @@
       "owner": "codex",
       "status": "DONE",
       "scope": "Ollama provider, local bridge, model router, UI wiring and tests",
-      "avoidPaths": ["docs/AGENT-HUB.md", "coordination/tasks.json"]
+      "avoidPaths": [
+        "docs/AGENT-HUB.md",
+        "coordination/tasks.json"
+      ]
     },
     {
       "id": "floot-sync",
@@ -17,10 +20,28 @@
     },
     {
       "id": "agent-hub-runtime",
-      "owner": "unassigned",
-      "status": "TODO",
+      "owner": "codex",
+      "status": "WORKING",
       "scope": "Real-time agent coordination API/WebSocket, leases, presence and event log",
-      "dependsOn": ["ollama-integration", "floot-sync"]
+      "dependsOn": [
+        "ollama-integration",
+        "floot-sync"
+      ]
+    },
+    {
+      "id": "avatar-motion-runtime",
+      "owner": "chatgpt",
+      "status": "WORKING",
+      "scope": "Embodied avatar motion runtime and voice-state animation signals; avoid Agent Hub server/runtime paths",
+      "dependsOn": [
+        "floot-sync"
+      ],
+      "avoidPaths": [
+        "helpers/agentHub.ts",
+        "helpers/agentHubServer.ts",
+        "helpers/agentHubStore.ts",
+        "coordination/tasks.json"
+      ]
     }
   ]
 }
