@@ -33,15 +33,22 @@ export function createAvatarMotionFrame(input: AvatarMotionInput): AvatarMotionF
   const breath = Math.sin(t * Math.PI * 0.45);
   const headAmplitude = listening ? 1.4 : speaking ? 1.1 : thinking ? 0.7 : 0.45;
   const gazeAmplitude = listening ? 1.8 : thinking ? 1.2 : 0.6;
-  const blinkPhase = (input.nowMs % 4300) / 4300;
-  const blink = blinkPhase > 0.965 ? Math.sin(((blinkPhase - 0.965) / 0.035) * Math.PI) : 0;
+  // Two incommensurate cycles avoid a robotic fixed blink cadence; an occasional
+  // second blink creates a more human double-blink without randomness in tests.
+  const blinkPhase = (input.nowMs % 4870) / 4870;
+  const microPhase = (input.nowMs % 11270) / 11270;
+  const primaryBlink = blinkPhase > 0.958 ? Math.sin(((blinkPhase - 0.958) / 0.042) * Math.PI) : 0;
+  const doubleBlink = microPhase > 0.973 && microPhase < 0.986
+    ? Math.sin(((microPhase - 0.973) / 0.013) * Math.PI)
+    : 0;
+  const blink = clamp(Math.max(primaryBlink, doubleBlink));
   const mouthOpen = speaking ? clamp(input.visemeOpen ?? (0.18 + energy * 0.82)) : 0;
 
   return {
     state: input.state,
     breath,
-    headX: Math.sin(t * 0.73) * headAmplitude,
-    headY: Math.sin(t * 0.51 + 0.8) * headAmplitude * 0.55,
+    headX: (Math.sin(t * 0.73) + 0.22 * Math.sin(t * 0.19 + 1.7)) * headAmplitude,
+    headY: (Math.sin(t * 0.51 + 0.8) + 0.18 * Math.sin(t * 0.23)) * headAmplitude * 0.55,
     gazeX: Math.sin(t * 0.39 + 1.4) * gazeAmplitude,
     gazeY: Math.sin(t * 0.31) * gazeAmplitude * 0.55,
     blink,
