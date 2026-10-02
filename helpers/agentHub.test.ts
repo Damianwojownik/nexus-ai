@@ -500,6 +500,31 @@ test('model router falls back to free local Ollama when primary is unavailable o
   assert.match(await withExhaustedPrimary.route('hello'), /^local:/);
 });
 
+test('model router keeps CLOUD strict while AUTO falls back to local', async () => {
+  const localProvider = {
+    name: 'Ollama',
+    mode: 'LOCAL' as const,
+    role: 'SUBAGENT' as const,
+    async generate() { return 'local-ok'; },
+    async checkHealth() { return { status: 'CONNECTED' as const, model: 'llama3.2' }; },
+    async listModels() { return [{ name: 'llama3.2' }]; },
+  };
+  const brokenCloud = {
+    name: 'cloud-primary',
+    mode: 'CLOUD' as const,
+    role: 'PRIMARY_ORCHESTRATOR' as const,
+    async generate() { throw new Error('quota exhausted'); },
+    async checkHealth() { return { status: 'CONNECTED' as const }; },
+    async listModels() { return []; },
+  };
+
+  const auto = new ModelRouter('AUTO', [localProvider], brokenCloud);
+  assert.equal(await auto.route('hello'), 'local-ok');
+
+  const cloudOnly = new ModelRouter('CLOUD', [localProvider], brokenCloud);
+  await assert.rejects(() => cloudOnly.route('hello'), /Cloud provider is not configured or unavailable/);
+});
+
 test('tool registry enforces safe execution boundaries', async () => {
   const registry = new ToolRegistry();
   registerDefaultTools(registry);
