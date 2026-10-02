@@ -1,0 +1,41 @@
+version: 1
+profiles:
+  gateway:
+    purpose: api-orchestrator
+    cpu: "2 vCPU"
+    ram: "4 GB"
+    gpu: null
+    autoscale: true
+  realtime-face:
+    purpose: "FasterLivePortrait + MuseTalk"
+    recommended_gpu: "NVIDIA T4 / L4"
+    minimum_vram_gb: 8
+    preferred_vram_gb: 16
+    persistent_model_cache_gb: 40
+    autoscale: true
+  full-body:
+    purpose: "EchoMimic-class full body animation"
+    recommended_gpu: "NVIDIA L4 / A10 / A100"
+    minimum_vram_gb: 12
+    preferred_vram_gb: 24
+    persistent_model_cache_gb: 80
+    autoscale: true
+  video-edit:
+    purpose: "style / subject / background / try-on"
+    recommended_gpu: "NVIDIA A10 / A100"
+    minimum_vram_gb: 16
+    preferred_vram_gb: 24
+    persistent_model_cache_gb: 120
+    autoscale: false
+
+routing:
+  talking_head:
+    primary: liveportrait
+    enhancer: musetalk
+  full_body:
+    primary: echomimic
+  editing:
+    primary: editor
+  fallback:
+    local_client: true
+    vidu_optional_benchmark: true
