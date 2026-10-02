@@ -25,8 +25,11 @@ function cleanBase64(value: string): string {
   return comma >= 0 && value.slice(0, comma).includes('base64') ? value.slice(comma + 1) : value;
 }
 
-function decodeBase64(value: string): Uint8Array {
-  return Uint8Array.from(Buffer.from(cleanBase64(value), 'base64'));
+function decodeBase64(value: string): ArrayBuffer {
+  const bytes = Buffer.from(cleanBase64(value), 'base64');
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 export class SelfHostedAvatarServerClient {
