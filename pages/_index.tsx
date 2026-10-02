@@ -16,6 +16,7 @@ import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
 import { LocalCapabilitiesClient } from '../helpers/localCapabilitiesClient';
+import { ConnectorClient } from '../helpers/connectorClient';
 import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
 import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
@@ -34,7 +35,8 @@ const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
 const voiceEventBus = new VoiceEventBus();
 const agentHubClient = new AgentHubClient();
 const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
-const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
+const connectorClient = new ConnectorClient(agentHubClient.baseUrl);
+const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient, connectorClient);
 
 export default function Home() {
   const avatars=[{name:'Kosmiczny',src:'/_cdn/static/8c1cadbc-855e-4488-a72b-e88cb715d899.png'},{name:'Luna',src:'/_cdn/static/cc2dde88-daa2-48c9-acc8-1ea16f85990d.png'},{name:'Kai',src:'/_cdn/static/6a74b8c4-e09a-4776-a01a-156edac8441f.png'},{name:'Nova',src:'/_cdn/static/364da496-a271-4b0c-b40e-e23f14fad3a2.png'},{name:'Orbit',src:'/_cdn/static/17f6bda3-9fc8-4e2d-9b46-fec5fc2d91d4.png'},{name:'Void',src:'/_cdn/static/2405769f-a406-4390-9af2-8b74c0fda46c.png'}];
@@ -52,6 +54,7 @@ export default function Home() {
   const [hubTasks,setHubTasks]=useState<Array<Awaited<ReturnType<AgentHubClient['getTasks']>>[number]>>([]);
   const [hubEvents,setHubEvents]=useState<AgentEvent[]>([]);
   const [hubError,setHubError]=useState('');
+  const [connectors,setConnectors]=useState<Array<Awaited<ReturnType<ConnectorClient['health']>>[number]>>([]);
   const [workflowProgress,setWorkflowProgress]=useState<NexusWorkflowProgress|null>(null);
   const [approvalRequest,setApprovalRequest]=useState<NexusApprovalRequest|null>(null);
   const [approvalBusy,setApprovalBusy]=useState(false);
@@ -89,6 +92,11 @@ export default function Home() {
 
       const primaryHealth = await cloudProvider.checkHealth();
       setPrimaryStatus(primaryHealth.status === 'CONNECTED' ? 'CONNECTED' : primaryHealth.status === 'ERROR' ? 'ERROR' : primaryHealth.status === 'OFFLINE' ? 'DISCONNECTED' : 'NOT_CONFIGURED');
+      try {
+        setConnectors(await connectorClient.health());
+      } catch {
+        setConnectors([]);
+      }
       setMemoryReady(true);
     })();
   }, []);
@@ -351,7 +359,7 @@ export default function Home() {
         <input ref={attachmentInputRef} type="file" multiple hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.xlsx,.pptx" onChange={event=>{addAttachments(event.target.files);event.currentTarget.value=''}}/>
         {attachments.length>0&&<div className={styles.attachmentList}>{attachments.map((file,index)=><span key={`${file.name}-${index}`} className={styles.attachmentChip}>{file.name}<button type="button" aria-label={`Usuń ${file.name}`} onClick={()=>setAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))}>×</button></span>)}</div>}
         <div className={styles.composer}><Button variant="secondary" onClick={()=>attachmentInputRef.current?.click()} aria-label="Dodaj załączniki"><Plus size={18}/> Dodaj</Button><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&run()} placeholder="Powiedz Nexusowi, co chcesz osiągnąć…"/><Button onClick={run} disabled={isThinking||(!prompt.trim()&&!attachments.length)} aria-label="Wyślij"><Send size={18}/></Button></div>
-        {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
+        {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':approvalRequest.kind==='CONNECTOR_TOOL'?'Zatwierdź akcję':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button></div>
       </div>
       <details className={styles.nexusDetails}>
@@ -368,11 +376,13 @@ export default function Home() {
             <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama · {selectedModel} · {ollamaStatus}</strong></div>
             <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady?'ready':'loading'}</strong></div>
             <div className={styles.settingsRow}><span>Hub</span><strong>{hubStatus} · {hubAgents.filter(agent=>agent.presence!=='offline').length} online</strong></div>
+            <div className={styles.settingsRow}><span>Connectors</span><strong>{connectors.filter(item=>item.status==='CONNECTED').length}/{connectors.length} connected</strong></div>
           </section>
           <section className={styles.diagnosticLists}>
             <div><h4>Agenci</h4>{hubAgents.map(agent=><p key={agent.agentId}>{agent.agentId} · {agent.presence} · {agent.kind}</p>)}</div>
             <div><h4>Zadania</h4>{hubTasks.map(task=><p key={task.id}>{task.status} · {task.goal}</p>)}</div>
             <div><h4>Zdarzenia</h4>{hubEvents.slice(0,6).map(event=><p key={event.id}>{event.type} · {event.agentId}: {event.message}</p>)}</div>
+            <div><h4>Connectors</h4>{connectors.map(item=><p key={item.id}>{item.name} · {item.status}{typeof item.toolCount==='number' ? ' · '+item.toolCount+' tools' : ''}</p>)}</div>
           </section>
           {hubError&&<p role="alert" className={styles.capabilityError}>{hubError}</p>}
         </div>

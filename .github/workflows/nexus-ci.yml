@@ -1,0 +1,30 @@
+name: Nexus CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "nexus/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck and build
+        run: npm run build
+      - name: Agent Hub tests
+        run: npm run test:hub

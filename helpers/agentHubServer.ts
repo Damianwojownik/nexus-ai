@@ -7,6 +7,7 @@ import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
+import { ConnectorRegistry } from './connectorRegistry.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -118,6 +119,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
   const avatarServer = new SelfHostedAvatarServerClient();
   const cloudRouter = new NexusCloudRouter();
+  const connectors = new ConnectorRegistry();
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -156,6 +158,9 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       if (segments[0] === 'api' && segments[1] === 'install' && origin && !isLoopbackOrigin(origin)) {
         throw new LocalCapabilityError(403, 'Software installation is only available from the local Nexus frontend');
       }
+      if (method === 'POST' && segments[0] === 'api' && segments[1] === 'connectors' && origin && !isLoopbackOrigin(origin)) {
+        throw new LocalCapabilityError(403, 'External connector actions are only available from the local Nexus frontend');
+      }
 
       if (method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true });
@@ -169,6 +174,26 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/ai/health') {
         sendJson(response, 200, await cloudRouter.health());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/connectors') {
+        sendJson(response, 200, { connectors: await connectors.health() });
+        return;
+      }
+
+      if (method === 'GET' && segments.length === 4 && segments[0] === 'api' && segments[1] === 'connectors' && segments[3] === 'tools') {
+        sendJson(response, 200, { connector: segments[2], tools: await connectors.listTools(segments[2]) });
+        return;
+      }
+
+      if (method === 'POST' && segments.length === 4 && segments[0] === 'api' && segments[1] === 'connectors' && segments[3] === 'call') {
+        const body = await readJson(request, 2 * 1024 * 1024);
+        const tool = requiredString(body, 'tool');
+        const args = isRecord(body.args) ? body.args : {};
+        const confirmed = body.confirmed === true;
+        const result = await connectors.callTool(segments[2], tool, args, confirmed);
+        sendJson(response, 200, { connector: segments[2], tool, result });
         return;
       }
 

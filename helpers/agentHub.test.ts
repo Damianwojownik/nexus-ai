@@ -19,6 +19,7 @@ import { NexusAgent } from './nexusAgent.ts';
 import { NexusOrchestrator } from './nexusOrchestrator.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
 import { FileSystemMemoryBackend } from './memoryStore.ts';
+import { parseConnectorManifests } from './connectorRegistry.ts';
 
 test('Nexus planner makes one conversational plan and only searches the web on web intent', () => {
   const webPlan = buildNexusPlan('Szukaj w internecie aktualnych informacji o Node.js', [
@@ -510,5 +511,41 @@ test('tool registry enforces safe execution boundaries', async () => {
   await assert.rejects(
     () => registry.execute('git_commit', { cwd: process.cwd(), message: 'demo commit' }, { allowDestructive: false }),
     /requires explicit approval/i,
+  );
+});
+
+
+test('connector manifests keep credentials indirect and reject unsafe remote HTTP', () => {
+  const parsed = parseConnectorManifests(JSON.stringify([
+    {
+      id: 'canva-like',
+      name: 'Canva-like service',
+      transport: 'mcp-http',
+      url: 'https://example.test/mcp',
+      tokenEnv: 'NEXUS_CANVA_LIKE_TOKEN',
+    },
+    {
+      id: 'local-tool',
+      name: 'Local MCP',
+      transport: 'mcp-http',
+      url: 'http://127.0.0.1:9000/mcp',
+    },
+  ]));
+
+  assert.equal(parsed.length, 2);
+  assert.equal(parsed[0].tokenEnv, 'NEXUS_CANVA_LIKE_TOKEN');
+  assert.equal((parsed[0] as any).token, undefined);
+  assert.throws(
+    () => parseConnectorManifests(JSON.stringify([
+      { id: 'unsafe', name: 'Unsafe', transport: 'mcp-http', url: 'http://example.test/mcp' },
+    ])),
+    /HTTPS/i,
+  );
+  assert.throws(
+    () => parseConnectorManifests(JSON.stringify([
+      { id: 'dup', name: 'A', transport: 'mcp-http', url: 'https://a.example/mcp' },
+      { id: 'dup', name: 'B', transport: 'mcp-http', url: 'https://b.example/mcp' },
+    ])),
+    /Duplicate connector id/i,
   );
 });
