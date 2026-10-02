@@ -153,6 +153,7 @@ function formatSearchResults(results: WebSearchResult[]): string {
 export class NexusOrchestrator {
   private readonly pendingWorkflows = new Map<string, PendingWorkflow>();
   private pendingProjectBuild?: PendingProjectBuild;
+  private projectClarificationSeed?: string;
   private readonly agent: NexusAgent;
   private readonly hub: AgentHubClient;
   private readonly memory: MemoryStore;
