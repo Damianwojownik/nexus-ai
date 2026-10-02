@@ -78,7 +78,8 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   ];
   if (isProjectIntent(text)) plan.push({ id: 'inspect', label: 'Przeglądam pliki projektu', state: 'PENDING' });
   if (isProjectIntent(text) && isProjectFixIntent(text)) plan.push({ id: 'modify', label: 'Wprowadzam ograniczoną poprawkę', state: 'PENDING' });
-  if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
+  if (isWeatherIntent(text)) plan.push({ id: 'weather', label: 'Sprawdzam pogodę online', state: 'PENDING' });
+  else if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
   if (installationRequest(text)) plan.push({ id: 'approval', label: 'Sprawdzam instalację i wymagane zgody', state: 'PENDING' });
   plan.push(
@@ -86,6 +87,10 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
     { id: 'verify', label: 'Weryfikuję i zapisuję wynik', state: 'PENDING' },
   );
   return plan;
+}
+
+function isWeatherIntent(text: string): boolean {
+  return /\b(pogoda|pogodę|pogode|temperatura|temperaturę|prognoza|weather|forecast)\b/i.test(text);
 }
 
 function isWebSearchIntent(text: string): boolean {
@@ -474,17 +479,34 @@ export class NexusOrchestrator {
         plan[plan.findIndex((step) => step.id === 'approval')].state = 'DONE';
       }
 
-      if (isWebSearchIntent(input.text)) {
-        plan[plan.findIndex((step) => step.id === 'search')].state = 'ACTIVE';
+      if (isWeatherIntent(input.text)) {
+        const weatherIndex = plan.findIndex((step) => step.id === 'weather');
+        if (weatherIndex >= 0) plan[weatherIndex].state = 'ACTIVE';
+        emit('SEARCHING', 'Sprawdzam pogodę online');
+        try {
+          const weather = await this.capabilities.getWeather(input.text);
+          contextNotes.push([
+            `Aktualna pogoda z ${weather.provider} dla ${weather.location.name}${weather.location.country ? ', ' + weather.location.country : ''}:`,
+            `temperatura ${weather.current.temperatureC ?? '?'}°C, odczuwalna ${weather.current.apparentTemperatureC ?? '?'}°C, ${weather.current.description}, wilgotność ${weather.current.humidityPercent ?? '?'}%, wiatr ${weather.current.windKmh ?? '?'} km/h.`,
+            weather.daily[0] ? `Dziś: ${weather.daily[0].minC ?? '?'}–${weather.daily[0].maxC ?? '?'}°C, opady do ${weather.daily[0].precipitationProbabilityPercent ?? '?'}%.` : '',
+          ].filter(Boolean).join('\n'));
+          if (weatherIndex >= 0) plan[weatherIndex].state = 'DONE';
+        } catch (error) {
+          contextNotes.push(`Nie udało się pobrać aktualnej pogody: ${error instanceof Error ? error.message : String(error)}. Nie zgaduj danych pogodowych.`);
+          if (weatherIndex >= 0) plan[weatherIndex].state = 'FAILED';
+        }
+      } else if (isWebSearchIntent(input.text)) {
+        const searchIndex = plan.findIndex((step) => step.id === 'search');
+        if (searchIndex >= 0) plan[searchIndex].state = 'ACTIVE';
         emit('SEARCHING', 'Szukam informacji w internecie');
         try {
           const result = await this.capabilities.searchWeb(input.text);
           searchResults = result.results;
           contextNotes.push(`Rzeczywiste wyniki wyszukiwania (${result.provider}):\n${formatSearchResults(searchResults)}`);
-          plan[plan.findIndex((step) => step.id === 'search')].state = 'DONE';
+          if (searchIndex >= 0) plan[searchIndex].state = 'DONE';
         } catch (error) {
           contextNotes.push(`Wyszukiwanie WWW jest niedostępne: ${error instanceof Error ? error.message : String(error)}. Kontynuuj na podstawie lokalnej wiedzy i zaznacz, że odpowiedź nie została zweryfikowana w sieci.`);
-          plan[plan.findIndex((step) => step.id === 'search')].state = 'FAILED';
+          if (searchIndex >= 0) plan[searchIndex].state = 'FAILED';
         }
       }
 
