@@ -5,6 +5,7 @@ import { AgentHub } from './agentHub.ts';
 import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
+import { CopilotCliProvider } from './copilotCliProvider.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -114,6 +115,7 @@ function isLoopbackOrigin(origin: string): boolean {
 
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
+  const copilot = new CopilotCliProvider();
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -155,6 +157,22 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/ai/copilot/health') {
+        sendJson(response, 200, await copilot.checkHealth());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/ai/copilot') {
+        const body = await readJson(request, 128 * 1024);
+        const prompt = requiredString(body, 'prompt');
+        try {
+          sendJson(response, 200, { text: await copilot.generate(prompt), provider: 'GitHub Copilot CLI' });
+        } catch (error) {
+          throw new HttpError(502, error instanceof Error ? error.message : 'Copilot CLI request failed');
+        }
         return;
       }
 
