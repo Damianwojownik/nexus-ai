@@ -1,17 +1,14 @@
 @echo off
 setlocal
-echo === Nexus AI repair ===
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0connect-ai-stack-windows.ps1" -InstallMissing
+echo === Nexus Backend + AI repair ===
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-nexus-windows.ps1" -Repair
 if errorlevel 1 (
   echo.
-  echo Repair step returned an error. Check the messages above.
+  echo Naprawa nie zakonczyla sie poprawnie. Zostaw to okno otwarte i skopiuj komunikat bledu.
   pause
   exit /b 1
 )
 echo.
-echo Starting Nexus after repair...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-nexus-windows.ps1"
-echo.
-echo If Copilot asks for authentication, run once: copilot login
+echo Gotowe. Nexus powinien byc pod http://127.0.0.1:5173/
 pause
 endlocal
