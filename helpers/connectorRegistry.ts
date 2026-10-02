@@ -130,14 +130,16 @@ function parseSseJson(text: string): JsonRpcResponse {
 }
 
 class McpHttpConnector {
+  readonly manifest: ConnectorManifest;
+  private readonly env: ConnectorEnv;
   private sessionId?: string;
   private initialized = false;
   private requestId = 1;
 
-  constructor(
-    readonly manifest: ConnectorManifest,
-    private readonly env: ConnectorEnv,
-  ) {}
+  constructor(manifest: ConnectorManifest, env: ConnectorEnv) {
+    this.manifest = manifest;
+    this.env = env;
+  }
 
   private headers(extra: Record<string, string> = {}) {
     const headers: Record<string, string> = {
@@ -350,16 +352,15 @@ class GitHubCliConnector {
 export class ConnectorRegistry {
   private readonly github?: GitHubCliConnector;
   private readonly mcp = new Map<string, McpHttpConnector>();
+  private readonly env: ConnectorEnv;
 
-  constructor(
-    private readonly env: ConnectorEnv = process.env,
-    options: { includeGitHub?: boolean } = {},
-  ) {
-    if (options.includeGitHub !== false && (env.NEXUS_GITHUB_CONNECTOR_DISABLED ?? '').trim() !== '1') {
+  constructor(env: ConnectorEnv = process.env, options: { includeGitHub?: boolean } = {}) {
+    this.env = env;
+    if (options.includeGitHub !== false && (this.env.NEXUS_GITHUB_CONNECTOR_DISABLED ?? '').trim() !== '1') {
       this.github = new GitHubCliConnector();
     }
-    const manifests = parseConnectorManifests(env.NEXUS_CONNECTORS_JSON);
-    for (const manifest of manifests) this.mcp.set(manifest.id, new McpHttpConnector(manifest, env));
+    const manifests = parseConnectorManifests(this.env.NEXUS_CONNECTORS_JSON);
+    for (const manifest of manifests) this.mcp.set(manifest.id, new McpHttpConnector(manifest, this.env));
   }
 
   listManifests(): ConnectorManifest[] {
