@@ -14,7 +14,13 @@ This repository is the shared source bridge for VS Code/Codex work. Floot-specif
 
 Install dependencies with `npm install`. Configure `VITE_OLLAMA_BASE_URL` and `VITE_NEXUS_AGENT_HUB_URL` in `.env.local`; this machine's safe local defaults are `http://127.0.0.1:11435` and `http://127.0.0.1:8788`.
 
-Start the local services in separate terminals:
+Recommended on Windows: run the one-click launcher:
+
+```powershell
+scripts\\start-nexus-windows.bat
+```
+
+It starts/validates Ollama, Agent Hub, the Vite frontend and then checks AI providers, web search and weather. Manual startup still works:
 
 ```powershell
 npm run hub
@@ -33,3 +39,8 @@ Open `http://127.0.0.1:5173/`. The Hub stores runtime state under the user's loc
 ## Next task
 
 Configure and verify the same frontend/runtime values in the hosted Floot deployment if that environment is required. The local end-to-end path is documented in `docs/AGENT-HUB.md`.
+
+
+## Continue in a new AI session
+
+Read `docs/NEXUS-HANDOFF.md` first. It records the current architecture, provider fallback, internet endpoints, memory behavior and avatar work so a new session can resume without relying on chat history.
