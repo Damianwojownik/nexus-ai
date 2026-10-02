@@ -1,7 +1,8 @@
 import { CopilotCliProvider } from './copilotCliProvider.ts';
+import { CodexCliProvider, ClaudeCliProvider } from './cliModelProviders.ts';
 
 export type CloudProviderHealth = {
-  id: 'copilot' | 'openai' | 'claude';
+  id: 'copilot' | 'codex' | 'claude-cli' | 'openai' | 'claude';
   name: string;
   status: 'CONNECTED' | 'NOT_CONFIGURED' | 'OFFLINE' | 'ERROR';
   model?: string;
@@ -111,27 +112,39 @@ class ClaudeProvider {
 
 export class NexusCloudRouter {
   private readonly copilot=new CopilotCliProvider();
+  private readonly codex=new CodexCliProvider();
+  private readonly claudeCli=new ClaudeCliProvider();
   private readonly openai=new OpenAIProvider();
   private readonly claude=new ClaudeProvider();
 
   private order(){
-    const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'copilot,openai,claude')
+    const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'copilot,codex,claude-cli,openai,claude')
       .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
-    const valid=configured.filter((x):x is 'copilot'|'openai'|'claude'=>x==='copilot'||x==='openai'||x==='claude');
-    return valid.length?valid:['copilot','openai','claude'];
+    const valid=configured.filter((x):x is 'copilot'|'codex'|'claude-cli'|'openai'|'claude'=>x==='copilot'||x==='codex'||x==='claude-cli'||x==='openai'||x==='claude');
+    return valid.length?valid:['copilot','codex','claude-cli','openai','claude'];
   }
 
   async health():Promise<{status:'CONNECTED'|'OFFLINE'|'NOT_CONFIGURED'|'ERROR';providers:CloudProviderHealth[]}>{
-    const [copilot,openai,claude]=await Promise.all([
+    const [copilot,codex,claudeCli,openai,claude]=await Promise.all([
       this.copilot.checkHealth().then(h=>({
         id:'copilot' as const,name:'GitHub Copilot CLI',
+        status:h.status==='CONNECTED'?'CONNECTED' as const:h.status==='ERROR'?'ERROR' as const:'OFFLINE' as const,
+        model:h.version,error:h.error
+      })),
+      this.codex.checkHealth().then(h=>({
+        id:'codex' as const,name:'OpenAI Codex CLI',
+        status:h.status==='CONNECTED'?'CONNECTED' as const:h.status==='ERROR'?'ERROR' as const:'OFFLINE' as const,
+        model:h.version,error:h.error
+      })),
+      this.claudeCli.checkHealth().then(h=>({
+        id:'claude-cli' as const,name:'Claude Code CLI',
         status:h.status==='CONNECTED'?'CONNECTED' as const:h.status==='ERROR'?'ERROR' as const:'OFFLINE' as const,
         model:h.version,error:h.error
       })),
       this.openai.health(),
       this.claude.health()
     ]);
-    const providers=[copilot,openai,claude];
+    const providers=[copilot,codex,claudeCli,openai,claude];
     const status=providers.some(p=>p.status==='CONNECTED')
       ? 'CONNECTED'
       : providers.every(p=>p.status==='NOT_CONFIGURED')
@@ -152,6 +165,22 @@ export class NexusCloudRouter {
           const text=await this.copilot.generate(prompt);
           if(text.trim()) return {text,provider:'GitHub Copilot CLI',model:h.version};
           errors.push('copilot: empty response');
+          continue;
+        }
+        if(id==='codex'){
+          const h=await this.codex.checkHealth();
+          if(h.status!=='CONNECTED'){ errors.push(`codex: ${h.error||h.status}`); continue; }
+          const text=await this.codex.generate(prompt);
+          if(text.trim()) return {text,provider:'OpenAI Codex CLI',model:h.version};
+          errors.push('codex: empty response');
+          continue;
+        }
+        if(id==='claude-cli'){
+          const h=await this.claudeCli.checkHealth();
+          if(h.status!=='CONNECTED'){ errors.push(`claude-cli: ${h.error||h.status}`); continue; }
+          const text=await this.claudeCli.generate(prompt);
+          if(text.trim()) return {text,provider:'Claude Code CLI',model:h.version};
+          errors.push('claude-cli: empty response');
           continue;
         }
         if(id==='openai'){
