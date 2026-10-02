@@ -139,8 +139,12 @@ try {
   $tags = Invoke-RestMethod -Uri "$ollamaUrl/api/tags" -TimeoutSec 8
   $names = @($tags.models | ForEach-Object { $_.name })
   if ($names.Count -eq 0 -and $InstallMissing -and (Have "ollama")) {
-    Write-Host "Brak modelu. Pobieram lekki model qwen2.5:1.5b..." -ForegroundColor Yellow
-    & ollama pull qwen2.5:1.5b
+    Write-Host "Brak modelu. Pobieram darmowa Llama 3.2 3B..." -ForegroundColor Yellow
+    & ollama pull llama3.2:3b
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning "Llama 3.2 3B nie pobrala sie poprawnie — probuje lzejszy qwen2.5:1.5b."
+      & ollama pull qwen2.5:1.5b
+    }
     $tags = Invoke-RestMethod -Uri "$ollamaUrl/api/tags" -TimeoutSec 8
     $names = @($tags.models | ForEach-Object { $_.name })
   }
