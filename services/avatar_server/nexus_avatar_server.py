@@ -11,7 +11,7 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.background import BackgroundTask
+from starlette.background import BackgroundTask
 from fastapi.responses import FileResponse, JSONResponse
 
 ROOT = Path(__file__).resolve().parents[2]
