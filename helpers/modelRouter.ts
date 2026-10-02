@@ -49,46 +49,55 @@ export class ModelRouter {
     this.preferredMode = mode;
   }
 
-  setPrimaryProvider(provider: ModelProvider) {
+  setPrimaryProvider(provider?: ModelProvider) {
     this.primaryProvider = provider;
   }
 
   register(provider: ModelProvider) {
-    this.providers.push(provider);
+    if (!this.providers.some((item) => item.name === provider.name)) this.providers.push(provider);
+  }
+
+  private localCandidates(): ModelProvider[] {
+    return this.providers.filter((p) => p.mode === 'LOCAL' || p.name === 'Ollama' || p.role === 'SUBAGENT');
+  }
+
+  private async tryProvider(provider: ModelProvider | undefined, prompt: string, options: Record<string, any>) {
+    if (!provider) return undefined;
+    const health = await provider.checkHealth();
+    if (health.status !== 'CONNECTED') return undefined;
+    try {
+      const text = await provider.generate(prompt, options);
+      if (typeof text === 'string' && text.trim()) return text;
+    } catch {
+      // Quota, transient network failures and provider-specific errors may fall through
+      // to the next configured provider in AUTO mode.
+    }
+    return undefined;
   }
 
   async route(prompt: string, options: Record<string, any> = {}) {
     if (this.preferredMode === 'LOCAL') {
-      const provider = this.providers.find((p) => p.name === 'Ollama' || p.role === 'SUBAGENT');
-      if (!provider) throw new Error('Local provider is not registered.');
-      return provider.generate(prompt, options);
-    }
-
-    const localProvider = this.providers.find((p) => p.name === 'Ollama' || p.role === 'SUBAGENT');
-    if (!localProvider) {
-      throw new Error('No provider available.');
-    }
-
-    if (this.primaryProvider && this.preferredMode === 'AUTO') {
-      const primaryHealth = await this.primaryProvider.checkHealth();
-      if (primaryHealth.status === 'CONNECTED') {
-        try {
-          return await this.primaryProvider.generate(prompt, options);
-        } catch {
-          // Token/quota exhaustion or transient primary failures fall back to the free local provider.
-        }
+      for (const provider of this.localCandidates()) {
+        const result = await this.tryProvider(provider, prompt, options);
+        if (result !== undefined) return result;
       }
-    }
-
-    const health = await localProvider.checkHealth();
-    if (health.status === 'CONNECTED') {
-      return localProvider.generate(prompt, options);
+      throw new Error('Local provider unavailable.');
     }
 
     if (this.preferredMode === 'CLOUD') {
-      throw new Error('Cloud provider is not configured yet.');
+      const result = await this.tryProvider(this.primaryProvider, prompt, options);
+      if (result !== undefined) return result;
+      throw new Error('Cloud provider is not configured or unavailable.');
     }
 
-    throw new Error(`Local provider unavailable: ${health.status}`);
+    const primaryResult = await this.tryProvider(this.primaryProvider, prompt, options);
+    if (primaryResult !== undefined) return primaryResult;
+
+    for (const provider of this.localCandidates()) {
+      const result = await this.tryProvider(provider, prompt, options);
+      if (result !== undefined) return result;
+    }
+
+    throw new Error('No AI provider is currently available.');
   }
 }
