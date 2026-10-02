@@ -2,7 +2,7 @@ import { CopilotCliProvider } from './copilotCliProvider.ts';
 import { CodexCliProvider, ClaudeCliProvider } from './cliModelProviders.ts';
 
 export type CloudProviderHealth = {
-  id: 'copilot' | 'codex' | 'claude-cli' | 'openai' | 'claude';
+  id: 'copilot' | 'codex' | 'gemini' | 'claude-cli' | 'openai' | 'claude';
   name: string;
   status: 'CONNECTED' | 'NOT_CONFIGURED' | 'OFFLINE' | 'ERROR';
   model?: string;
@@ -17,6 +17,55 @@ export type CloudGenerateResult = {
 
 function env(name:string):string {
   return (process.env[name] ?? '').trim();
+}
+
+class GeminiProvider {
+  readonly id='gemini' as const;
+  readonly name='Google Gemini';
+  readonly key=env('GOOGLE_GEMINI_API_KEY') || env('GEMINI_API_KEY') || env('NEXUS_GEMINI_API_KEY');
+  readonly model=env('NEXUS_GEMINI_MODEL') || 'gemini-2.5-flash';
+
+  configured(){ return !!this.key; }
+
+  async health():Promise<CloudProviderHealth>{
+    if(!this.configured()) return {id:this.id,name:this.name,status:'NOT_CONFIGURED',model:this.model};
+    try{
+      const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models',{
+        headers:{'x-goog-api-key':this.key,Accept:'application/json'},
+        signal:AbortSignal.timeout(12000)
+      });
+      if(!r.ok){
+        const data=await r.json().catch(()=>({})) as any;
+        return {id:this.id,name:this.name,status:'ERROR',model:this.model,error:data?.error?.message || `HTTP ${r.status}`};
+      }
+      return {id:this.id,name:this.name,status:'CONNECTED',model:this.model};
+    }catch(e){
+      return {id:this.id,name:this.name,status:'OFFLINE',model:this.model,error:e instanceof Error?e.message:'Gemini unavailable'};
+    }
+  }
+
+  async generate(prompt:string, options:Record<string,any>={}):Promise<CloudGenerateResult>{
+    if(!this.configured()) throw new Error('Google Gemini is not configured');
+    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`,{
+      method:'POST',
+      headers:{'x-goog-api-key':this.key,'Content-Type':'application/json',Accept:'application/json'},
+      body:JSON.stringify({
+        contents:[{role:'user',parts:[{text:prompt}]}],
+        generationConfig:{
+          temperature:typeof options.temperature==='number'?options.temperature:0.2,
+          maxOutputTokens:typeof options.maxOutputTokens==='number'?options.maxOutputTokens:4096,
+        }
+      }),
+      signal:AbortSignal.timeout(120000)
+    });
+    const data=await r.json().catch(()=>({})) as any;
+    if(!r.ok) throw new Error(data?.error?.message || `Gemini HTTP ${r.status}`);
+    const text=Array.isArray(data?.candidates?.[0]?.content?.parts)
+      ? data.candidates[0].content.parts.map((part:any)=>typeof part?.text==='string'?part.text:'').join('')
+      : '';
+    if(!text.trim()) throw new Error('Google Gemini returned an empty response');
+    return {text,provider:this.name,model:this.model};
+  }
 }
 
 class OpenAIProvider {
@@ -43,10 +92,7 @@ class OpenAIProvider {
 
   async generate(prompt:string, options:Record<string,any>={}):Promise<CloudGenerateResult>{
     if(!this.configured()) throw new Error('OpenAI is not configured');
-    const body:any={
-      model:this.model,
-      input:prompt,
-    };
+    const body:any={model:this.model,input:prompt};
     if(typeof options.maxOutputTokens==='number') body.max_output_tokens=options.maxOutputTokens;
     if(typeof options.temperature==='number') body.temperature=options.temperature;
     const r=await fetch('https://api.openai.com/v1/responses',{
@@ -113,19 +159,21 @@ class ClaudeProvider {
 export class NexusCloudRouter {
   private readonly copilot=new CopilotCliProvider();
   private readonly codex=new CodexCliProvider();
+  private readonly gemini=new GeminiProvider();
   private readonly claudeCli=new ClaudeCliProvider();
   private readonly openai=new OpenAIProvider();
   private readonly claude=new ClaudeProvider();
 
   private order(){
-    const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'copilot,codex,claude-cli,openai,claude')
+    const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'copilot,codex,gemini,claude-cli,openai,claude')
       .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
-    const valid=configured.filter((x):x is 'copilot'|'codex'|'claude-cli'|'openai'|'claude'=>x==='copilot'||x==='codex'||x==='claude-cli'||x==='openai'||x==='claude');
-    return valid.length?valid:['copilot','codex','claude-cli','openai','claude'];
+    const valid=configured.filter((x):x is 'copilot'|'codex'|'gemini'|'claude-cli'|'openai'|'claude'=>
+      x==='copilot'||x==='codex'||x==='gemini'||x==='claude-cli'||x==='openai'||x==='claude');
+    return valid.length?valid:['copilot','codex','gemini','claude-cli','openai','claude'];
   }
 
   async health():Promise<{status:'CONNECTED'|'OFFLINE'|'NOT_CONFIGURED'|'ERROR';providers:CloudProviderHealth[]}>{
-    const [copilot,codex,claudeCli,openai,claude]=await Promise.all([
+    const [copilot,codex,gemini,claudeCli,openai,claude]=await Promise.all([
       this.copilot.checkHealth().then(h=>({
         id:'copilot' as const,name:'GitHub Copilot CLI',
         status:h.status==='CONNECTED'?'CONNECTED' as const:h.status==='ERROR'?'ERROR' as const:'OFFLINE' as const,
@@ -136,6 +184,7 @@ export class NexusCloudRouter {
         status:h.status==='CONNECTED'?'CONNECTED' as const:h.status==='ERROR'?'ERROR' as const:'OFFLINE' as const,
         model:h.version,error:h.error
       })),
+      this.gemini.health(),
       this.claudeCli.checkHealth().then(h=>({
         id:'claude-cli' as const,name:'Claude Code CLI',
         status:h.status==='CONNECTED'?'CONNECTED' as const:h.status==='ERROR'?'ERROR' as const:'OFFLINE' as const,
@@ -144,7 +193,7 @@ export class NexusCloudRouter {
       this.openai.health(),
       this.claude.health()
     ]);
-    const providers=[copilot,codex,claudeCli,openai,claude];
+    const providers=[copilot,codex,gemini,claudeCli,openai,claude];
     const status=providers.some(p=>p.status==='CONNECTED')
       ? 'CONNECTED'
       : providers.every(p=>p.status==='NOT_CONFIGURED')
@@ -174,6 +223,11 @@ export class NexusCloudRouter {
           if(text.trim()) return {text,provider:'OpenAI Codex CLI',model:h.version};
           errors.push('codex: empty response');
           continue;
+        }
+        if(id==='gemini'){
+          const h=await this.gemini.health();
+          if(h.status!=='CONNECTED'){ errors.push(`gemini: ${h.error||h.status}`); continue; }
+          return await this.gemini.generate(prompt,options);
         }
         if(id==='claude-cli'){
           const h=await this.claudeCli.checkHealth();
