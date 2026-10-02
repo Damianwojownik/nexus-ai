@@ -30,6 +30,12 @@ export interface ImportedWorkspaceFile {
   location: 'workspace';
 }
 
+export interface GitHubCloneResult {
+  repository: string;
+  path: string;
+  output: string;
+}
+
 export interface InstallableApp {
   id: string;
   name: string;
@@ -153,6 +159,14 @@ export class LocalCapabilitiesClient {
       body: JSON.stringify({ path, content, confirmed }),
     });
     return result.file;
+  }
+
+  async cloneGitHubRepository(repoUrl: string, confirmed: boolean): Promise<GitHubCloneResult> {
+    const result = await this.request<{ repository: GitHubCloneResult }>('/api/github/clone', {
+      method: 'POST',
+      body: JSON.stringify({ repoUrl, confirmed }),
+    });
+    return result.repository;
   }
 
   async getInstallCatalog(): Promise<InstallCatalog> {
