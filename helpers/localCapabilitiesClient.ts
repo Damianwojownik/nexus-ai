@@ -4,6 +4,13 @@ export interface WebSearchResult {
   snippet: string;
 }
 
+export interface WeatherResult {
+  provider: 'Open-Meteo';
+  location: { name: string; country?: string; latitude: number; longitude: number; timezone?: string };
+  current: { temperatureC?: number; apparentTemperatureC?: number; humidityPercent?: number; windKmh?: number; weatherCode?: number; description: string; time?: string };
+  daily: Array<{ date: string; minC?: number; maxC?: number; precipitationProbabilityPercent?: number; weatherCode?: number; description: string }>;
+}
+
 export interface ImportedWorkspaceFile {
   filename: string;
   bytes: number;
@@ -87,6 +94,10 @@ export class LocalCapabilitiesClient {
 
   async searchWeb(query: string): Promise<{ query: string; provider: string; results: WebSearchResult[] }> {
     return this.request(`/api/search?q=${encodeURIComponent(query)}`);
+  }
+
+  async getWeather(query: string): Promise<WeatherResult> {
+    return this.request(`/api/weather?q=${encodeURIComponent(query)}`);
   }
 
   async importFile(file: File): Promise<ImportedWorkspaceFile> {
