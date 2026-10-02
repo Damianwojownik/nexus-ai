@@ -16,6 +16,7 @@ import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
 import { LocalCapabilitiesClient } from '../helpers/localCapabilitiesClient';
+import { ConnectorClient } from '../helpers/connectorClient';
 import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
 import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
@@ -34,6 +35,7 @@ const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
 const voiceEventBus = new VoiceEventBus();
 const agentHubClient = new AgentHubClient();
 const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
+const connectorClient = new ConnectorClient(agentHubClient.baseUrl);
 const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
 export default function Home() {
@@ -52,6 +54,7 @@ export default function Home() {
   const [hubTasks,setHubTasks]=useState<Array<Awaited<ReturnType<AgentHubClient['getTasks']>>[number]>>([]);
   const [hubEvents,setHubEvents]=useState<AgentEvent[]>([]);
   const [hubError,setHubError]=useState('');
+  const [connectors,setConnectors]=useState<Array<Awaited<ReturnType<ConnectorClient['health']>>[number]>>([]);
   const [workflowProgress,setWorkflowProgress]=useState<NexusWorkflowProgress|null>(null);
   const [approvalRequest,setApprovalRequest]=useState<NexusApprovalRequest|null>(null);
   const [approvalBusy,setApprovalBusy]=useState(false);
@@ -89,6 +92,11 @@ export default function Home() {
 
       const primaryHealth = await cloudProvider.checkHealth();
       setPrimaryStatus(primaryHealth.status === 'CONNECTED' ? 'CONNECTED' : primaryHealth.status === 'ERROR' ? 'ERROR' : primaryHealth.status === 'OFFLINE' ? 'DISCONNECTED' : 'NOT_CONFIGURED');
+      try {
+        setConnectors(await connectorClient.health());
+      } catch {
+        setConnectors([]);
+      }
       setMemoryReady(true);
     })();
   }, []);
@@ -368,11 +376,13 @@ export default function Home() {
             <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama · {selectedModel} · {ollamaStatus}</strong></div>
             <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady?'ready':'loading'}</strong></div>
             <div className={styles.settingsRow}><span>Hub</span><strong>{hubStatus} · {hubAgents.filter(agent=>agent.presence!=='offline').length} online</strong></div>
+            <div className={styles.settingsRow}><span>Connectors</span><strong>{connectors.filter(item=>item.status==='CONNECTED').length}/{connectors.length} connected</strong></div>
           </section>
           <section className={styles.diagnosticLists}>
             <div><h4>Agenci</h4>{hubAgents.map(agent=><p key={agent.agentId}>{agent.agentId} · {agent.presence} · {agent.kind}</p>)}</div>
             <div><h4>Zadania</h4>{hubTasks.map(task=><p key={task.id}>{task.status} · {task.goal}</p>)}</div>
             <div><h4>Zdarzenia</h4>{hubEvents.slice(0,6).map(event=><p key={event.id}>{event.type} · {event.agentId}: {event.message}</p>)}</div>
+            <div><h4>Connectors</h4>{connectors.map(item=><p key={item.id}>{item.name} · {item.status}{typeof item.toolCount==='number' ? ' · '+item.toolCount+' tools' : ''}</p>)}</div>
           </section>
           {hubError&&<p role="alert" className={styles.capabilityError}>{hubError}</p>}
         </div>
