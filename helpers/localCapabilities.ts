@@ -77,8 +77,13 @@ export const installableApps: InstallableApp[] = [
   { id: 'Git.Git', name: 'Git', publisher: 'Git for Windows', description: 'System kontroli wersji.' },
   { id: '7zip.7zip', name: '7-Zip', publisher: '7-Zip', description: 'Archiwizator plików.' },
   { id: 'VideoLAN.VLC', name: 'VLC media player', publisher: 'VideoLAN', description: 'Odtwarzacz multimediów.' },
-  { id: 'Python.Python.3.13', name: 'Python 3.13', publisher: 'Python Software Foundation', description: 'Interpreter języka Python.' },
+  { id: 'Python.Python.3.11', name: 'Python 3.11', publisher: 'Python Software Foundation', description: 'Interpreter Python zgodny z narzędziami AI wymagającymi linii 3.11.' },
+  { id: 'Python.Python.3.13', name: 'Python 3.13', publisher: 'Python Software Foundation', description: 'Najnowszy interpreter języka Python.' },
   { id: 'OpenJS.NodeJS.LTS', name: 'Node.js LTS', publisher: 'OpenJS Foundation', description: 'Runtime JavaScript dla narzędzi developerskich.' },
+  { id: 'BlenderFoundation.Blender', name: 'Blender', publisher: 'Blender Foundation', description: 'Modelowanie, rigowanie i animacja 3D.' },
+  { id: 'Gyan.FFmpeg', name: 'FFmpeg', publisher: 'Gyan', description: 'Narzędzia audio/wideo potrzebne przez część silników AI.' },
+  { id: 'Ollama.Ollama', name: 'Ollama', publisher: 'Ollama', description: 'Lokalny runtime modeli AI.' },
+  { id: 'GitHub.GitHubDesktop', name: 'GitHub Desktop', publisher: 'GitHub', description: 'Graficzna obsługa repozytoriów GitHub.' },
 ];
 
 function decodeSearchUrl(rawUrl: string): string | undefined {
