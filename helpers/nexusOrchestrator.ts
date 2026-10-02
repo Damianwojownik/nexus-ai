@@ -67,8 +67,13 @@ const installationPatterns: Array<{ pattern: RegExp; id: string }> = [
   { pattern: /visual\s*studio\s*code|\bvscode\b/i, id: 'Microsoft.VisualStudioCode' },
   { pattern: /\b7\s*-?\s*zip\b/i, id: '7zip.7zip' },
   { pattern: /\bvlc\b/i, id: 'VideoLAN.VLC' },
+  { pattern: /\bpython\s*3\.11\b/i, id: 'Python.Python.3.11' },
   { pattern: /\bpython(?:\s*3(?:\.13)?)?\b/i, id: 'Python.Python.3.13' },
   { pattern: /\bnode(?:\.js)?\s*(?:lts)?\b/i, id: 'OpenJS.NodeJS.LTS' },
+  { pattern: /\bblender\b/i, id: 'BlenderFoundation.Blender' },
+  { pattern: /\bffmpeg\b/i, id: 'Gyan.FFmpeg' },
+  { pattern: /\bollama\b/i, id: 'Ollama.Ollama' },
+  { pattern: /\bgithub\s*desktop\b/i, id: 'GitHub.GitHubDesktop' },
   { pattern: /\bgit\b/i, id: 'Git.Git' },
 ];
 
