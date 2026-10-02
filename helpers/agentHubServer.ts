@@ -176,6 +176,12 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         return;
       }
 
+      if (method === 'GET' && segments.length === 2 && segments[0] === 'api' && segments[1] === 'weather') {
+        const query = url.searchParams.get('q') ?? '';
+        sendJson(response, 200, await localCapabilities.getWeather(query));
+        return;
+      }
+
       if (method === 'POST' && segments.length === 3 && segments[0] === 'api' && segments[1] === 'workspace' && segments[2] === 'import') {
         const body = await readJson(request, 15 * 1024 * 1024);
         const file = await localCapabilities.importFile(body.filename, body.contentBase64);
