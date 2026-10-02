@@ -5,6 +5,7 @@ import { AgentHub } from './agentHub.ts';
 import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
+import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -114,6 +115,7 @@ function isLoopbackOrigin(origin: string): boolean {
 
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
+  const avatarServer = new SelfHostedAvatarServerClient();
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -155,6 +157,39 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/avatar/health') {
+        sendJson(response, 200, await avatarServer.health());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/avatar/render') {
+        if (!avatarServer.configured()) {
+          throw new HttpError(503, 'Set NEXUS_AVATAR_SERVER_URL and NEXUS_AVATAR_SERVER_TOKEN');
+        }
+        const body = await readJson(request, 32 * 1024 * 1024);
+        const sourceImageBase64 = requiredString(body, 'sourceImageBase64');
+        const audioBase64 = typeof body.audioBase64 === 'string' ? body.audioBase64 : undefined;
+        const drivingVideoBase64 = typeof body.drivingVideoBase64 === 'string' ? body.drivingVideoBase64 : undefined;
+        if (!audioBase64 && !drivingVideoBase64) {
+          throw new HttpError(400, 'audioBase64 or drivingVideoBase64 is required');
+        }
+        const rendered = await avatarServer.render({
+          sourceImageBase64,
+          sourceImageMime: typeof body.sourceImageMime === 'string' ? body.sourceImageMime : undefined,
+          audioBase64,
+          audioMime: typeof body.audioMime === 'string' ? body.audioMime : undefined,
+          drivingVideoBase64,
+          drivingVideoMime: typeof body.drivingVideoMime === 'string' ? body.drivingVideoMime : undefined,
+        });
+        response.writeHead(200, {
+          'Content-Type': rendered.contentType,
+          'Content-Length': rendered.data.length,
+          'Cache-Control': 'no-store',
+        });
+        response.end(rendered.data);
         return;
       }
 
