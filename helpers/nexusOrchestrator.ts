@@ -4,6 +4,8 @@ import { AgentHubClient } from './agentHubClient.ts';
 import type { AgentTask } from './agentProtocol.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
 import type { InstallableApp, InstallOperation, WebSearchResult } from './localCapabilitiesClient.ts';
+import { isAffirmative, isProjectCreationIntent, needsProjectClarification, parseBlueprint, parseGeneratedProject } from './projectBuilder.ts';
+import type { ProjectBlueprint } from './projectBuilder.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
 export type NexusPlanStepState = 'PENDING' | 'ACTIVE' | 'DONE' | 'SKIPPED' | 'FAILED';
@@ -45,6 +47,11 @@ export interface NexusWorkflowInput {
 export type NexusWorkflowOutcome =
   | { status: 'DONE'; taskId: string; text: string; plan: NexusPlanStep[]; searchResults: WebSearchResult[] }
   | { status: 'WAITING_FOR_APPROVAL'; taskId: string; text: string; plan: NexusPlanStep[]; approval: NexusApprovalRequest; searchResults: WebSearchResult[] };
+
+interface PendingProjectBuild {
+  blueprint: ProjectBlueprint;
+  originalRequest: string;
+}
 
 interface PendingWorkflow {
   input: NexusWorkflowInput;
@@ -145,6 +152,7 @@ function formatSearchResults(results: WebSearchResult[]): string {
 
 export class NexusOrchestrator {
   private readonly pendingWorkflows = new Map<string, PendingWorkflow>();
+  private pendingProjectBuild?: PendingProjectBuild;
   private readonly agent: NexusAgent;
   private readonly hub: AgentHubClient;
   private readonly memory: MemoryStore;
