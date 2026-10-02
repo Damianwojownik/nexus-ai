@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  isProjectCreationIntent,
   needsProjectClarification,
   parseBlueprint,
   parseGeneratedProject,
   safeProjectName,
 } from './projectBuilder.ts';
+import { isProjectCreationIntent } from './projectIntent.ts';
 
 test('detects a new app request', () => {
   assert.equal(isProjectCreationIntent('Chcę aplikację do planowania treningów'), true);
