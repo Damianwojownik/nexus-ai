@@ -29,6 +29,9 @@ test('Nexus planner makes one conversational plan and only searches the web on w
   const projectPlan = buildNexusPlan('Sprawdź mój projekt, znajdź błędy i je napraw.');
   assert.deepEqual(projectPlan.map((step) => step.id), ['understand', 'plan', 'inspect', 'modify', 'execute', 'verify']);
 
+  const weatherPlan = buildNexusPlan('Jaka jest pogoda w Kolonii dzisiaj?');
+  assert.deepEqual(weatherPlan.map((step) => step.id), ['understand', 'plan', 'weather', 'execute', 'verify']);
+
   const proposal = parseProjectChange('```json\n{"summary":"Popraw funkcję","changes":[{"path":"math.py","oldText":"return a - b","newText":"return a + b"}]}\n```', new Set(['math.py']));
   assert.equal(proposal.change.path, 'math.py');
   assert.throws(() => parseProjectChange('{"summary":"x","changes":[{"path":"outside.py","oldText":"x","newText":"y"}]}', new Set(['math.py'])));
