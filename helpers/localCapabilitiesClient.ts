@@ -11,6 +11,19 @@ export interface WeatherResult {
   daily: Array<{ date: string; minC?: number; maxC?: number; precipitationProbabilityPercent?: number; weatherCode?: number; description: string }>;
 }
 
+export interface CreatedWorkspaceProject {
+  name: string;
+  summary: string;
+  path: string;
+  files: string[];
+}
+
+export interface GeneratedWorkspaceProject {
+  name: string;
+  summary: string;
+  files: Array<{ path: string; content: string }>;
+}
+
 export interface ImportedWorkspaceFile {
   filename: string;
   bytes: number;
@@ -98,6 +111,14 @@ export class LocalCapabilitiesClient {
 
   async getWeather(query: string): Promise<WeatherResult> {
     return this.request(`/api/weather?q=${encodeURIComponent(query)}`);
+  }
+
+  async createWorkspaceProject(project: GeneratedWorkspaceProject, confirmed: boolean): Promise<CreatedWorkspaceProject> {
+    const result = await this.request<{ project: CreatedWorkspaceProject }>('/api/workspace/project', {
+      method: 'POST',
+      body: JSON.stringify({ project, confirmed }),
+    });
+    return result.project;
   }
 
   async importFile(file: File): Promise<ImportedWorkspaceFile> {
