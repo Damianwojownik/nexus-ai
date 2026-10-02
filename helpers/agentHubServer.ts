@@ -6,6 +6,7 @@ import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 import { OpenAICompatibleCloudClient } from './cloudAI.ts';
+import { createWorkspaceProject } from './projectWorkspace.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -211,6 +212,17 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         const body = await readJson(request, 15 * 1024 * 1024);
         const file = await localCapabilities.importFile(body.filename, body.contentBase64);
         sendJson(response, 201, { file });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/workspace/project') {
+        const body = await readJson(request, 2 * 1024 * 1024);
+        const project = await createWorkspaceProject(
+          options.workspaceDir ?? join(process.cwd(), 'workspace'),
+          body.project,
+          body.confirmed === true,
+        );
+        sendJson(response, 201, { project });
         return;
       }
 
