@@ -322,14 +322,14 @@ class GitHubCliConnector {
       if (!path || path.includes('..')) throw new Error('path must be a safe repository-relative path');
       const endpoint = `repos/${repo}/contents/${path}`;
       const query = ref ? ['-f', `ref=${ref}`] : [];
-      const result = await exec('gh', ['api', endpoint, ...query, '--jq', '.content']);
+      const result = await exec('gh', ['api', '--method', 'GET', endpoint, ...query, '--jq', '.content']);
       const base64 = result.stdout.replace(/\s+/g, '');
       return { repo, path, ref: ref || undefined, content: Buffer.from(base64, 'base64').toString('utf8') };
     }
     if (name === 'search_repositories') {
       const query = String(args.query ?? '').trim();
       if (!query || query.length > 300) throw new Error('query must contain 1 to 300 characters');
-      const result = await exec('gh', ['api', 'search/repositories', '-f', `q=${query}`, '-f', 'per_page=10']);
+      const result = await exec('gh', ['api', '--method', 'GET', 'search/repositories', '-f', `q=${query}`, '-f', 'per_page=10']);
       const data = JSON.parse(result.stdout);
       return {
         items: Array.isArray(data?.items)
