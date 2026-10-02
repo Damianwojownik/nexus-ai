@@ -3,7 +3,7 @@ import { MemoryStore } from './memoryStore.ts';
 import { AgentHubClient } from './agentHubClient.ts';
 import type { AgentTask } from './agentProtocol.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
-import type { InstallableApp, InstallOperation, WebSearchResult } from './localCapabilitiesClient.ts';
+import type { InstallableApp, InstallOperation, WebSearchResult, WeatherResult } from './localCapabilitiesClient.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
 export type NexusPlanStepState = 'PENDING' | 'ACTIVE' | 'DONE' | 'SKIPPED' | 'FAILED';
@@ -71,7 +71,7 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   ];
   if (isProjectIntent(text)) plan.push({ id: 'inspect', label: 'Przeglądam pliki projektu', state: 'PENDING' });
   if (isProjectIntent(text) && isProjectFixIntent(text)) plan.push({ id: 'modify', label: 'Wprowadzam ograniczoną poprawkę', state: 'PENDING' });
-  if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
+  if (isWebSearchIntent(text) || isWeatherIntent(text)) plan.push({ id: 'search', label: isWeatherIntent(text) ? 'Sprawdzam pogodę online' : 'Szukam informacji i źródeł', state: 'PENDING' });
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
   if (installationRequest(text)) plan.push({ id: 'approval', label: 'Sprawdzam instalację i wymagane zgody', state: 'PENDING' });
   plan.push(
@@ -83,6 +83,28 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
 
 function isWebSearchIntent(text: string): boolean {
   return /(szukaj|wyszukaj|znajdź|sprawdź|poszukaj).{0,80}(w internecie|w sieci|online|źródł|stron|informacj)|aktualn.{0,40}(informacj|wersj|cena|wiadomoś)|\bsearch\s+(the\s+)?web\b/i.test(text);
+}
+
+function isWeatherIntent(text: string): boolean {
+  return /\b(pogod[ayęe]|temperatur[ayęe]|prognoz[ayęe]|weather|forecast)\b/i.test(text);
+}
+
+function formatWeather(result: WeatherResult): string {
+  const current = [
+    `lokalizacja: ${result.location.name}${result.location.country ? `, ${result.location.country}` : ''}`,
+    `warunki: ${result.current.description}`,
+    result.current.temperatureC === undefined ? undefined : `temperatura: ${result.current.temperatureC}°C`,
+    result.current.apparentTemperatureC === undefined ? undefined : `odczuwalna: ${result.current.apparentTemperatureC}°C`,
+    result.current.humidityPercent === undefined ? undefined : `wilgotność: ${result.current.humidityPercent}%`,
+    result.current.windKmh === undefined ? undefined : `wiatr: ${result.current.windKmh} km/h`,
+    result.current.time ? `czas danych: ${result.current.time}` : undefined,
+  ].filter(Boolean).join(', ');
+  const forecast = result.daily.map((day) => {
+    const range = day.minC === undefined || day.maxC === undefined ? '' : `, ${day.minC}–${day.maxC}°C`;
+    const rain = day.precipitationProbabilityPercent === undefined ? '' : `, opady do ${day.precipitationProbabilityPercent}%`;
+    return `- ${day.date}: ${day.description}${range}${rain}`;
+  }).join('\n');
+  return `Rzeczywiste dane pogodowe (${result.provider}):\n${current}\nPrognoza:\n${forecast}`;
 }
 
 function installationRequest(text: string): boolean {
@@ -168,6 +190,7 @@ export class NexusOrchestrator {
     let task: AgentTask | undefined;
     const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: task?.id, plan: [...plan] });
     let searchResults: WebSearchResult[] = [];
+    let weatherResolved = false;
     const contextNotes: string[] = [];
     const inspectedFiles = new Map<string, string>();
     let repairSummary: string | undefined;
@@ -293,17 +316,31 @@ export class NexusOrchestrator {
         plan[plan.findIndex((step) => step.id === 'approval')].state = 'DONE';
       }
 
-      if (isWebSearchIntent(input.text)) {
-        plan[plan.findIndex((step) => step.id === 'search')].state = 'ACTIVE';
+      if (isWeatherIntent(input.text)) {
+        const searchIndex = plan.findIndex((step) => step.id === 'search');
+        if (searchIndex >= 0) plan[searchIndex].state = 'ACTIVE';
+        emit('SEARCHING', 'Sprawdzam pogodę w internecie');
+        try {
+          const weather = await this.capabilities.getWeather(input.text);
+          weatherResolved = true;
+          contextNotes.push(formatWeather(weather));
+          if (searchIndex >= 0) plan[searchIndex].state = 'DONE';
+        } catch (error) {
+          contextNotes.push(`Pogoda online jest niedostępna: ${error instanceof Error ? error.message : String(error)}. Nie zgaduj bieżącej pogody; wyjaśnij, że nie udało się pobrać aktualnych danych.`);
+          if (searchIndex >= 0) plan[searchIndex].state = 'FAILED';
+        }
+      } else if (isWebSearchIntent(input.text)) {
+        const searchIndex = plan.findIndex((step) => step.id === 'search');
+        if (searchIndex >= 0) plan[searchIndex].state = 'ACTIVE';
         emit('SEARCHING', 'Szukam informacji w internecie');
         try {
           const result = await this.capabilities.searchWeb(input.text);
           searchResults = result.results;
           contextNotes.push(`Rzeczywiste wyniki wyszukiwania (${result.provider}):\n${formatSearchResults(searchResults)}`);
-          plan[plan.findIndex((step) => step.id === 'search')].state = 'DONE';
+          if (searchIndex >= 0) plan[searchIndex].state = 'DONE';
         } catch (error) {
           contextNotes.push(`Wyszukiwanie WWW jest niedostępne: ${error instanceof Error ? error.message : String(error)}. Kontynuuj na podstawie lokalnej wiedzy i zaznacz, że odpowiedź nie została zweryfikowana w sieci.`);
-          plan[plan.findIndex((step) => step.id === 'search')].state = 'FAILED';
+          if (searchIndex >= 0) plan[searchIndex].state = 'FAILED';
         }
       }
 
@@ -324,7 +361,7 @@ export class NexusOrchestrator {
       emit('TESTING', 'Weryfikuję wynik i zapisuję ważne informacje');
       await this.saveTaskMemory(input.text, responseText, searchResults);
       await this.hub.completeTask(task.id, {
-        status: searchResults.length || !isWebSearchIntent(input.text) ? 'SUCCESS' : 'PARTIAL',
+        status: searchResults.length || weatherResolved || (!isWebSearchIntent(input.text) && !isWeatherIntent(input.text)) ? 'SUCCESS' : 'PARTIAL',
         summary: responseText.slice(0, 240),
         payload: { sourceCount: searchResults.length, repairedPath },
       });
