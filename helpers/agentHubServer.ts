@@ -7,6 +7,8 @@ import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 import { OpenAICompatibleCloudClient } from './cloudAI.ts';
 import { createWorkspaceProject } from './projectWorkspace.ts';
+import { FileSystemMemoryBackend } from './memoryStore.ts';
+import type { MemoryEntry } from './memoryStore.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -14,6 +16,7 @@ const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', '
 export interface AgentHubServerOptions {
   allowedOrigins?: string[];
   workspaceDir?: string;
+  memoryFilePath?: string;
 }
 
 class HttpError extends Error {
@@ -117,6 +120,7 @@ function isLoopbackOrigin(origin: string): boolean {
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
   const cloudAI = new OpenAICompatibleCloudClient();
+  const memoryBackend = new FileSystemMemoryBackend(options.memoryFilePath ?? join(process.cwd(), '.nexus-memory.json'));
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -158,6 +162,35 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/memory/snapshot') {
+        sendJson(response, 200, { entries: await memoryBackend.load() });
+        return;
+      }
+
+      if (method === 'PUT' && url.pathname === '/api/memory/snapshot') {
+        const body = await readJson(request, 4 * 1024 * 1024);
+        if (!Array.isArray(body.entries) || body.entries.length > 2000) {
+          throw new HttpError(400, 'entries must be an array with at most 2000 memories');
+        }
+        const entries = body.entries as MemoryEntry[];
+        const valid = entries.every((entry) =>
+          isRecord(entry)
+          && typeof entry.id === 'string'
+          && typeof entry.kind === 'string'
+          && typeof entry.text === 'string'
+          && typeof entry.category === 'string'
+          && Array.isArray(entry.tags)
+          && typeof entry.createdAt === 'number'
+          && typeof entry.updatedAt === 'number'
+          && typeof entry.relevance === 'number'
+          && typeof entry.hash === 'string'
+        );
+        if (!valid) throw new HttpError(400, 'Invalid memory snapshot');
+        await memoryBackend.save(entries);
+        sendJson(response, 200, { ok: true, count: entries.length });
         return;
       }
 
