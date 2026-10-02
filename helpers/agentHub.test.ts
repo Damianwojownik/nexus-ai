@@ -193,6 +193,31 @@ test('Nexus applies one verified repair through the approval-checked workspace w
   }
 });
 
+test('weather intent is planned as a live internet capability', () => {
+  const plan = buildNexusPlan('Jaka jest pogoda w Kolonii dzisiaj?');
+  assert.equal(plan.some((step) => step.id === 'search' && step.label === 'Sprawdzam pogodę online'), true);
+});
+
+test('weather API validates requests through the Agent Hub', { timeout: 15000 }, async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'nexus-weather-api-'));
+  const hub = new AgentHub({ stateFilePath: join(tempDir, 'hub-state.json') });
+  const server = createAgentHubServer(hub, { workspaceDir: join(tempDir, 'workspace') });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const response = await fetch(`${baseUrl}/api/weather?q=x`);
+    assert.equal(response.status, 400);
+    assert.match((await response.json() as { error: string }).error, /2 to 300 characters/i);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('workspace import is path-safe and installs require explicit confirmation', { timeout: 15000 }, async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'nexus-local-capabilities-'));
   const hub = new AgentHub({ stateFilePath: join(tempDir, 'hub-state.json') });

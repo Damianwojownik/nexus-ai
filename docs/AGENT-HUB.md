@@ -2,6 +2,8 @@
 
 Nexus uses GitHub as the shared source of truth for code while agents may execute in different environments. Nexus owns durable memory and coordination state; models and agents are replaceable workers.
 
+In `AUTO` mode the model router uses a configured cloud primary when one actually exists, and falls back to local Ollama when that primary is unavailable or quota-limited. Memory belongs to Nexus rather than to the provider, so the same retrieved context is passed to the fallback model. The UI must not label Ollama as a cloud/primary connection.
+
 ## Runtime API
 
 `createAgentHubServer(hub)` in `helpers/agentHubServer.ts` creates a Node HTTP server around the existing `AgentHub`. Run the local host from the repository root with:
@@ -21,6 +23,7 @@ The UI registers the actual `nexus-ui` agent, heartbeats it every 15 seconds, fe
 - `POST /api/tasks/:id/claim` and `/lease` claim or lease work.
 - `GET /api/events` returns recent events as JSON. With `Accept: text/event-stream`, it streams new events over SSE.
 - `GET /api/search?q=...` performs DuckDuckGo web search and returns source URLs/snippets.
+- `GET /api/weather?q=...` resolves a place and fetches current conditions plus a short forecast from Open-Meteo. Weather requests are routed here before the model answers, so the local Ollama fallback can answer from live data instead of guessing.
 - `POST /api/workspace/import` stores one file up to 10 MB in the configured workspace; path segments and executable/installer extensions are rejected, and existing files are not overwritten.
 - `GET /api/install/catalog`, `POST /api/install` and `GET /api/install/:id` expose the Windows `winget` allowlist and asynchronous operation status. Every start requires `confirmed: true`, and the endpoint rejects browser origins other than loopback. No arbitrary package IDs or shell commands are accepted.
 

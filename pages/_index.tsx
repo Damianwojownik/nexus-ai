@@ -27,7 +27,7 @@ const toolRegistry = new ToolRegistry();
 registerDefaultTools(toolRegistry);
 const ollamaProvider = new OllamaProvider(ollamaClient);
 const primaryProvider = new PrimaryAgentProvider({ id: 'chatgpt-primary', name: 'chatgpt-primary' });
-const modelRouter = new ModelRouter('AUTO', [ollamaProvider], ollamaProvider);
+const modelRouter = new ModelRouter('AUTO', [ollamaProvider]);
 const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
   systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
 });
