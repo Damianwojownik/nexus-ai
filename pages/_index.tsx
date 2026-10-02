@@ -11,7 +11,7 @@ import type { NexusApprovalRequest, NexusWorkflowProgress, NexusWorkflowState } 
 import { MemoryStore } from '../helpers/memoryStore';
 import { ToolRegistry, registerDefaultTools } from '../helpers/toolRegistry';
 import { VoiceEventBus } from '../helpers/voiceEventBus';
-import { PrimaryAgentProvider } from '../helpers/primaryAgentProvider';
+import { CopilotHubProvider } from '../helpers/copilotHubProvider';
 import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
@@ -26,8 +26,8 @@ const memoryStore = new MemoryStore();
 const toolRegistry = new ToolRegistry();
 registerDefaultTools(toolRegistry);
 const ollamaProvider = new OllamaProvider(ollamaClient);
-const primaryProvider = new PrimaryAgentProvider({ id: 'chatgpt-primary', name: 'chatgpt-primary' });
-const modelRouter = new ModelRouter('AUTO', [ollamaProvider]);
+const copilotProvider = new CopilotHubProvider();
+const modelRouter = new ModelRouter('AUTO', [ollamaProvider], copilotProvider);
 const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
   systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
 });
@@ -87,8 +87,8 @@ export default function Home() {
         setStatus(`Ollama — połączono (${health.model})`);
       }
 
-      const primaryHealth = await primaryProvider.health();
-      setPrimaryStatus(primaryHealth.status);
+      const primaryHealth = await copilotProvider.checkHealth();
+      setPrimaryStatus(primaryHealth.status === 'CONNECTED' ? 'CONNECTED' : primaryHealth.status === 'ERROR' ? 'ERROR' : 'DISCONNECTED');
       setMemoryReady(true);
     })();
   }, []);
