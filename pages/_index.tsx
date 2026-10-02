@@ -16,24 +16,28 @@ import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
 import { LocalCapabilitiesClient } from '../helpers/localCapabilitiesClient';
+import { HubCloudProvider } from '../helpers/hubCloudProvider';
+import { seedNexusMemory } from '../helpers/nexusSeedMemory';
+import { HubMemoryBackend } from '../helpers/hubMemoryBackend';
 import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
 import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
 import type { VoiceEventType } from '../helpers/agentProtocol';
 
 const ollamaClient = new OllamaClient();
-const memoryStore = new MemoryStore();
 const toolRegistry = new ToolRegistry();
 registerDefaultTools(toolRegistry);
 const ollamaProvider = new OllamaProvider(ollamaClient);
 const primaryProvider = new PrimaryAgentProvider({ id: 'chatgpt-primary', name: 'chatgpt-primary' });
-const modelRouter = new ModelRouter('AUTO', [ollamaProvider], ollamaProvider);
-const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
-  systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
-});
 const voiceEventBus = new VoiceEventBus();
 const agentHubClient = new AgentHubClient();
+const memoryStore = new MemoryStore(new HubMemoryBackend(agentHubClient.baseUrl));
 const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
+const cloudProvider = new HubCloudProvider(agentHubClient.baseUrl);
+const modelRouter = new ModelRouter('AUTO', [ollamaProvider], cloudProvider);
+const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
+  systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning. Use live tool context when available and continue locally when remote AI is unavailable.',
+});
 const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
 export default function Home() {
@@ -89,6 +93,7 @@ export default function Home() {
 
       const primaryHealth = await primaryProvider.health();
       setPrimaryStatus(primaryHealth.status);
+      await seedNexusMemory(memoryStore);
       setMemoryReady(true);
     })();
   }, []);
@@ -351,7 +356,7 @@ export default function Home() {
         <input ref={attachmentInputRef} type="file" multiple hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.xlsx,.pptx" onChange={event=>{addAttachments(event.target.files);event.currentTarget.value=''}}/>
         {attachments.length>0&&<div className={styles.attachmentList}>{attachments.map((file,index)=><span key={`${file.name}-${index}`} className={styles.attachmentChip}>{file.name}<button type="button" aria-label={`Usuń ${file.name}`} onClick={()=>setAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))}>×</button></span>)}</div>}
         <div className={styles.composer}><Button variant="secondary" onClick={()=>attachmentInputRef.current?.click()} aria-label="Dodaj załączniki"><Plus size={18}/> Dodaj</Button><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&run()} placeholder="Powiedz Nexusowi, co chcesz osiągnąć…"/><Button onClick={run} disabled={isThinking||(!prompt.trim()&&!attachments.length)} aria-label="Wyślij"><Send size={18}/></Button></div>
-        {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
+        {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':approvalRequest.kind==='GITHUB_IMPORT'?'Pobierz repozytorium':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button></div>
       </div>
       <details className={styles.nexusDetails}>

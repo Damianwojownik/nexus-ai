@@ -4,10 +4,13 @@ import { AgentHubClient } from './agentHubClient.ts';
 import type { AgentTask } from './agentProtocol.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
 import type { InstallableApp, InstallOperation, WebSearchResult } from './localCapabilitiesClient.ts';
+import { isAffirmative, needsProjectClarification, parseBlueprint, parseGeneratedProject } from './projectBuilder.ts';
+import { isProjectCreationIntent } from './projectIntent.ts';
+import type { ProjectBlueprint } from './projectBuilder.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
 export type NexusPlanStepState = 'PENDING' | 'ACTIVE' | 'DONE' | 'SKIPPED' | 'FAILED';
-export type NexusApprovalKind = 'INSTALL_APP' | 'INSTALLER_SETUP';
+export type NexusApprovalKind = 'INSTALL_APP' | 'INSTALLER_SETUP' | 'GITHUB_IMPORT';
 
 export interface NexusPlanStep {
   id: string;
@@ -22,12 +25,9 @@ export interface NexusWorkflowProgress {
   plan: NexusPlanStep[];
 }
 
-export interface NexusApprovalRequest {
-  kind: NexusApprovalKind;
-  taskId: string;
-  app: InstallableApp;
-  message: string;
-}
+export type NexusApprovalRequest =
+  | { kind: 'INSTALL_APP' | 'INSTALLER_SETUP'; taskId: string; app: InstallableApp; message: string }
+  | { kind: 'GITHUB_IMPORT'; taskId: string; repoUrl: string; message: string };
 
 export interface NexusAttachmentContext {
   name: string;
@@ -46,6 +46,11 @@ export type NexusWorkflowOutcome =
   | { status: 'DONE'; taskId: string; text: string; plan: NexusPlanStep[]; searchResults: WebSearchResult[] }
   | { status: 'WAITING_FOR_APPROVAL'; taskId: string; text: string; plan: NexusPlanStep[]; approval: NexusApprovalRequest; searchResults: WebSearchResult[] };
 
+interface PendingProjectBuild {
+  blueprint: ProjectBlueprint;
+  originalRequest: string;
+}
+
 interface PendingWorkflow {
   input: NexusWorkflowInput;
   task: AgentTask;
@@ -59,21 +64,31 @@ const installationPatterns: Array<{ pattern: RegExp; id: string }> = [
   { pattern: /visual\s*studio\s*code|\bvscode\b/i, id: 'Microsoft.VisualStudioCode' },
   { pattern: /\b7\s*-?\s*zip\b/i, id: '7zip.7zip' },
   { pattern: /\bvlc\b/i, id: 'VideoLAN.VLC' },
+  { pattern: /\bpython\s*3\.11\b/i, id: 'Python.Python.3.11' },
   { pattern: /\bpython(?:\s*3(?:\.13)?)?\b/i, id: 'Python.Python.3.13' },
   { pattern: /\bnode(?:\.js)?\s*(?:lts)?\b/i, id: 'OpenJS.NodeJS.LTS' },
+  { pattern: /\bblender\b/i, id: 'BlenderFoundation.Blender' },
+  { pattern: /\bffmpeg\b/i, id: 'Gyan.FFmpeg' },
+  { pattern: /\bollama\b/i, id: 'Ollama.Ollama' },
+  { pattern: /\bgithub\s*desktop\b/i, id: 'GitHub.GitHubDesktop' },
   { pattern: /\bgit\b/i, id: 'Git.Git' },
 ];
 
-export function buildNexusPlan(text: string, attachments: NexusAttachmentContext[] = []): NexusPlanStep[] {
+export function buildNexusPlan(text: string, attachments: NexusAttachmentContext[] = [], hasActiveProject = false): NexusPlanStep[] {
   const plan: NexusPlanStep[] = [
     { id: 'understand', label: 'Rozpoznaję cel', state: 'PENDING' },
     { id: 'plan', label: 'Przygotowuję plan', state: 'PENDING' },
   ];
-  if (isProjectIntent(text)) plan.push({ id: 'inspect', label: 'Przeglądam pliki projektu', state: 'PENDING' });
-  if (isProjectIntent(text) && isProjectFixIntent(text)) plan.push({ id: 'modify', label: 'Wprowadzam ograniczoną poprawkę', state: 'PENDING' });
-  if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
+  const projectIntent = isProjectIntent(text) || (hasActiveProject && isProjectIterationIntent(text));
+  if (projectIntent) plan.push({ id: 'inspect', label: 'Przeglądam pliki projektu', state: 'PENDING' });
+  if (projectIntent && (isProjectFixIntent(text) || (hasActiveProject && isProjectIterationIntent(text)))) {
+    plan.push({ id: 'modify', label: 'Wprowadzam ograniczoną poprawkę', state: 'PENDING' });
+  }
+  if (isWeatherIntent(text)) plan.push({ id: 'weather', label: 'Sprawdzam pogodę online', state: 'PENDING' });
+  else if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
   if (installationRequest(text)) plan.push({ id: 'approval', label: 'Sprawdzam instalację i wymagane zgody', state: 'PENDING' });
+  else if (githubImportRequest(text)) plan.push({ id: 'approval', label: 'Czekam na zgodę na import repozytorium', state: 'PENDING' });
   plan.push(
     { id: 'execute', label: 'Wykonuję zadanie', state: 'PENDING' },
     { id: 'verify', label: 'Weryfikuję i zapisuję wynik', state: 'PENDING' },
@@ -81,8 +96,22 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   return plan;
 }
 
+function isWeatherIntent(text: string): boolean {
+  return /\b(pogoda|pogodę|pogode|temperatura|temperaturę|prognoza|weather|forecast)\b/i.test(text);
+}
+
 function isWebSearchIntent(text: string): boolean {
   return /(szukaj|wyszukaj|znajdź|sprawdź|poszukaj).{0,80}(w internecie|w sieci|online|źródł|stron|informacj)|aktualn.{0,40}(informacj|wersj|cena|wiadomoś)|\bsearch\s+(the\s+)?web\b/i.test(text);
+}
+
+function extractGitHubRepository(text: string): string | undefined {
+  const match = text.match(/https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?/i);
+  return match?.[0];
+}
+
+function githubImportRequest(text: string): boolean {
+  return /\b(sklonuj|skopiuj|pobierz|importuj|wgraj|dodaj)\b.{0,80}\b(github|repo|repozytor)/i.test(text)
+    && !!extractGitHubRepository(text);
 }
 
 function installationRequest(text: string): boolean {
@@ -91,6 +120,10 @@ function installationRequest(text: string): boolean {
 
 function isProjectIntent(text: string): boolean {
   return /(mój projekt|moim projekcie|repozytor|codebase|znajdź błęd|znaleźć błęd|napraw|debug|review.*code|fix.*bug)/i.test(text);
+}
+
+function isProjectIterationIntent(text: string): boolean {
+  return /\b(zmień|zmien|dodaj|usuń|usun|popraw|napraw|przerób|przerob|zmodyfikuj|change|add|remove|fix|update)\b/i.test(text);
 }
 
 function isProjectFixIntent(text: string): boolean {
@@ -145,6 +178,9 @@ function formatSearchResults(results: WebSearchResult[]): string {
 
 export class NexusOrchestrator {
   private readonly pendingWorkflows = new Map<string, PendingWorkflow>();
+  private pendingProjectBuild?: PendingProjectBuild;
+  private projectClarificationSeed?: string;
+  private activeProjectPath?: string;
   private readonly agent: NexusAgent;
   private readonly hub: AgentHubClient;
   private readonly memory: MemoryStore;
@@ -162,9 +198,182 @@ export class NexusOrchestrator {
     this.capabilities = capabilities;
   }
 
+  private async prepareProjectBuild(
+    input: NexusWorkflowInput,
+    onProgress: (progress: NexusWorkflowProgress) => void,
+  ): Promise<NexusWorkflowOutcome> {
+    const task = await this.hub.submitTask({
+      goal: 'Przygotuj plan nowej aplikacji',
+      createdBy: 'nexus-ui',
+      assignedTo: 'nexus-ui',
+      scope: 'nexus-builder',
+    });
+    const plan: NexusPlanStep[] = [
+      { id: 'understand', label: 'Zbieram wymagania', state: 'ACTIVE' },
+      { id: 'plan', label: 'Przygotowuję specyfikację', state: 'PENDING' },
+      { id: 'confirm', label: 'Czekam na potwierdzenie', state: 'PENDING' },
+    ];
+    const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: task.id, plan: [...plan] });
+
+    try {
+      const claimed = await this.hub.claimTask(task.id, 'nexus-ui');
+      if (!claimed) throw new Error('Nexus nie mógł przejąć zadania planowania');
+      await this.hub.leaseTask(task.id, 'nexus-ui', 60 * 60 * 1000);
+
+      const seed = this.projectClarificationSeed;
+      if (!seed && needsProjectClarification(input.text)) {
+        this.projectClarificationSeed = input.text;
+        const question = await this.agent.send({
+          text: [
+            'Użytkownik chce stworzyć nową aplikację, ale opis jest zbyt ogólny.',
+            'Zadaj po polsku maksymalnie 4 krótkie pytania, które są niezbędne do rozpoczęcia budowy.',
+            'Pytaj o cel aplikacji, najważniejsze funkcje, wygląd i sposób działania. Nie proponuj jeszcze kodu.',
+            `Prośba użytkownika: ${input.text}`,
+          ].join('\n'),
+          mode: 'AUTO',
+          history: input.history,
+          maxOutputTokens: 220,
+        });
+        plan[0].state = 'DONE';
+        plan[1].state = 'SKIPPED';
+        plan[2].state = 'ACTIVE';
+        await this.hub.completeTask(task.id, { status: 'PARTIAL', summary: question.text.slice(0, 240) });
+        emit('DONE', 'Potrzebuję kilku szczegółów');
+        return { status: 'DONE', taskId: task.id, text: question.text, plan, searchResults: [] };
+      }
+
+      plan[0].state = 'DONE';
+      plan[1].state = 'ACTIVE';
+      emit('THINKING', 'Układam konkretny plan aplikacji');
+      const requestText = seed ? `${seed}\n\nDoprecyzowanie użytkownika: ${input.text}` : input.text;
+      this.projectClarificationSeed = undefined;
+
+      const proposal = await this.agent.send({
+        text: [
+          'Przygotuj plan nowej aplikacji. Zwróć wyłącznie JSON:',
+          '{"name":"krótka-nazwa","summary":"co aplikacja robi","stack":"prosty stos technologiczny","features":["funkcja 1","funkcja 2"]}',
+          'Plan ma być możliwy do zbudowania lokalnie. Maksymalnie 10 funkcji.',
+          `Wymagania: ${requestText}`,
+        ].join('\n'),
+        mode: 'AUTO',
+        history: input.history,
+        maxOutputTokens: 700,
+      });
+      const blueprint = parseBlueprint(proposal.text);
+      this.pendingProjectBuild = { blueprint, originalRequest: requestText };
+      plan[1].state = 'DONE';
+      plan[2].state = 'ACTIVE';
+
+      const text = [
+        `Mam plan dla „${blueprint.name}”.`,
+        blueprint.summary,
+        `Technologia: ${blueprint.stack}.`,
+        `Funkcje: ${blueprint.features.join(', ')}.`,
+        'Czy tak mam to zbudować? Napisz „tak”, albo podaj poprawki — zaktualizuję plan przed kodowaniem.',
+      ].join('\n');
+      await this.hub.completeTask(task.id, { status: 'PARTIAL', summary: text.slice(0, 240), payload: { blueprint } });
+      emit('DONE', 'Plan gotowy do potwierdzenia');
+      return { status: 'DONE', taskId: task.id, text, plan, searchResults: [] };
+    } catch (error) {
+      await this.hub.failTask(task.id, error instanceof Error ? error.message : String(error)).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async executePendingProjectBuild(
+    input: NexusWorkflowInput,
+    onProgress: (progress: NexusWorkflowProgress) => void,
+  ): Promise<NexusWorkflowOutcome> {
+    const pending = this.pendingProjectBuild;
+    if (!pending) throw new Error('Brak oczekującego projektu do utworzenia');
+
+    const plan: NexusPlanStep[] = [
+      { id: 'understand', label: 'Potwierdzam specyfikację', state: 'DONE' },
+      { id: 'generate', label: 'Generuję komplet plików', state: 'ACTIVE' },
+      { id: 'write', label: 'Tworzę projekt w workspace', state: 'PENDING' },
+      { id: 'verify', label: 'Weryfikuję zapis', state: 'PENDING' },
+    ];
+    const task = await this.hub.submitTask({
+      goal: `Zbuduj projekt ${pending.blueprint.name}`,
+      createdBy: 'nexus-ui',
+      assignedTo: 'nexus-ui',
+      scope: 'nexus-builder',
+    });
+    const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: task.id, plan: [...plan] });
+
+    try {
+      const claimed = await this.hub.claimTask(task.id, 'nexus-ui');
+      if (!claimed) throw new Error('Nexus nie mógł przejąć zadania budowy projektu');
+      await this.hub.leaseTask(task.id, 'nexus-ui', 60 * 60 * 1000);
+      emit('WORKING', 'Generuję aplikację od podstaw');
+
+      const generation = await this.agent.send({
+        text: [
+          'Wygeneruj kompletny, uruchamialny projekt na podstawie zatwierdzonego planu.',
+          'Zwróć wyłącznie JSON bez komentarzy: {"name":"nazwa","summary":"opis","files":[{"path":"index.html","content":"..."},...]}.',
+          'Maksymalnie 24 pliki. Nie dodawaj sekretów, binariów, .env ani plików wykonywalnych.',
+          'Preferuj prosty stack bez zbędnych zależności. Jeśli używasz npm, dodaj package.json.',
+          `Nazwa: ${pending.blueprint.name}`,
+          `Stack: ${pending.blueprint.stack}`,
+          `Opis: ${pending.blueprint.summary}`,
+          `Funkcje: ${pending.blueprint.features.join(', ')}`,
+          `Oryginalna prośba: ${pending.originalRequest}`,
+        ].join('\n'),
+        mode: 'AUTO',
+        projectContext: input.projectContext,
+        history: input.history,
+        maxOutputTokens: 6000,
+      });
+      const generated = parseGeneratedProject(generation.text);
+      generated.name = pending.blueprint.name;
+      plan[1].state = 'DONE';
+      plan[2].state = 'ACTIVE';
+      emit('WORKING', 'Zapisuję pliki projektu');
+
+      const created = await this.capabilities.createWorkspaceProject(generated, true);
+      plan[2].state = 'DONE';
+      plan[3].state = 'ACTIVE';
+      emit('TESTING', 'Sprawdzam zapis projektu');
+
+      const files = await this.capabilities.listWorkspaceFiles();
+      const expectedPrefix = created.path + '/';
+      const written = files.filter((path) => path === created.path || path.startsWith(expectedPrefix));
+      if (written.length < created.files.length) throw new Error('Nie wszystkie pliki projektu są widoczne po zapisie');
+
+      const text = `Gotowe. Zbudowałem projekt „${created.name}” od podstaw i zapisałem ${created.files.length} plików w ${created.path}. Powiedz teraz, co mam poprawić lub dodać — będę iterował na tym samym projekcie.`;
+      await this.saveTaskMemory(pending.originalRequest, text, []);
+      await this.hub.completeTask(task.id, { status: 'SUCCESS', summary: text.slice(0, 240), payload: { project: created } });
+      plan[3].state = 'DONE';
+      this.pendingProjectBuild = undefined;
+      this.activeProjectPath = created.path;
+      emit('DONE', 'Projekt gotowy');
+      return { status: 'DONE', taskId: task.id, text, plan, searchResults: [] };
+    } catch (error) {
+      await this.hub.failTask(task.id, error instanceof Error ? error.message : String(error)).catch(() => undefined);
+      throw error;
+    }
+  }
+
   async start(input: NexusWorkflowInput, onProgress: (progress: NexusWorkflowProgress) => void = () => undefined): Promise<NexusWorkflowOutcome> {
+    if (this.pendingProjectBuild && isAffirmative(input.text)) {
+      return this.executePendingProjectBuild(input, onProgress);
+    }
+    if (this.pendingProjectBuild) {
+      const previous = this.pendingProjectBuild;
+      this.pendingProjectBuild = undefined;
+      this.projectClarificationSeed = [
+        previous.originalRequest,
+        `Poprzedni plan: ${previous.blueprint.summary}`,
+        `Poprzednie funkcje: ${previous.blueprint.features.join(', ')}`,
+      ].join('\n');
+      return this.prepareProjectBuild(input, onProgress);
+    }
+    if (this.projectClarificationSeed || isProjectCreationIntent(input.text)) {
+      return this.prepareProjectBuild(input, onProgress);
+    }
+
     const attachmentNames = (input.attachments ?? []).map((file) => ({ name: file.name, mimeType: file.type || 'application/octet-stream' }));
-    const plan = buildNexusPlan(input.text, attachmentNames);
+    const plan = buildNexusPlan(input.text, attachmentNames, !!this.activeProjectPath);
     let task: AgentTask | undefined;
     const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: task?.id, plan: [...plan] });
     let searchResults: WebSearchResult[] = [];
@@ -198,7 +407,10 @@ export class NexusOrchestrator {
         emit('WORKING', 'Przeglądam pliki projektu');
         try {
           const files = await this.capabilities.listWorkspaceFiles();
-          const selectedFiles = files.slice(0, 12);
+          const scopedFiles = this.activeProjectPath
+            ? files.filter((path) => path === this.activeProjectPath || path.startsWith(this.activeProjectPath + '/'))
+            : files;
+          const selectedFiles = (scopedFiles.length ? scopedFiles : files).slice(0, 12);
           if (!selectedFiles.length) {
             contextNotes.push('Workspace Nexusa nie zawiera jeszcze plików projektu. Nie twierdź, że projekt został sprawdzony; poproś o dodanie plików lub projektu przez przycisk Dodaj.');
           } else {
@@ -293,17 +505,34 @@ export class NexusOrchestrator {
         plan[plan.findIndex((step) => step.id === 'approval')].state = 'DONE';
       }
 
-      if (isWebSearchIntent(input.text)) {
-        plan[plan.findIndex((step) => step.id === 'search')].state = 'ACTIVE';
+      if (isWeatherIntent(input.text)) {
+        const weatherIndex = plan.findIndex((step) => step.id === 'weather');
+        if (weatherIndex >= 0) plan[weatherIndex].state = 'ACTIVE';
+        emit('SEARCHING', 'Sprawdzam pogodę online');
+        try {
+          const weather = await this.capabilities.getWeather(input.text);
+          contextNotes.push([
+            `Aktualna pogoda z ${weather.provider} dla ${weather.location.name}${weather.location.country ? ', ' + weather.location.country : ''}:`,
+            `temperatura ${weather.current.temperatureC ?? '?'}°C, odczuwalna ${weather.current.apparentTemperatureC ?? '?'}°C, ${weather.current.description}, wilgotność ${weather.current.humidityPercent ?? '?'}%, wiatr ${weather.current.windKmh ?? '?'} km/h.`,
+            weather.daily[0] ? `Dziś: ${weather.daily[0].minC ?? '?'}–${weather.daily[0].maxC ?? '?'}°C, opady do ${weather.daily[0].precipitationProbabilityPercent ?? '?'}%.` : '',
+          ].filter(Boolean).join('\n'));
+          if (weatherIndex >= 0) plan[weatherIndex].state = 'DONE';
+        } catch (error) {
+          contextNotes.push(`Nie udało się pobrać aktualnej pogody: ${error instanceof Error ? error.message : String(error)}. Nie zgaduj danych pogodowych.`);
+          if (weatherIndex >= 0) plan[weatherIndex].state = 'FAILED';
+        }
+      } else if (isWebSearchIntent(input.text)) {
+        const searchIndex = plan.findIndex((step) => step.id === 'search');
+        if (searchIndex >= 0) plan[searchIndex].state = 'ACTIVE';
         emit('SEARCHING', 'Szukam informacji w internecie');
         try {
           const result = await this.capabilities.searchWeb(input.text);
           searchResults = result.results;
           contextNotes.push(`Rzeczywiste wyniki wyszukiwania (${result.provider}):\n${formatSearchResults(searchResults)}`);
-          plan[plan.findIndex((step) => step.id === 'search')].state = 'DONE';
+          if (searchIndex >= 0) plan[searchIndex].state = 'DONE';
         } catch (error) {
           contextNotes.push(`Wyszukiwanie WWW jest niedostępne: ${error instanceof Error ? error.message : String(error)}. Kontynuuj na podstawie lokalnej wiedzy i zaznacz, że odpowiedź nie została zweryfikowana w sieci.`);
-          plan[plan.findIndex((step) => step.id === 'search')].state = 'FAILED';
+          if (searchIndex >= 0) plan[searchIndex].state = 'FAILED';
         }
       }
 
@@ -365,6 +594,24 @@ export class NexusOrchestrator {
       const message = 'Otworzyłem Microsoft Store. Zainstaluj App Installer; Nexus sprawdzi dostępność winget i będzie kontynuował.';
       onProgress({ state: 'WAITING_FOR_APPROVAL', message, taskId, plan: [...pending.plan] });
       return { status: 'WAITING_FOR_APPROVAL', taskId, text: message, plan: [...pending.plan], approval: pending.approval, searchResults: [] };
+    }
+
+    if (pending.approval.kind === 'GITHUB_IMPORT') {
+      onProgress({ state: 'WORKING', message: 'Pobieram repozytorium GitHub', taskId, plan: [...pending.plan] });
+      const imported = await this.capabilities.cloneGitHubRepository(pending.approval.repoUrl, true);
+      this.activeProjectPath = imported.path;
+      const approvalIndex = pending.plan.findIndex((step) => step.id === 'approval');
+      if (approvalIndex >= 0) pending.plan[approvalIndex].state = 'DONE';
+      const executeIndex = pending.plan.findIndex((step) => step.id === 'execute');
+      if (executeIndex >= 0) pending.plan[executeIndex].state = 'DONE';
+      const verifyIndex = pending.plan.findIndex((step) => step.id === 'verify');
+      if (verifyIndex >= 0) pending.plan[verifyIndex].state = 'DONE';
+      const text = `Pobrałem ${imported.repository} do workspace: ${imported.path}. Mogę teraz przejrzeć kod, uruchomić analizę i wprowadzać poprawki.`;
+      await this.saveTaskMemory(pending.input.text, text, []);
+      await this.hub.completeTask(taskId, { status: 'SUCCESS', summary: text.slice(0, 240), payload: imported });
+      this.pendingWorkflows.delete(taskId);
+      onProgress({ state: 'DONE', message: 'Repozytorium gotowe', taskId, plan: [...pending.plan] });
+      return { status: 'DONE', taskId, text, plan: [...pending.plan], searchResults: [] };
     }
 
     onProgress({ state: 'WORKING', message: `Instaluję ${pending.approval.app.name}`, taskId, plan: [...pending.plan] });

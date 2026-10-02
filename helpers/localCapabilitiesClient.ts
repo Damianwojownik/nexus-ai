@@ -4,10 +4,36 @@ export interface WebSearchResult {
   snippet: string;
 }
 
+export interface WeatherResult {
+  provider: 'Open-Meteo';
+  location: { name: string; country?: string; latitude: number; longitude: number; timezone?: string };
+  current: { temperatureC?: number; apparentTemperatureC?: number; humidityPercent?: number; windKmh?: number; weatherCode?: number; description: string; time?: string };
+  daily: Array<{ date: string; minC?: number; maxC?: number; precipitationProbabilityPercent?: number; weatherCode?: number; description: string }>;
+}
+
+export interface CreatedWorkspaceProject {
+  name: string;
+  summary: string;
+  path: string;
+  files: string[];
+}
+
+export interface GeneratedWorkspaceProject {
+  name: string;
+  summary: string;
+  files: Array<{ path: string; content: string }>;
+}
+
 export interface ImportedWorkspaceFile {
   filename: string;
   bytes: number;
   location: 'workspace';
+}
+
+export interface GitHubCloneResult {
+  repository: string;
+  path: string;
+  output: string;
 }
 
 export interface InstallableApp {
@@ -89,6 +115,18 @@ export class LocalCapabilitiesClient {
     return this.request(`/api/search?q=${encodeURIComponent(query)}`);
   }
 
+  async getWeather(query: string): Promise<WeatherResult> {
+    return this.request(`/api/weather?q=${encodeURIComponent(query)}`);
+  }
+
+  async createWorkspaceProject(project: GeneratedWorkspaceProject, confirmed: boolean): Promise<CreatedWorkspaceProject> {
+    const result = await this.request<{ project: CreatedWorkspaceProject }>('/api/workspace/project', {
+      method: 'POST',
+      body: JSON.stringify({ project, confirmed }),
+    });
+    return result.project;
+  }
+
   async importFile(file: File): Promise<ImportedWorkspaceFile> {
     if (file.size > 10 * 1024 * 1024) throw new LocalCapabilitiesError('Import limit is 10 MB');
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -121,6 +159,14 @@ export class LocalCapabilitiesClient {
       body: JSON.stringify({ path, content, confirmed }),
     });
     return result.file;
+  }
+
+  async cloneGitHubRepository(repoUrl: string, confirmed: boolean): Promise<GitHubCloneResult> {
+    const result = await this.request<{ repository: GitHubCloneResult }>('/api/github/import', {
+      method: 'POST',
+      body: JSON.stringify({ repoUrl, confirmed }),
+    });
+    return result.repository;
   }
 
   async getInstallCatalog(): Promise<InstallCatalog> {
