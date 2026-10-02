@@ -5,6 +5,12 @@ import { AgentHub } from './agentHub.ts';
 import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
+import { AIProviderRouter, AIProviderUnavailableError } from './aiProviderRouter.ts';
+import type { AIRoutingMode } from './aiProviderRouter.ts';
+import { GeminiAIProvider } from './geminiAIProvider.ts';
+import { OllamaHttpProvider } from './ollamaHttpProvider.ts';
+import { CapabilityRegistry, GitHubConnector } from './capabilityRegistry.ts';
+import type { ToolConnector } from './capabilityRegistry.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -12,6 +18,9 @@ const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', '
 export interface AgentHubServerOptions {
   allowedOrigins?: string[];
   workspaceDir?: string;
+  aiRouter?: AIProviderRouter;
+  capabilityRegistry?: CapabilityRegistry;
+  connectors?: ToolConnector[];
 }
 
 class HttpError extends Error {
@@ -61,6 +70,40 @@ function requiredString(body: Record<string, unknown>, key: string): string {
     throw new HttpError(400, `${key} is required`);
   }
   return value.trim();
+}
+
+function createDefaultCapabilityRegistry(localCapabilities: LocalCapabilities, connectors: ToolConnector[] = []): CapabilityRegistry {
+  const registry = new CapabilityRegistry();
+  registry.register({
+    id: 'browser-search',
+    name: 'Local web search',
+    authType: 'none',
+    priority: 100,
+    capabilities: [{ id: 'browser.search', name: 'Search the web', readOnly: true }],
+    async healthCheck() {
+      return { status: 'healthy' };
+    },
+    async execute(capability, args) {
+      if (capability !== 'browser.search') throw new Error(`Unsupported browser capability: ${capability}`);
+      if (typeof args.query !== 'string' || !args.query.trim()) throw new HttpError(400, 'query is required');
+      return localCapabilities.searchWeb(args.query);
+    },
+  });
+  registry.register(new GitHubConnector());
+  for (const connector of connectors) registry.register(connector);
+  return registry;
+}
+
+function parseRoutingMode(value: unknown): AIRoutingMode {
+  if (value === undefined) return 'AUTO';
+  if (value === 'AUTO' || value === 'LOCAL' || value === 'CLOUD') return value;
+  throw new HttpError(400, 'mode must be AUTO, LOCAL, or CLOUD');
+}
+
+function requirePrompt(body: Record<string, unknown>): string {
+  const prompt = requiredString(body, 'prompt');
+  if (prompt.length > 64000) throw new HttpError(413, 'prompt exceeds 64000 characters');
+  return prompt;
 }
 
 function streamEvents(hub: AgentHub, request: IncomingMessage, response: ServerResponse): void {
@@ -114,6 +157,8 @@ function isLoopbackOrigin(origin: string): boolean {
 
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
+  const aiRouter = options.aiRouter ?? new AIProviderRouter([new GeminiAIProvider(), new OllamaHttpProvider()]);
+  const capabilityRegistry = options.capabilityRegistry ?? createDefaultCapabilityRegistry(localCapabilities, options.connectors);
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -155,6 +200,165 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/avatar/animate') {
+        const body = await readJson(request, 256 * 1024);
+        const portraitPath = requiredString(body, 'portraitPath');
+        const text = body.text ?? undefined;
+        const audioPath = body.audioPath ?? undefined;
+        const lang = body.lang ?? 'pl';
+        
+        if (!text && !audioPath) {
+          throw new HttpError(400, 'Either text or audioPath is required');
+        }
+
+        const animationScript = join(process.cwd(), '..', 'FasterLivePortrait', 'nexus_avatar_animator.py');
+        const pythonExe = process.env.PYTHON_EXE || 'python';
+
+        // Invoke animator subprocess (non-blocking)
+        const { spawn } = await import('child_process');
+        const args = [
+          animationScript,
+          '--portrait', portraitPath,
+          '--lang', lang,
+          '--mode', 'onnx',
+          '--json',
+        ];
+
+        if (text) {
+          args.push('--text', text);
+        } else if (audioPath) {
+          args.push('--audio', audioPath);
+        }
+
+        let stdout = '';
+        let stderr = '';
+
+        const proc = spawn(pythonExe, args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 120_000,
+        });
+
+        proc.stdout?.on('data', (data) => {
+          stdout += data.toString();
+        });
+
+        proc.stderr?.on('data', (data) => {
+          stderr += data.toString();
+        });
+
+        proc.on('close', (code) => {
+          if (code !== 0) {
+            console.error(`Avatar animator failed: ${stderr}`);
+          }
+        });
+
+        proc.on('error', (err) => {
+          console.error(`Avatar animator process error: ${err.message}`);
+        });
+
+        // Return immediately with 202 Accepted; client polls /api/avatar/result/:id
+        const jobId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        sendJson(response, 202, { jobId, status: 'processing' });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/health') {
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+        const providers = await aiRouter.healthCheck();
+        sendJson(response, 200, {
+          gemini: providers['google-gemini'] ?? { status: 'not_configured' },
+          ollama: providers['ollama-local'] ?? { status: 'unavailable' },
+        });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/ai/generate') {
+        const body = await readJson(request, 256 * 1024);
+        const prompt = requirePrompt(body);
+        const temperature = body.temperature;
+        const maxOutputTokens = body.maxOutputTokens;
+        if (temperature !== undefined && (typeof temperature !== 'number' || !Number.isFinite(temperature) || temperature < 0 || temperature > 2)) {
+          throw new HttpError(400, 'temperature must be between 0 and 2');
+        }
+        if (maxOutputTokens !== undefined && (typeof maxOutputTokens !== 'number' || !Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 32768)) {
+          throw new HttpError(400, 'maxOutputTokens must be an integer between 1 and 32768');
+        }
+        const controller = new AbortController();
+        const abortIfDisconnected = () => {
+          if (!response.writableEnded) controller.abort(new DOMException('The client disconnected', 'AbortError'));
+        };
+        request.once('aborted', abortIfDisconnected);
+        response.once('close', abortIfDisconnected);
+        try {
+          const result = await aiRouter.generate(prompt, {
+            mode: parseRoutingMode(body.mode),
+            signal: controller.signal,
+            ...(temperature !== undefined ? { temperature } : {}),
+            ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+          });
+          sendJson(response, 200, { text: result.text, providerId: result.providerId });
+        } finally {
+          request.off('aborted', abortIfDisconnected);
+          response.off('close', abortIfDisconnected);
+        }
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/ai/stream') {
+        const body = await readJson(request, 256 * 1024);
+        const prompt = requirePrompt(body);
+        const mode = parseRoutingMode(body.mode);
+        const controller = new AbortController();
+        const abortIfDisconnected = () => {
+          if (!response.writableEnded) controller.abort(new DOMException('The client disconnected', 'AbortError'));
+        };
+        request.once('aborted', abortIfDisconnected);
+        response.once('close', abortIfDisconnected);
+        response.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        try {
+          const result = await aiRouter.stream(prompt, (chunk) => {
+            if (!response.destroyed) response.write(`event: token\ndata: ${JSON.stringify({ text: chunk })}\n\n`);
+          }, { mode, signal: controller.signal });
+          if (!response.destroyed) {
+            response.write(`event: complete\ndata: ${JSON.stringify({ providerId: result.providerId })}\n\n`);
+            response.end();
+          }
+        } catch (error) {
+          if (!response.destroyed) {
+            const message = error instanceof AIProviderUnavailableError
+              ? error.message
+              : error instanceof Error ? error.message : 'AI streaming failed';
+            response.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
+            response.end();
+          }
+        } finally {
+          request.off('aborted', abortIfDisconnected);
+          response.off('close', abortIfDisconnected);
+        }
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/capabilities') {
+        sendJson(response, 200, { capabilities: await capabilityRegistry.listCapabilities() });
+        return;
+      }
+
+      if (method === 'POST' && segments.length === 3 && segments[0] === 'api' && segments[1] === 'capabilities') {
+        const body = await readJson(request);
+        const args = body.args === undefined ? {} : body.args;
+        if (!isRecord(args)) throw new HttpError(400, 'args must be a JSON object');
+        const result = await capabilityRegistry.execute(segments[2], args);
+        sendJson(response, 200, result);
         return;
       }
 
@@ -332,7 +536,9 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         response.destroy();
         return;
       }
-      const statusCode = error instanceof HttpError || error instanceof LocalCapabilityError ? error.statusCode : 500;
+      const statusCode = error instanceof HttpError || error instanceof LocalCapabilityError
+        ? error.statusCode
+        : error instanceof AIProviderUnavailableError ? 503 : 500;
       const message = error instanceof Error ? error.message : 'Internal server error';
       sendJson(response, statusCode, { error: message });
     }

@@ -16,6 +16,10 @@ Set `NEXUS_AGENT_HUB_HOST`, `NEXUS_AGENT_HUB_PORT`, `NEXUS_AGENT_HUB_STATE`, `NE
 The UI registers the actual `nexus-ui` agent, heartbeats it every 15 seconds, fetches agents/tasks from the API, and consumes new events over SSE. Native reconnect is not assumed: the client retries with bounded exponential backoff. The server allows local browser origins and HTTPS `*.sandbox.floot.app` origins, including Private Network Access preflight. Keep the service on loopback unless authentication and an explicit origin policy are added.
 
 - `GET /api/health` reports server health.
+- `GET /api/ai/health` reports Gemini and Ollama provider state without returning credentials.
+- `POST /api/ai/generate` routes text generation through Gemini and falls back to Ollama on provider limits or outages.
+- `POST /api/ai/stream` streams response chunks as server-sent events and propagates client cancellation.
+- `GET /api/capabilities` lists capabilities and connector health; `POST /api/capabilities/:id` executes a registered capability.
 - `GET` and `POST /api/agents` list and register agents; `POST /api/agents/:id/heartbeat` updates presence.
 - `GET` and `POST /api/tasks` list and submit tasks; `GET /api/tasks/:id` reads a task.
 - `POST /api/tasks/:id/claim` and `/lease` claim or lease work.
@@ -27,6 +31,14 @@ The UI registers the actual `nexus-ui` agent, heartbeats it every 15 seconds, fe
 The browser exposes search, import and install controls. Installation is disabled when `winget` is missing; the runtime will not install the package manager or another app without the individual UI confirmation. This machine currently has no `winget`, so installation execution is not verified. Search and workspace import have been exercised against the live local runtime.
 
 The hub persists its task, agent and recent-event snapshot through its configured state file. Task leases prevent a second agent from claiming work while the current lease is active.
+
+## AI providers and connectors
+
+The server-side AI provider registry uses `GEMINI_API_KEY` only in the Agent Hub process. `GEMINI_MODEL` defaults to `gemini-2.5-flash`. The local Ollama adapter uses `OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`) and automatically selects an installed lightweight model, preferring Qwen, Gemma and Mistral before larger Llama models. Set `OLLAMA_MODEL` to force an installed model. No model is downloaded automatically.
+
+Quota/credits/points exhaustion places that provider in cooldown and the current request immediately falls back to local Ollama. Rate limits use a shorter cooldown. Fallback events log provider IDs and status only, never prompts or credentials. The repository has no real GitHub Copilot model integration; the router can act on an explicit quota response from a configured adapter but cannot inspect Copilot account points itself.
+
+The capability registry currently includes local web search and read-only GitHub operations. Set `NEXUS_GITHUB_TOKEN` in the Hub process to enable the GitHub connector; tokens are only sent in server-side authorization headers. The registry is designed to resolve a requested capability to an available connector rather than binding orchestration to a vendor.
 
 ## Coordination contract
 

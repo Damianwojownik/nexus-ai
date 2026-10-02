@@ -5,6 +5,7 @@ import { Input } from '../components/Input';
 import styles from './_index.module.css';
 import { OllamaClient } from '../helpers/ollamaClient';
 import { OllamaProvider, ModelRouter } from '../helpers/modelRouter';
+import { GeminiProxyProvider } from '../helpers/geminiProxyProvider';
 import { NexusAgent } from '../helpers/nexusAgent';
 import { NexusOrchestrator } from '../helpers/nexusOrchestrator';
 import type { NexusApprovalRequest, NexusWorkflowProgress, NexusWorkflowState } from '../helpers/nexusOrchestrator';
@@ -27,7 +28,8 @@ const toolRegistry = new ToolRegistry();
 registerDefaultTools(toolRegistry);
 const ollamaProvider = new OllamaProvider(ollamaClient);
 const primaryProvider = new PrimaryAgentProvider({ id: 'chatgpt-primary', name: 'chatgpt-primary' });
-const modelRouter = new ModelRouter('AUTO', [ollamaProvider], ollamaProvider);
+const geminiProxyProvider = new GeminiProxyProvider();
+const modelRouter = new ModelRouter('AUTO', [ollamaProvider], geminiProxyProvider);
 const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
   systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
 });
@@ -43,9 +45,11 @@ export default function Home() {
   const [status,setStatus]=useState('Gotowa do rozmowy');
   const [listening,setListening]=useState(false);
   const [speaking,setSpeaking]=useState(false);
+  const [animationVideoUrl,setAnimationVideoUrl]=useState<string|null>(null);
   const [selectedModel,setSelectedModel]=useState<string>(ollamaClient.defaultModel);
   const [ollamaStatus,setOllamaStatus]=useState<'CONNECTED'|'OFFLINE'|'NO_MODEL'|'ERROR'>('OFFLINE');
   const [primaryStatus,setPrimaryStatus]=useState<'CONNECTED'|'DISCONNECTED'|'NOT_CONFIGURED'|'ERROR'>('NOT_CONFIGURED');
+  const [geminiStatus,setGeminiStatus]=useState<'CONNECTED'|'OFFLINE'|'NO_MODEL'|'NOT_CONFIGURED'|'RATE_LIMITED'|'QUOTA_EXCEEDED'|'UNAVAILABLE'|'ERROR'>('OFFLINE');
   const [memoryReady,setMemoryReady]=useState(false);
   const [hubStatus,setHubStatus]=useState<AgentHubConnectionStatus>('DISCONNECTED');
   const [hubAgents,setHubAgents]=useState<Array<Awaited<ReturnType<AgentHubClient['getAgents']>>[number]>>([]);
@@ -76,11 +80,17 @@ export default function Home() {
 
     void (async () => {
       const available = await ollamaClient.listModels();
-      if (available.length > 0) {
-        setSelectedModel(available[0].name);
+      const lightweight = available.filter((model) => model.size === undefined || model.size <= 2_500_000_000);
+      const candidates = lightweight.length ? lightweight : available;
+      const preferred = ['qwen', 'gemma', 'mistral', 'llama'];
+      const selected = preferred.map((prefix) => candidates.find((model) => model.name.toLowerCase().startsWith(prefix))).find(Boolean) ?? candidates[0];
+      const selectedModelName = selected?.name ?? ollamaClient.defaultModel;
+      if (selected) {
+        setSelectedModel(selected.name);
+        ollamaClient.defaultModel = selected.name;
       }
 
-      const health = await ollamaClient.checkHealth(selectedModel || ollamaClient.defaultModel);
+      const health = await ollamaClient.checkHealth(selectedModelName);
       setOllamaStatus(health.status);
       if (health.status === 'CONNECTED' && health.model) {
         setSelectedModel(health.model);
@@ -89,6 +99,8 @@ export default function Home() {
 
       const primaryHealth = await primaryProvider.health();
       setPrimaryStatus(primaryHealth.status);
+      const geminiHealth = await geminiProxyProvider.checkHealth();
+      setGeminiStatus(geminiHealth.status);
       setMemoryReady(true);
     })();
   }, []);
@@ -327,6 +339,30 @@ export default function Home() {
     u.onend=()=>{setSpeaking(false); emitVoiceEvent('IDLE', 'Nexus ready'); setStatus('Gotowy do rozmowy')};
     window.speechSynthesis.speak(u);
   };
+
+  const animateAvatar = async (text: string) => {
+    if (!text.trim()) return;
+    try {
+      const response = await fetch('http://127.0.0.1:8788/api/avatar/animate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          portraitPath: 'C:\\Users\\damian\\FasterLivePortrait\\checkpoints\\nexus_test_portrait.png',
+          text: text,
+          lang: 'pl'
+        })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      // Backend returns 202; client should poll for results or use WebSocket
+      // For MVP, we'll trigger local animation via Python subprocess directly
+      setStatus('Animuję awatara...');
+    } catch (error) {
+      console.error('Avatar animation failed:', error);
+      // Silent fail; fall back to CSS animation
+    }
+  };
+
   const startVoice=()=>{
     const w:any=window, SR=w.SpeechRecognition||w.webkitSpeechRecognition;
     if(!SR){emitVoiceEvent('ERROR','Rozpoznawanie mowy nie jest dostępne w tej przeglądarce');setStatus('Rozpoznawanie mowy nie jest dostępne w tej przeglądarce');return;}
@@ -344,7 +380,7 @@ export default function Home() {
   return <main className={styles.shell}>
     <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
       <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
-        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
+        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/>{animationVideoUrl?<video autoPlay muted playsInline className={styles.person} src={animationVideoUrl} onEnded={()=>setAnimationVideoUrl(null)}/>:<img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/>}<div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
         {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
         <div className={styles.status}>{status}</div>
@@ -365,6 +401,7 @@ export default function Home() {
           <section className={styles.settingsPanel}>
             <h3>NEXUS</h3>
             <div className={styles.settingsRow}><span>Primary Agent</span><strong>{primaryStatus}</strong></div>
+            <div className={styles.settingsRow}><span>Cloud AI</span><strong>Gemini · {geminiStatus}</strong></div>
             <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama · {selectedModel} · {ollamaStatus}</strong></div>
             <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady?'ready':'loading'}</strong></div>
             <div className={styles.settingsRow}><span>Hub</span><strong>{hubStatus} · {hubAgents.filter(agent=>agent.presence!=='offline').length} online</strong></div>
