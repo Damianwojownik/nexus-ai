@@ -63,10 +63,13 @@ function connectorMentioned(text: string, connectors: ConnectorHealth[]): boolea
 }
 
 export class ConnectorPlanner {
-  constructor(
-    private readonly client: ConnectorClient,
-    private readonly agent: NexusAgent,
-  ) {}
+  private readonly client: ConnectorClient;
+  private readonly agent: NexusAgent;
+
+  constructor(client: ConnectorClient, agent: NexusAgent) {
+    this.client = client;
+    this.agent = agent;
+  }
 
   async shouldConsider(text: string): Promise<{ consider: boolean; connectors: ConnectorHealth[] }> {
     let connectors: ConnectorHealth[] = [];
