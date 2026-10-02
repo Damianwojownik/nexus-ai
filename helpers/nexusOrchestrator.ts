@@ -173,6 +173,7 @@ export class NexusOrchestrator {
   private readonly pendingWorkflows = new Map<string, PendingWorkflow>();
   private pendingProjectBuild?: PendingProjectBuild;
   private projectClarificationSeed?: string;
+  private activeProjectPath?: string;
   private readonly agent: NexusAgent;
   private readonly hub: AgentHubClient;
   private readonly memory: MemoryStore;
@@ -337,6 +338,7 @@ export class NexusOrchestrator {
       await this.hub.completeTask(task.id, { status: 'SUCCESS', summary: text.slice(0, 240), payload: { project: created } });
       plan[3].state = 'DONE';
       this.pendingProjectBuild = undefined;
+      this.activeProjectPath = created.path;
       emit('DONE', 'Projekt gotowy');
       return { status: 'DONE', taskId: task.id, text, plan, searchResults: [] };
     } catch (error) {
@@ -582,6 +584,24 @@ export class NexusOrchestrator {
       const message = 'Otworzyłem Microsoft Store. Zainstaluj App Installer; Nexus sprawdzi dostępność winget i będzie kontynuował.';
       onProgress({ state: 'WAITING_FOR_APPROVAL', message, taskId, plan: [...pending.plan] });
       return { status: 'WAITING_FOR_APPROVAL', taskId, text: message, plan: [...pending.plan], approval: pending.approval, searchResults: [] };
+    }
+
+    if (pending.approval.kind === 'GITHUB_IMPORT') {
+      onProgress({ state: 'WORKING', message: 'Pobieram repozytorium GitHub', taskId, plan: [...pending.plan] });
+      const imported = await this.capabilities.cloneGitHubRepository(pending.approval.repoUrl, true);
+      this.activeProjectPath = imported.path;
+      const approvalIndex = pending.plan.findIndex((step) => step.id === 'approval');
+      if (approvalIndex >= 0) pending.plan[approvalIndex].state = 'DONE';
+      const executeIndex = pending.plan.findIndex((step) => step.id === 'execute');
+      if (executeIndex >= 0) pending.plan[executeIndex].state = 'DONE';
+      const verifyIndex = pending.plan.findIndex((step) => step.id === 'verify');
+      if (verifyIndex >= 0) pending.plan[verifyIndex].state = 'DONE';
+      const text = `Pobrałem ${imported.repository} do workspace: ${imported.path}. Mogę teraz przejrzeć kod, uruchomić analizę i wprowadzać poprawki.`;
+      await this.saveTaskMemory(pending.input.text, text, []);
+      await this.hub.completeTask(taskId, { status: 'SUCCESS', summary: text.slice(0, 240), payload: imported });
+      this.pendingWorkflows.delete(taskId);
+      onProgress({ state: 'DONE', message: 'Repozytorium gotowe', taskId, plan: [...pending.plan] });
+      return { status: 'DONE', taskId, text, plan: [...pending.plan], searchResults: [] };
     }
 
     onProgress({ state: 'WORKING', message: `Instaluję ${pending.approval.app.name}`, taskId, plan: [...pending.plan] });
