@@ -5,6 +5,7 @@ import { AgentHub } from './agentHub.ts';
 import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
+import { OpenAICompatibleCloudClient } from './cloudAI.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -114,6 +115,7 @@ function isLoopbackOrigin(origin: string): boolean {
 
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
+  const cloudAI = new OpenAICompatibleCloudClient();
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -173,6 +175,35 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       if (method === 'GET' && segments.length === 2 && segments[0] === 'api' && segments[1] === 'search') {
         const query = url.searchParams.get('q') ?? '';
         sendJson(response, 200, await localCapabilities.searchWeb(query));
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/weather') {
+        const query = url.searchParams.get('q') ?? '';
+        sendJson(response, 200, await localCapabilities.getWeather(query));
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/ai/health') {
+        sendJson(response, 200, await cloudAI.health());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/ai/models') {
+        sendJson(response, 200, { models: await cloudAI.listModels() });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/ai/generate') {
+        const body = await readJson(request, 2 * 1024 * 1024);
+        const prompt = requiredString(body, 'prompt');
+        const text = await cloudAI.generate({
+          prompt,
+          system: typeof body.system === 'string' ? body.system : undefined,
+          temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
+          maxTokens: typeof body.maxTokens === 'number' ? body.maxTokens : undefined,
+        });
+        sendJson(response, 200, { text });
         return;
       }
 
