@@ -205,7 +205,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'POST' && url.pathname === '/api/avatar/animate') {
         const body = await readJson(request, 256 * 1024);
-        const portraitPath = requiredString(body, 'portraitPath');
+        const portraitPath = body.portraitPath ?? undefined; // Optional now
         const text = body.text ?? undefined;
         const audioPath = body.audioPath ?? undefined;
         const lang = body.lang ?? 'pl';
@@ -221,11 +221,15 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         const { spawn } = await import('child_process');
         const args = [
           animationScript,
-          '--portrait', portraitPath,
           '--lang', lang,
           '--mode', 'onnx',
           '--json',
         ];
+
+        // Add portrait only if provided (auto-detect otherwise)
+        if (portraitPath) {
+          args.push('--portrait', portraitPath);
+        }
 
         if (text) {
           args.push('--text', text);

@@ -347,9 +347,9 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          portraitPath: 'C:\\Users\\damian\\FasterLivePortrait\\checkpoints\\nexus_test_portrait.png',
           text: text,
           lang: 'pl'
+          // portraitPath omitted - auto-detect from FasterLivePortrait/checkpoints/
         })
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
