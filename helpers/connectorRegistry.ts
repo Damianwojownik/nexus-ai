@@ -48,7 +48,7 @@ const TOOL_RE = /^[a-zA-Z0-9_.:/-]{1,160}$/;
 
 function safeUrl(raw: string): URL {
   const url = new URL(raw);
-  const loopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '::1';
+  const loopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '::1' || url.hostname === '[::1]';
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
     throw new Error('Connector URL must use HTTPS, except loopback HTTP is allowed');
   }
@@ -107,7 +107,6 @@ function exec(command: string, args: string[], timeoutMs = 15000): Promise<{ std
       timeout: timeoutMs,
       windowsHide: true,
       maxBuffer: 4 * 1024 * 1024,
-      shell: process.platform === 'win32',
     }, (error, stdout, stderr) => {
       if (error) reject(new Error((stderr || error.message || `${command} failed`).trim()));
       else resolve({ stdout: stdout.trim(), stderr: stderr.trim() });
@@ -132,6 +131,7 @@ function parseSseJson(text: string): JsonRpcResponse {
 
 class McpHttpConnector {
   private sessionId?: string;
+  private initialized = false;
   private requestId = 1;
 
   constructor(
@@ -182,13 +182,14 @@ class McpHttpConnector {
   }
 
   private async ensureInitialized() {
-    if (this.sessionId) return;
+    if (this.initialized) return;
     await this.rpc('initialize', {
       protocolVersion: this.manifest.protocolVersion ?? '2025-03-26',
       capabilities: {},
       clientInfo: { name: 'Nexus', version: '1.0.0' },
     });
     await this.rpc('notifications/initialized', undefined, true).catch(() => undefined);
+    this.initialized = true;
   }
 
   async listTools(): Promise<ConnectorTool[]> {
