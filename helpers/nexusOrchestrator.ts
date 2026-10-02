@@ -182,24 +182,32 @@ export class NexusOrchestrator {
     const attachmentNames = (input.attachments ?? []).map((file) => ({ name: file.name, mimeType: file.type || 'application/octet-stream' }));
     const plan = buildNexusPlan(input.text, attachmentNames);
     let task: AgentTask | undefined;
-    const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: task?.id, plan: [...plan] });
+    const localTaskId = `local-${Date.now().toString(36)}`;
+    const currentTaskId = () => task?.id ?? localTaskId;
+    const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: currentTaskId(), plan: [...plan] });
     let searchResults: WebSearchResult[] = [];
     const contextNotes: string[] = [];
+    let hubAvailable = true;
     const inspectedFiles = new Map<string, string>();
     let repairSummary: string | undefined;
     let repairedPath: string | undefined;
 
     try {
       emit('THINKING', 'Rozpoznaję cel i układam plan');
-      task = await this.hub.submitTask({
-        goal: input.text.trim(),
-        createdBy: 'nexus-ui',
-        assignedTo: 'nexus-ui',
-        scope: 'nexus-conversation',
-      });
-      const claimed = await this.hub.claimTask(task.id, 'nexus-ui');
-      if (!claimed) throw new Error('Nexus nie mógł przejąć własnego zadania');
-      await this.hub.leaseTask(task.id, 'nexus-ui', 60 * 60 * 1000);
+      try {
+        task = await this.hub.submitTask({
+          goal: input.text.trim(),
+          createdBy: 'nexus-ui',
+          assignedTo: 'nexus-ui',
+          scope: 'nexus-conversation',
+        });
+        const claimed = await this.hub.claimTask(task.id, 'nexus-ui');
+        if (!claimed) throw new Error('Nexus nie mógł przejąć własnego zadania');
+        await this.hub.leaseTask(task.id, 'nexus-ui', 60 * 60 * 1000);
+      } catch (hubError) {
+        hubAvailable = false;
+        contextNotes.push(`Agent Hub/backend jest chwilowo niedostępny: ${hubError instanceof Error ? hubError.message : String(hubError)}. Kontynuuj rozmowę bez narzędzi backendowych; nie twierdź, że wykonałeś wyszukiwanie, instalację ani operacje na plikach.`);
+      }
       plan[0].state = 'DONE';
       plan[1].state = 'DONE';
 
@@ -240,12 +248,16 @@ export class NexusOrchestrator {
       for (const attachment of input.attachments ?? []) {
         const attachmentStep = plan.findIndex((step) => step.id === 'attachments');
         if (attachmentStep >= 0) plan[attachmentStep].state = 'ACTIVE';
-        const imported = await this.capabilities.importFile(attachment);
-        const isText = attachment.type.startsWith('text/') || /\.(txt|md|csv|json|xml|html|css|js|jsx|ts|tsx|py|yml|yaml)$/i.test(attachment.name);
-        const textContent = isText && attachment.size <= 256 * 1024 ? await attachment.text() : undefined;
-        contextNotes.push(textContent
-          ? `Załącznik ${imported.filename} (${attachment.type || 'text/plain'}, zapisany w workspace):\n${textContent.slice(0, 20000)}`
-          : `Załącznik ${imported.filename} (${attachment.type || 'application/octet-stream'}, zapisany w workspace). Bieżący provider nie obsługuje analizy wizualnej/binarnej; nie twierdź, że przeanalizowałeś jego zawartość.`);
+        try {
+          const imported = await this.capabilities.importFile(attachment);
+          const isText = attachment.type.startsWith('text/') || /\.(txt|md|csv|json|xml|html|css|js|jsx|ts|tsx|py|yml|yaml)$/i.test(attachment.name);
+          const textContent = isText && attachment.size <= 256 * 1024 ? await attachment.text() : undefined;
+          contextNotes.push(textContent
+            ? `Załącznik ${imported.filename} (${attachment.type || 'text/plain'}, zapisany w workspace):\n${textContent.slice(0, 20000)}`
+            : `Załącznik ${imported.filename} (${attachment.type || 'application/octet-stream'}, zapisany w workspace). Bieżący provider nie obsługuje analizy wizualnej/binarnej; nie twierdź, że przeanalizowałeś jego zawartość.`);
+        } catch (error) {
+          contextNotes.push(`Załącznik ${attachment.name} nie został zapisany, bo backend jest niedostępny: ${error instanceof Error ? error.message : String(error)}.`);
+        }
       }
       const attachmentStep = plan.findIndex((step) => step.id === 'attachments');
       if (attachmentStep >= 0) plan[attachmentStep].state = 'DONE';
@@ -291,11 +303,16 @@ export class NexusOrchestrator {
         }
       }
 
-      if (installationRequest(input.text)) {
+      if (installationRequest(input.text) && !hubAvailable) {
+        const approvalIndex = plan.findIndex((step) => step.id === 'approval');
+        if (approvalIndex >= 0) plan[approvalIndex].state = 'SKIPPED';
+        contextNotes.push('Instalacja wymaga działającego lokalnego Agent Hub i nie została uruchomiona podczas trybu awaryjnego.');
+      } else if (installationRequest(input.text)) {
         plan[plan.findIndex((step) => step.id === 'approval')].state = 'ACTIVE';
         const catalog = await this.capabilities.getInstallCatalog();
         const app = requestedApp(input.text, catalog.apps);
         if (app) {
+          if (!task) throw new Error('Agent Hub nie utworzył zadania instalacyjnego');
           const approval: NexusApprovalRequest = catalog.available
             ? { kind: 'INSTALL_APP', taskId: task.id, app, message: `Czy mam zainstalować ${app.name}?` }
             : { kind: 'INSTALLER_SETUP', taskId: task.id, app, message: `Nie wykryłem winget ani bezpiecznego instalatora. Czy mam otworzyć Microsoft Store dla App Installer? Po jego skonfigurowaniu Nexus zapyta osobno o instalację ${app.name}.` };
@@ -353,20 +370,22 @@ export class NexusOrchestrator {
       plan[plan.findIndex((step) => step.id === 'verify')].state = 'ACTIVE';
       emit('TESTING', 'Weryfikuję wynik i zapisuję ważne informacje');
       await this.saveTaskMemory(input.text, responseText, searchResults);
-      await this.hub.completeTask(task.id, {
-        status: searchResults.length || !isWebSearchIntent(input.text) ? 'SUCCESS' : 'PARTIAL',
-        summary: responseText.slice(0, 240),
-        payload: { sourceCount: searchResults.length, repairedPath },
-      });
+      if (task) {
+        await this.hub.completeTask(task.id, {
+          status: searchResults.length || !isWebSearchIntent(input.text) ? 'SUCCESS' : 'PARTIAL',
+          summary: responseText.slice(0, 240),
+          payload: { sourceCount: searchResults.length, repairedPath },
+        }).catch(() => undefined);
+      }
       plan[plan.findIndex((step) => step.id === 'verify')].state = 'DONE';
-      emit('DONE', 'Gotowe');
-      return { status: 'DONE', taskId: task.id, text: responseText, plan: [...plan], searchResults };
+      emit('DONE', hubAvailable ? 'Gotowe' : 'Gotowe — tryb lokalny bez backendu');
+      return { status: 'DONE', taskId: currentTaskId(), text: responseText, plan: [...plan], searchResults };
     } catch (error) {
       if (task) {
         await this.hub.failTask(task.id, error instanceof Error ? error.message : String(error)).catch(() => undefined);
       }
       const message = error instanceof Error ? error.message : 'Nexus nie mógł wykonać zadania';
-      onProgress({ state: 'ERROR', message, taskId: task?.id, plan: [...plan] });
+      onProgress({ state: 'ERROR', message, taskId: currentTaskId(), plan: [...plan] });
       throw error;
     }
   }
