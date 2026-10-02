@@ -10,7 +10,7 @@ import type { ProjectBlueprint } from './projectBuilder.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
 export type NexusPlanStepState = 'PENDING' | 'ACTIVE' | 'DONE' | 'SKIPPED' | 'FAILED';
-export type NexusApprovalKind = 'INSTALL_APP' | 'INSTALLER_SETUP';
+export type NexusApprovalKind = 'INSTALL_APP' | 'INSTALLER_SETUP' | 'GITHUB_IMPORT';
 
 export interface NexusPlanStep {
   id: string;
@@ -25,12 +25,9 @@ export interface NexusWorkflowProgress {
   plan: NexusPlanStep[];
 }
 
-export interface NexusApprovalRequest {
-  kind: NexusApprovalKind;
-  taskId: string;
-  app: InstallableApp;
-  message: string;
-}
+export type NexusApprovalRequest =
+  | { kind: 'INSTALL_APP' | 'INSTALLER_SETUP'; taskId: string; app: InstallableApp; message: string }
+  | { kind: 'GITHUB_IMPORT'; taskId: string; repoUrl: string; message: string };
 
 export interface NexusAttachmentContext {
   name: string;
@@ -88,6 +85,7 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   else if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
   if (installationRequest(text)) plan.push({ id: 'approval', label: 'Sprawdzam instalację i wymagane zgody', state: 'PENDING' });
+  else if (githubImportRequest(text)) plan.push({ id: 'approval', label: 'Czekam na zgodę na import repozytorium', state: 'PENDING' });
   plan.push(
     { id: 'execute', label: 'Wykonuję zadanie', state: 'PENDING' },
     { id: 'verify', label: 'Weryfikuję i zapisuję wynik', state: 'PENDING' },
@@ -101,6 +99,16 @@ function isWeatherIntent(text: string): boolean {
 
 function isWebSearchIntent(text: string): boolean {
   return /(szukaj|wyszukaj|znajdź|sprawdź|poszukaj).{0,80}(w internecie|w sieci|online|źródł|stron|informacj)|aktualn.{0,40}(informacj|wersj|cena|wiadomoś)|\bsearch\s+(the\s+)?web\b/i.test(text);
+}
+
+function extractGitHubRepository(text: string): string | undefined {
+  const match = text.match(/https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?/i);
+  return match?.[0];
+}
+
+function githubImportRequest(text: string): boolean {
+  return /\b(sklonuj|skopiuj|pobierz|importuj|wgraj|dodaj)\b.{0,80}\b(github|repo|repozytor)/i.test(text)
+    && !!extractGitHubRepository(text);
 }
 
 function installationRequest(text: string): boolean {
