@@ -4,7 +4,8 @@ import { AgentHubClient } from './agentHubClient.ts';
 import type { AgentTask } from './agentProtocol.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
 import type { InstallableApp, InstallOperation, WebSearchResult } from './localCapabilitiesClient.ts';
-import { isAffirmative, isProjectCreationIntent, needsProjectClarification, parseBlueprint, parseGeneratedProject } from './projectBuilder.ts';
+import { isAffirmative, needsProjectClarification, parseBlueprint, parseGeneratedProject } from './projectBuilder.ts';
+import { isProjectCreationIntent } from './projectIntent.ts';
 import type { ProjectBlueprint } from './projectBuilder.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
