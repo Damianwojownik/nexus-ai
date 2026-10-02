@@ -16,6 +16,8 @@ import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
 import { LocalCapabilitiesClient } from '../helpers/localCapabilitiesClient';
+import { HubCloudProvider } from '../helpers/hubCloudProvider';
+import { seedNexusMemory } from '../helpers/nexusSeedMemory';
 import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
 import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
@@ -27,13 +29,14 @@ const toolRegistry = new ToolRegistry();
 registerDefaultTools(toolRegistry);
 const ollamaProvider = new OllamaProvider(ollamaClient);
 const primaryProvider = new PrimaryAgentProvider({ id: 'chatgpt-primary', name: 'chatgpt-primary' });
-const modelRouter = new ModelRouter('AUTO', [ollamaProvider], ollamaProvider);
-const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
-  systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
-});
 const voiceEventBus = new VoiceEventBus();
 const agentHubClient = new AgentHubClient();
 const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
+const cloudProvider = new HubCloudProvider(agentHubClient.baseUrl);
+const modelRouter = new ModelRouter('AUTO', [ollamaProvider], cloudProvider);
+const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
+  systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning. Use live tool context when available and continue locally when remote AI is unavailable.',
+});
 const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
 export default function Home() {
@@ -89,6 +92,7 @@ export default function Home() {
 
       const primaryHealth = await primaryProvider.health();
       setPrimaryStatus(primaryHealth.status);
+      await seedNexusMemory(memoryStore);
       setMemoryReady(true);
     })();
   }, []);
