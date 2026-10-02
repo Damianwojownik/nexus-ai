@@ -25,6 +25,10 @@ function cleanBase64(value: string): string {
   return comma >= 0 && value.slice(0, comma).includes('base64') ? value.slice(comma + 1) : value;
 }
 
+function decodeBase64(value: string): Uint8Array {
+  return Uint8Array.from(Buffer.from(cleanBase64(value), 'base64'));
+}
+
 export class SelfHostedAvatarServerClient {
   readonly baseUrl: string;
   private readonly token: string;
@@ -94,19 +98,19 @@ export class SelfHostedAvatarServerClient {
     const form = new FormData();
     form.append(
       'source_image',
-      new Blob([Buffer.from(cleanBase64(input.sourceImageBase64), 'base64')], { type: input.sourceImageMime || 'image/png' }),
+      new Blob([decodeBase64(input.sourceImageBase64)], { type: input.sourceImageMime || 'image/png' }),
       'source.png',
     );
     if (input.audioBase64) {
       form.append(
         'audio',
-        new Blob([Buffer.from(cleanBase64(input.audioBase64), 'base64')], { type: input.audioMime || 'audio/wav' }),
+        new Blob([decodeBase64(input.audioBase64)], { type: input.audioMime || 'audio/wav' }),
         'speech.wav',
       );
     } else if (input.drivingVideoBase64) {
       form.append(
         'driving_video',
-        new Blob([Buffer.from(cleanBase64(input.drivingVideoBase64), 'base64')], { type: input.drivingVideoMime || 'video/mp4' }),
+        new Blob([decodeBase64(input.drivingVideoBase64)], { type: input.drivingVideoMime || 'video/mp4' }),
         'driving.mp4',
       );
     }
