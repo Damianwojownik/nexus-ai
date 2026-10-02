@@ -58,36 +58,34 @@ export class ModelRouter {
   }
 
   async route(prompt: string, options: Record<string, any> = {}) {
+    const localProvider = this.providers.find((p) => p.mode === 'LOCAL' || p.name === 'Ollama' || p.role === 'SUBAGENT');
+
     if (this.preferredMode === 'LOCAL') {
-      const provider = this.providers.find((p) => p.name === 'Ollama' || p.role === 'SUBAGENT');
-      if (!provider) throw new Error('Local provider is not registered.');
-      return provider.generate(prompt, options);
+      if (!localProvider) throw new Error('Local provider is not registered.');
+      const health = await localProvider.checkHealth();
+      if (health.status !== 'CONNECTED') throw new Error(`Local provider unavailable: ${health.status}`);
+      return localProvider.generate(prompt, options);
     }
 
-    const localProvider = this.providers.find((p) => p.name === 'Ollama' || p.role === 'SUBAGENT');
-    if (!localProvider) {
-      throw new Error('No provider available.');
-    }
-
-    if (this.primaryProvider && this.preferredMode === 'AUTO') {
+    if (this.primaryProvider) {
       const primaryHealth = await this.primaryProvider.checkHealth();
       if (primaryHealth.status === 'CONNECTED') {
         try {
           return await this.primaryProvider.generate(prompt, options);
-        } catch {
-          // Token/quota exhaustion or transient primary failures fall back to the free local provider.
+        } catch (error) {
+          if (this.preferredMode === 'CLOUD') throw error;
+          // Quota exhaustion and temporary remote failures fall through to the free local model in AUTO.
         }
+      } else if (this.preferredMode === 'CLOUD') {
+        throw new Error(`Cloud provider unavailable: ${primaryHealth.error || primaryHealth.status}`);
       }
-    }
-
-    const health = await localProvider.checkHealth();
-    if (health.status === 'CONNECTED') {
-      return localProvider.generate(prompt, options);
-    }
-
-    if (this.preferredMode === 'CLOUD') {
+    } else if (this.preferredMode === 'CLOUD') {
       throw new Error('Cloud provider is not configured yet.');
     }
+
+    if (!localProvider) throw new Error('No local fallback provider available.');
+    const health = await localProvider.checkHealth();
+    if (health.status === 'CONNECTED') return localProvider.generate(prompt, options);
 
     throw new Error(`Local provider unavailable: ${health.status}`);
   }
