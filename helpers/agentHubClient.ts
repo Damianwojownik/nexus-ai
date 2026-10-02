@@ -63,6 +63,40 @@ export class AgentHubClient {
     await this.request<{ ok: boolean }>('/api/health');
   }
 
+  async getAvatarHealth(): Promise<{ status: string; ok: boolean; message?: string; provider?: string; mode?: string }> {
+    return this.request('/api/avatar/health');
+  }
+
+  async renderAvatar(input: {
+    sourceImageBase64: string;
+    sourceImageMime?: string;
+    audioBase64?: string;
+    audioMime?: string;
+    drivingVideoBase64?: string;
+    drivingVideoMime?: string;
+  }): Promise<Blob> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/api/avatar/render`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(10 * 60 * 1000),
+      });
+    } catch (error) {
+      throw new AgentHubClientError(error instanceof Error ? error.message : 'Avatar render endpoint is unreachable');
+    }
+    if (!response.ok) {
+      let detail = `Avatar render returned HTTP ${response.status}`;
+      try {
+        const body = await response.json() as { error?: string };
+        if (body.error) detail = body.error;
+      } catch {}
+      throw new AgentHubClientError(detail, response.status);
+    }
+    return response.blob();
+  }
+
   async getAgents(): Promise<Array<AgentRegistration & { lastHeartbeat: string }>> {
     const result = await this.request<{ agents: Array<AgentRegistration & { lastHeartbeat: string }> }>('/api/agents');
     return result.agents;
