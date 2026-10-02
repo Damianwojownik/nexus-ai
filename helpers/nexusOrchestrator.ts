@@ -3,7 +3,7 @@ import { MemoryStore } from './memoryStore.ts';
 import { AgentHubClient } from './agentHubClient.ts';
 import type { AgentTask } from './agentProtocol.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
-import type { InstallableApp, InstallOperation, WebSearchResult } from './localCapabilitiesClient.ts';
+import type { InstallableApp, InstallOperation, WeatherResult, WebSearchResult } from './localCapabilitiesClient.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
 export type NexusPlanStepState = 'PENDING' | 'ACTIVE' | 'DONE' | 'SKIPPED' | 'FAILED';
@@ -71,6 +71,7 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   ];
   if (isProjectIntent(text)) plan.push({ id: 'inspect', label: 'Przeglądam pliki projektu', state: 'PENDING' });
   if (isProjectIntent(text) && isProjectFixIntent(text)) plan.push({ id: 'modify', label: 'Wprowadzam ograniczoną poprawkę', state: 'PENDING' });
+  if (isWeatherIntent(text)) plan.push({ id: 'weather', label: 'Sprawdzam pogodę online', state: 'PENDING' });
   if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
   if (installationRequest(text)) plan.push({ id: 'approval', label: 'Sprawdzam instalację i wymagane zgody', state: 'PENDING' });
@@ -81,8 +82,23 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   return plan;
 }
 
+function isWeatherIntent(text: string): boolean {
+  return /\b(pogod[ayę]|temperatur[ayę]|prognoz[ayę]|weather|forecast)\b/i.test(text);
+}
+
 function isWebSearchIntent(text: string): boolean {
   return /(szukaj|wyszukaj|znajdź|sprawdź|poszukaj).{0,80}(w internecie|w sieci|online|źródł|stron|informacj)|aktualn.{0,40}(informacj|wersj|cena|wiadomoś)|\bsearch\s+(the\s+)?web\b/i.test(text);
+}
+
+function formatWeather(result: WeatherResult): string {
+  const current = result.current;
+  const today = result.daily[0];
+  return [
+    `Źródło pogody: ${result.provider}`,
+    `Lokalizacja: ${result.location.name}${result.location.country ? `, ${result.location.country}` : ''}`,
+    `Teraz: ${current.temperatureC ?? '?'}°C, odczuwalna ${current.apparentTemperatureC ?? '?'}°C, ${current.description}, wilgotność ${current.humidityPercent ?? '?'}%, wiatr ${current.windKmh ?? '?'} km/h`,
+    today ? `Dzisiaj: min ${today.minC ?? '?'}°C, max ${today.maxC ?? '?'}°C, ${today.description}, opady do ${today.precipitationProbabilityPercent ?? '?'}%` : '',
+  ].filter(Boolean).join('\n');
 }
 
 function installationRequest(text: string): boolean {
@@ -291,6 +307,20 @@ export class NexusOrchestrator {
         }
         contextNotes.push(`Użytkownik poprosił o instalację, ale aplikacji nie ma na zatwierdzonej allowliście: ${catalog.apps.map((item) => item.name).join(', ')}. Nie instaluj i wyjaśnij ograniczenie.`);
         plan[plan.findIndex((step) => step.id === 'approval')].state = 'DONE';
+      }
+
+      if (isWeatherIntent(input.text)) {
+        const weatherStep = plan.findIndex((step) => step.id === 'weather');
+        plan[weatherStep].state = 'ACTIVE';
+        emit('SEARCHING', 'Sprawdzam aktualną pogodę');
+        try {
+          const weather = await this.capabilities.getWeather(input.text);
+          contextNotes.push(`Rzeczywiste dane pogodowe pobrane online. Użyj ich jako źródła prawdy i nie zgaduj:\n${formatWeather(weather)}`);
+          plan[weatherStep].state = 'DONE';
+        } catch (error) {
+          contextNotes.push(`Pogoda online jest niedostępna: ${error instanceof Error ? error.message : String(error)}. Nie zgaduj bieżącej pogody; wyjaśnij, że połączenie nie zadziałało.`);
+          plan[weatherStep].state = 'FAILED';
+        }
       }
 
       if (isWebSearchIntent(input.text)) {
