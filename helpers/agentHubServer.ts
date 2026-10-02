@@ -6,6 +6,7 @@ import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
+import { NexusCloudRouter } from './cloudProviders.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -116,6 +117,7 @@ function isLoopbackOrigin(origin: string): boolean {
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
   const avatarServer = new SelfHostedAvatarServerClient();
+  const cloudRouter = new NexusCloudRouter();
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -162,6 +164,26 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/avatar/health') {
         sendJson(response, 200, await avatarServer.health());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/ai/health') {
+        sendJson(response, 200, await cloudRouter.health());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/ai/generate') {
+        const body = await readJson(request, 2 * 1024 * 1024);
+        const prompt = requiredString(body, 'prompt');
+        try {
+          const result = await cloudRouter.generate(prompt, {
+            temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
+            maxOutputTokens: typeof body.maxOutputTokens === 'number' ? body.maxOutputTokens : undefined,
+          });
+          sendJson(response, 200, result);
+        } catch (error) {
+          throw new HttpError(502, error instanceof Error ? error.message : 'Cloud providers failed');
+        }
         return;
       }
 
