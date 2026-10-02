@@ -177,6 +177,17 @@ try {
   } catch {
     Write-Host ("INTERNET   Weather ERROR: " + $_.Exception.Message) -ForegroundColor Yellow
   }
+
+  try {
+    $connectorResult = Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/connectors" -TimeoutSec 20
+    foreach ($connector in @($connectorResult.connectors)) {
+      $suffix = if ($connector.toolCount -ne $null) { " (" + $connector.toolCount + " tools)" } else { "" }
+      $color = if ($connector.status -eq "CONNECTED") { "Green" } elseif ($connector.status -eq "NOT_CONFIGURED") { "DarkYellow" } else { "Yellow" }
+      Write-Host ("CONNECTOR  " + $connector.name + ": " + $connector.status + $suffix) -ForegroundColor $color
+    }
+  } catch {
+    Write-Host ("CONNECTOR  diagnostics ERROR: " + $_.Exception.Message) -ForegroundColor Yellow
+  }
 } catch {
   Write-Warning "Agent Hub nie odpowiada. Uruchom 'npm run hub' albo scripts/start-nexus-windows.ps1."
 }
