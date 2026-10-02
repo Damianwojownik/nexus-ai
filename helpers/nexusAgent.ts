@@ -35,6 +35,21 @@ export class NexusAgent {
     this.options = options;
   }
 
+
+  async runInternalPlanner(input: { text: string; projectContext?: string; maxOutputTokens?: number }): Promise<string> {
+    const prompt = [
+      this.options.systemPrompt || 'You are Nexus, a local-first AI assistant for product work and coding.',
+      'Internal Nexus planning request. Return only the structured output requested by the instruction. Do not address the end user.',
+      `Project context: ${input.projectContext || 'No project context provided.'}`,
+      `Planning instruction: ${input.text}`,
+    ].join('\n\n');
+
+    return this.router.route(prompt, {
+      temperature: 0,
+      numPredict: input.maxOutputTokens ?? 256,
+    });
+  }
+
   async send(input: NexusMessageInput): Promise<NexusAgentResult> {
     const mode = input.mode || 'AUTO';
     this.router.setPreferredMode(mode);
