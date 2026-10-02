@@ -171,6 +171,79 @@ export class NexusOrchestrator {
     this.capabilities = capabilities;
   }
 
+  private async executePendingProjectBuild(
+    input: NexusWorkflowInput,
+    onProgress: (progress: NexusWorkflowProgress) => void,
+  ): Promise<NexusWorkflowOutcome> {
+    const pending = this.pendingProjectBuild;
+    if (!pending) throw new Error('Brak oczekującego projektu do utworzenia');
+
+    const plan: NexusPlanStep[] = [
+      { id: 'understand', label: 'Potwierdzam specyfikację', state: 'DONE' },
+      { id: 'generate', label: 'Generuję komplet plików', state: 'ACTIVE' },
+      { id: 'write', label: 'Tworzę projekt w workspace', state: 'PENDING' },
+      { id: 'verify', label: 'Weryfikuję zapis', state: 'PENDING' },
+    ];
+    const task = await this.hub.submitTask({
+      goal: `Zbuduj projekt ${pending.blueprint.name}`,
+      createdBy: 'nexus-ui',
+      assignedTo: 'nexus-ui',
+      scope: 'nexus-builder',
+    });
+    const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: task.id, plan: [...plan] });
+
+    try {
+      const claimed = await this.hub.claimTask(task.id, 'nexus-ui');
+      if (!claimed) throw new Error('Nexus nie mógł przejąć zadania budowy projektu');
+      await this.hub.leaseTask(task.id, 'nexus-ui', 60 * 60 * 1000);
+      emit('WORKING', 'Generuję aplikację od podstaw');
+
+      const generation = await this.agent.send({
+        text: [
+          'Wygeneruj kompletny, uruchamialny projekt na podstawie zatwierdzonego planu.',
+          'Zwróć wyłącznie JSON bez komentarzy: {"name":"nazwa","summary":"opis","files":[{"path":"index.html","content":"..."},...]}.',
+          'Maksymalnie 24 pliki. Nie dodawaj sekretów, binariów, .env ani plików wykonywalnych.',
+          'Preferuj prosty stack bez zbędnych zależności. Jeśli używasz npm, dodaj package.json.',
+          `Nazwa: ${pending.blueprint.name}`,
+          `Stack: ${pending.blueprint.stack}`,
+          `Opis: ${pending.blueprint.summary}`,
+          `Funkcje: ${pending.blueprint.features.join(', ')}`,
+          `Oryginalna prośba: ${pending.originalRequest}`,
+        ].join('\n'),
+        mode: 'AUTO',
+        projectContext: input.projectContext,
+        history: input.history,
+        maxOutputTokens: 6000,
+      });
+      const generated = parseGeneratedProject(generation.text);
+      generated.name = pending.blueprint.name;
+      plan[1].state = 'DONE';
+      plan[2].state = 'ACTIVE';
+      emit('WORKING', 'Zapisuję pliki projektu');
+
+      const created = await this.capabilities.createWorkspaceProject(generated, true);
+      plan[2].state = 'DONE';
+      plan[3].state = 'ACTIVE';
+      emit('TESTING', 'Sprawdzam zapis projektu');
+
+      const files = await this.capabilities.listWorkspaceFiles();
+      const expectedPrefix = created.path + '/';
+      const written = files.filter((path) => path === created.path || path.startsWith(expectedPrefix));
+      if (written.length < created.files.length) throw new Error('Nie wszystkie pliki projektu są widoczne po zapisie');
+
+      const text = `Gotowe. Zbudowałem projekt „${created.name}” od podstaw i zapisałem ${created.files.length} plików w ${created.path}. Powiedz teraz, co mam poprawić lub dodać — będę iterował na tym samym projekcie.`;
+      await this.saveTaskMemory(pending.originalRequest, text, []);
+      await this.hub.completeTask(task.id, { status: 'SUCCESS', summary: text.slice(0, 240), payload: { project: created } });
+      plan[3].state = 'DONE';
+      this.pendingProjectBuild = undefined;
+      emit('DONE', 'Projekt gotowy');
+      return { status: 'DONE', taskId: task.id, text, plan, searchResults: [] };
+    } catch (error) {
+      await this.hub.failTask(task.id, error instanceof Error ? error.message : String(error)).catch(() => undefined);
+      throw error;
+    }
+  }
+
   async start(input: NexusWorkflowInput, onProgress: (progress: NexusWorkflowProgress) => void = () => undefined): Promise<NexusWorkflowOutcome> {
     const attachmentNames = (input.attachments ?? []).map((file) => ({ name: file.name, mimeType: file.type || 'application/octet-stream' }));
     const plan = buildNexusPlan(input.text, attachmentNames);
