@@ -34,7 +34,8 @@ Step "Konfiguracja bezpiecznego tokenu"
 $token = [Environment]::GetEnvironmentVariable("NEXUS_AVATAR_SERVER_TOKEN", "User")
 if ([string]::IsNullOrWhiteSpace($token)) {
   $bytes = New-Object byte[] 32
-  [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
   $token = -join ($bytes | ForEach-Object { $_.ToString("x2") })
   [Environment]::SetEnvironmentVariable("NEXUS_AVATAR_SERVER_TOKEN", $token, "User")
 }
