@@ -171,6 +171,88 @@ export class NexusOrchestrator {
     this.capabilities = capabilities;
   }
 
+  private async prepareProjectBuild(
+    input: NexusWorkflowInput,
+    onProgress: (progress: NexusWorkflowProgress) => void,
+  ): Promise<NexusWorkflowOutcome> {
+    const task = await this.hub.submitTask({
+      goal: 'Przygotuj plan nowej aplikacji',
+      createdBy: 'nexus-ui',
+      assignedTo: 'nexus-ui',
+      scope: 'nexus-builder',
+    });
+    const plan: NexusPlanStep[] = [
+      { id: 'understand', label: 'Zbieram wymagania', state: 'ACTIVE' },
+      { id: 'plan', label: 'Przygotowuję specyfikację', state: 'PENDING' },
+      { id: 'confirm', label: 'Czekam na potwierdzenie', state: 'PENDING' },
+    ];
+    const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: task.id, plan: [...plan] });
+
+    try {
+      const claimed = await this.hub.claimTask(task.id, 'nexus-ui');
+      if (!claimed) throw new Error('Nexus nie mógł przejąć zadania planowania');
+      await this.hub.leaseTask(task.id, 'nexus-ui', 60 * 60 * 1000);
+
+      const seed = this.projectClarificationSeed;
+      if (!seed && needsProjectClarification(input.text)) {
+        this.projectClarificationSeed = input.text;
+        const question = await this.agent.send({
+          text: [
+            'Użytkownik chce stworzyć nową aplikację, ale opis jest zbyt ogólny.',
+            'Zadaj po polsku maksymalnie 4 krótkie pytania, które są niezbędne do rozpoczęcia budowy.',
+            'Pytaj o cel aplikacji, najważniejsze funkcje, wygląd i sposób działania. Nie proponuj jeszcze kodu.',
+            `Prośba użytkownika: ${input.text}`,
+          ].join('\n'),
+          mode: 'AUTO',
+          history: input.history,
+          maxOutputTokens: 220,
+        });
+        plan[0].state = 'DONE';
+        plan[1].state = 'SKIPPED';
+        plan[2].state = 'ACTIVE';
+        await this.hub.completeTask(task.id, { status: 'PARTIAL', summary: question.text.slice(0, 240) });
+        emit('DONE', 'Potrzebuję kilku szczegółów');
+        return { status: 'DONE', taskId: task.id, text: question.text, plan, searchResults: [] };
+      }
+
+      plan[0].state = 'DONE';
+      plan[1].state = 'ACTIVE';
+      emit('THINKING', 'Układam konkretny plan aplikacji');
+      const requestText = seed ? `${seed}\n\nDoprecyzowanie użytkownika: ${input.text}` : input.text;
+      this.projectClarificationSeed = undefined;
+
+      const proposal = await this.agent.send({
+        text: [
+          'Przygotuj plan nowej aplikacji. Zwróć wyłącznie JSON:',
+          '{"name":"krótka-nazwa","summary":"co aplikacja robi","stack":"prosty stos technologiczny","features":["funkcja 1","funkcja 2"]}',
+          'Plan ma być możliwy do zbudowania lokalnie. Maksymalnie 10 funkcji.',
+          `Wymagania: ${requestText}`,
+        ].join('\n'),
+        mode: 'AUTO',
+        history: input.history,
+        maxOutputTokens: 700,
+      });
+      const blueprint = parseBlueprint(proposal.text);
+      this.pendingProjectBuild = { blueprint, originalRequest: requestText };
+      plan[1].state = 'DONE';
+      plan[2].state = 'ACTIVE';
+
+      const text = [
+        `Mam plan dla „${blueprint.name}”.`,
+        blueprint.summary,
+        `Technologia: ${blueprint.stack}.`,
+        `Funkcje: ${blueprint.features.join(', ')}.`,
+        'Czy tak mam to zbudować? Napisz „tak”, albo podaj poprawki — zaktualizuję plan przed kodowaniem.',
+      ].join('\n');
+      await this.hub.completeTask(task.id, { status: 'PARTIAL', summary: text.slice(0, 240), payload: { blueprint } });
+      emit('DONE', 'Plan gotowy do potwierdzenia');
+      return { status: 'DONE', taskId: task.id, text, plan, searchResults: [] };
+    } catch (error) {
+      await this.hub.failTask(task.id, error instanceof Error ? error.message : String(error)).catch(() => undefined);
+      throw error;
+    }
+  }
+
   private async executePendingProjectBuild(
     input: NexusWorkflowInput,
     onProgress: (progress: NexusWorkflowProgress) => void,
@@ -245,6 +327,23 @@ export class NexusOrchestrator {
   }
 
   async start(input: NexusWorkflowInput, onProgress: (progress: NexusWorkflowProgress) => void = () => undefined): Promise<NexusWorkflowOutcome> {
+    if (this.pendingProjectBuild && isAffirmative(input.text)) {
+      return this.executePendingProjectBuild(input, onProgress);
+    }
+    if (this.pendingProjectBuild) {
+      const previous = this.pendingProjectBuild;
+      this.pendingProjectBuild = undefined;
+      this.projectClarificationSeed = [
+        previous.originalRequest,
+        `Poprzedni plan: ${previous.blueprint.summary}`,
+        `Poprzednie funkcje: ${previous.blueprint.features.join(', ')}`,
+      ].join('\n');
+      return this.prepareProjectBuild(input, onProgress);
+    }
+    if (this.projectClarificationSeed || isProjectCreationIntent(input.text)) {
+      return this.prepareProjectBuild(input, onProgress);
+    }
+
     const attachmentNames = (input.attachments ?? []).map((file) => ({ name: file.name, mimeType: file.type || 'application/octet-stream' }));
     const plan = buildNexusPlan(input.text, attachmentNames);
     let task: AgentTask | undefined;
