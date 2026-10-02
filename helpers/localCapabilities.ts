@@ -55,6 +55,12 @@ export interface WeatherResult {
   }>;
 }
 
+export interface GitHubCloneResult {
+  repository: string;
+  path: string;
+  output: string;
+}
+
 export interface InstallableApp {
   id: string;
   name: string;
@@ -405,6 +411,56 @@ export class LocalCapabilities {
     }
 
     return { filename, bytes: content.length, location: 'workspace' as const };
+  }
+
+  async cloneGitHubRepository(repoUrlValue: unknown, confirmed: unknown): Promise<GitHubCloneResult> {
+    if (confirmed !== true) throw new LocalCapabilityError(403, 'Explicit confirmation is required to clone a repository');
+    if (typeof repoUrlValue !== 'string') throw new LocalCapabilityError(400, 'repoUrl is required');
+
+    let url: URL;
+    try {
+      url = new URL(repoUrlValue.trim());
+    } catch {
+      throw new LocalCapabilityError(400, 'A valid GitHub repository URL is required');
+    }
+    if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.username || url.password || url.search || url.hash) {
+      throw new LocalCapabilityError(400, 'Only plain HTTPS github.com repository URLs are allowed');
+    }
+    const parts = url.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+    if (parts.length !== 2 || !/^[A-Za-z0-9_.-]+$/.test(parts[0]) || !/^[A-Za-z0-9_.-]+(?:\.git)?$/.test(parts[1])) {
+      throw new LocalCapabilityError(400, 'GitHub URL must point to one owner/repository');
+    }
+    const owner = parts[0];
+    const repo = parts[1].replace(/\.git$/i, '');
+    const normalized = `https://github.com/${owner}/${repo}.git`;
+
+    await mkdir(this.workspaceDir, { recursive: true });
+    const root = await realpath(this.workspaceDir);
+    const destination = resolve(root, repo);
+    const rel = relative(root, destination);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new LocalCapabilityError(400, 'Invalid repository destination');
+
+    try {
+      await lstat(destination);
+      throw new LocalCapabilityError(409, `Workspace already contains ${repo}`);
+    } catch (error) {
+      if (error instanceof LocalCapabilityError) throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+
+    const output = await new Promise<string>((resolveClone, rejectClone) => {
+      execFile('git', ['clone', '--depth', '1', '--', normalized, destination], {
+        cwd: root,
+        timeout: 5 * 60 * 1000,
+        windowsHide: true,
+        maxBuffer: 2 * 1024 * 1024,
+      }, (error, stdout, stderr) => {
+        if (error) rejectClone(new LocalCapabilityError(502, `Git clone failed: ${error.message}`));
+        else resolveClone(`${stdout}\n${stderr}`.trim().slice(-8000));
+      });
+    });
+
+    return { repository: `${owner}/${repo}`, path: rel.split(sep).join('/'), output };
   }
 
   async getInstallCatalog() {
