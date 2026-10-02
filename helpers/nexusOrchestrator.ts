@@ -74,13 +74,16 @@ const installationPatterns: Array<{ pattern: RegExp; id: string }> = [
   { pattern: /\bgit\b/i, id: 'Git.Git' },
 ];
 
-export function buildNexusPlan(text: string, attachments: NexusAttachmentContext[] = []): NexusPlanStep[] {
+export function buildNexusPlan(text: string, attachments: NexusAttachmentContext[] = [], hasActiveProject = false): NexusPlanStep[] {
   const plan: NexusPlanStep[] = [
     { id: 'understand', label: 'Rozpoznaję cel', state: 'PENDING' },
     { id: 'plan', label: 'Przygotowuję plan', state: 'PENDING' },
   ];
-  if (isProjectIntent(text)) plan.push({ id: 'inspect', label: 'Przeglądam pliki projektu', state: 'PENDING' });
-  if (isProjectIntent(text) && isProjectFixIntent(text)) plan.push({ id: 'modify', label: 'Wprowadzam ograniczoną poprawkę', state: 'PENDING' });
+  const projectIntent = isProjectIntent(text) || (hasActiveProject && isProjectIterationIntent(text));
+  if (projectIntent) plan.push({ id: 'inspect', label: 'Przeglądam pliki projektu', state: 'PENDING' });
+  if (projectIntent && (isProjectFixIntent(text) || (hasActiveProject && isProjectIterationIntent(text)))) {
+    plan.push({ id: 'modify', label: 'Wprowadzam ograniczoną poprawkę', state: 'PENDING' });
+  }
   if (isWeatherIntent(text)) plan.push({ id: 'weather', label: 'Sprawdzam pogodę online', state: 'PENDING' });
   else if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
@@ -117,6 +120,10 @@ function installationRequest(text: string): boolean {
 
 function isProjectIntent(text: string): boolean {
   return /(mój projekt|moim projekcie|repozytor|codebase|znajdź błęd|znaleźć błęd|napraw|debug|review.*code|fix.*bug)/i.test(text);
+}
+
+function isProjectIterationIntent(text: string): boolean {
+  return /\b(zmień|zmien|dodaj|usuń|usun|popraw|napraw|przerób|przerob|zmodyfikuj|change|add|remove|fix|update)\b/i.test(text);
 }
 
 function isProjectFixIntent(text: string): boolean {
@@ -366,7 +373,7 @@ export class NexusOrchestrator {
     }
 
     const attachmentNames = (input.attachments ?? []).map((file) => ({ name: file.name, mimeType: file.type || 'application/octet-stream' }));
-    const plan = buildNexusPlan(input.text, attachmentNames);
+    const plan = buildNexusPlan(input.text, attachmentNames, !!this.activeProjectPath);
     let task: AgentTask | undefined;
     const emit = (state: NexusWorkflowState, message: string) => onProgress({ state, message, taskId: task?.id, plan: [...plan] });
     let searchResults: WebSearchResult[] = [];
@@ -400,7 +407,10 @@ export class NexusOrchestrator {
         emit('WORKING', 'Przeglądam pliki projektu');
         try {
           const files = await this.capabilities.listWorkspaceFiles();
-          const selectedFiles = files.slice(0, 12);
+          const scopedFiles = this.activeProjectPath
+            ? files.filter((path) => path === this.activeProjectPath || path.startsWith(this.activeProjectPath + '/'))
+            : files;
+          const selectedFiles = (scopedFiles.length ? scopedFiles : files).slice(0, 12);
           if (!selectedFiles.length) {
             contextNotes.push('Workspace Nexusa nie zawiera jeszcze plików projektu. Nie twierdź, że projekt został sprawdzony; poproś o dodanie plików lub projektu przez przycisk Dodaj.');
           } else {
