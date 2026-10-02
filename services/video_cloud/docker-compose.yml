@@ -1,0 +1,31 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - nexus_video_redis:/data
+
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      NEXUS_VIDEO_REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["python","worker.py"]
+    environment:
+      NEXUS_VIDEO_REDIS_URL: redis://redis:6379/0
+      NEXUS_VIDEO_WAN_URL: ${NEXUS_VIDEO_WAN_URL:-}
+      NEXUS_VIDEO_HUNYUAN_URL: ${NEXUS_VIDEO_HUNYUAN_URL:-}
+      NEXUS_VIDEO_WORKER_TIMEOUT: ${NEXUS_VIDEO_WORKER_TIMEOUT:-1800}
+    depends_on:
+      - redis
+
+volumes:
+  nexus_video_redis:
