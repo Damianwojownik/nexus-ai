@@ -259,6 +259,13 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         return;
       }
 
+      if (method === 'POST' && url.pathname === '/api/github/import') {
+        const body = await readJson(request);
+        const repository = await localCapabilities.cloneGitHubRepository(body.repoUrl, body.confirmed);
+        sendJson(response, 201, { repository });
+        return;
+      }
+
       if (method === 'GET' && url.pathname === '/api/workspace/files') {
         sendJson(response, 200, { files: await localCapabilities.listWorkspaceFiles() });
         return;
