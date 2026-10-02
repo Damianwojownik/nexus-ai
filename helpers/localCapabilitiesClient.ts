@@ -162,7 +162,7 @@ export class LocalCapabilitiesClient {
   }
 
   async cloneGitHubRepository(repoUrl: string, confirmed: boolean): Promise<GitHubCloneResult> {
-    const result = await this.request<{ repository: GitHubCloneResult }>('/api/github/clone', {
+    const result = await this.request<{ repository: GitHubCloneResult }>('/api/github/import', {
       method: 'POST',
       body: JSON.stringify({ repoUrl, confirmed }),
     });
