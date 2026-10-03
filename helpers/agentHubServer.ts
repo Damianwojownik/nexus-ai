@@ -165,7 +165,17 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       }
 
       if (method === 'GET' && url.pathname === '/api/health') {
-        sendJson(response, 200, { ok: true });
+        sendJson(response, 200, {
+          ok: true,
+          version: '1.4.0',
+          capabilities: [
+            'chatgpt-plan-direct',
+            'ai-generate',
+            'workspace',
+            'web-search',
+            'weather',
+          ],
+        });
         return;
       }
 
