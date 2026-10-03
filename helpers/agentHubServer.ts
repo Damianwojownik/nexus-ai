@@ -6,6 +6,7 @@ import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
+import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
@@ -206,6 +207,7 @@ h1{font-size:1.25rem;color:#7de4ff}p{line-height:1.5}.ok{color:#7dffc2}
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
   const avatarServer = new SelfHostedAvatarServerClient();
+  const imageServer = new SelfHostedImageServerClient();
   const cloudRouter = new NexusCloudRouter();
 
   return createServer(async (request, response) => {
@@ -263,6 +265,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
             'chatgpt-plan-direct',
             'popup-relay',
             'ai-generate',
+            'image-generate',
             'workspace',
             'web-search',
             'weather',
@@ -273,6 +276,36 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/avatar/health') {
         sendJson(response, 200, await avatarServer.health());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/image/health') {
+        sendJson(response, 200, await imageServer.health());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/image/generate') {
+        if (!imageServer.configured()) {
+          throw new HttpError(503, 'Set NEXUS_IMAGE_SERVER_URL and NEXUS_IMAGE_SERVER_TOKEN');
+        }
+        const body = await readJson(request, 64 * 1024);
+        const rendered = await imageServer.generate({
+          prompt: requiredString(body, 'prompt'),
+          width: typeof body.width === 'number' ? body.width : undefined,
+          height: typeof body.height === 'number' ? body.height : undefined,
+          steps: typeof body.steps === 'number' ? body.steps : undefined,
+          seed: typeof body.seed === 'number' ? body.seed : undefined,
+          guidanceScale: typeof body.guidanceScale === 'number' ? body.guidanceScale : undefined,
+        });
+        response.writeHead(200, {
+          'Content-Type': rendered.contentType,
+          'Content-Length': rendered.data.length,
+          'Cache-Control': 'no-store',
+          ...(rendered.model ? { 'X-Nexus-Model': rendered.model } : {}),
+          ...(rendered.seed !== undefined ? { 'X-Nexus-Seed': String(rendered.seed) } : {}),
+          ...(rendered.steps !== undefined ? { 'X-Nexus-Steps': String(rendered.steps) } : {}),
+        });
+        response.end(rendered.data);
         return;
       }
 
