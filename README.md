@@ -1,5 +1,13 @@
 # Nexus AI
 
+## Studio portretów — zdjęcie → 10 emocji i póz
+
+Nowy, osobny [moduł studia portretów](services/portrait_studio/README.md) obsługuje
+wgrywanie zdjęcia osoby, 10 wariantów, ponawianie pojedynczego ujęcia i pobieranie
+PNG/ZIP. [Notebook Colab](notebooks/Nexus_Portrait_Studio.ipynb) uruchamia panel na GPU.
+Kod i testy przepływu są przygotowane; rzeczywiste generowanie i jakość wymagają
+weryfikacji na GPU. Główna aplikacja i dotychczasowy serwer obrazów działają osobno.
+
 Snapshot of the existing Nexus project from Floot.
 
 Floot project ID: `155877bd-a916-4527-8a1f-63d8e09ecf79`
