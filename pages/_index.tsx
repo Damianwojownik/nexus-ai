@@ -57,6 +57,7 @@ export default function Home() {
   const [approvalBusy,setApprovalBusy]=useState(false);
   const [attachments,setAttachments]=useState<File[]>([]);
   const [response,setResponse]=useState('');
+  const [generatedImageUrl,setGeneratedImageUrl]=useState('');
   const [isThinking,setIsThinking]=useState(false);
   const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>([]);
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
@@ -69,6 +70,11 @@ export default function Home() {
   const speechBoundaryRef=useRef({at:0,intensity:0});
   const speechVisemePlanRef=useRef<VisemeCue[]>([]);
   const pointerRef=useRef({x:0,y:0});
+  const generatedImageUrlRef=useRef('');
+
+  useEffect(() => () => {
+    if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
+  }, []);
 
   useEffect(()=>{
     const saved=localStorage.getItem('nexus-avatar');
@@ -197,6 +203,9 @@ export default function Home() {
     setIsThinking(true);
     setApprovalRequest(null);
     setResponse('');
+    if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
+    generatedImageUrlRef.current = '';
+    setGeneratedImageUrl('');
     const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-12);
     try {
       const result = await nexusOrchestrator.start({
@@ -206,6 +215,11 @@ export default function Home() {
         attachments,
       }, publishWorkflowProgress);
       setResponse(result.text);
+      if (result.status === 'DONE' && result.image) {
+        const nextImageUrl = URL.createObjectURL(result.image.blob);
+        generatedImageUrlRef.current = nextImageUrl;
+        setGeneratedImageUrl(nextImageUrl);
+      }
       setLastSources(result.searchResults);
       setConversationHistory(result.status === 'DONE'
         ? [...nextHistory, { role: 'assistant' as const, content: result.text }].slice(-12)
@@ -347,6 +361,7 @@ export default function Home() {
         <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
         {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
+        {generatedImageUrl&&<img className={styles.generatedImage} src={generatedImageUrl} alt="Obraz wygenerowany przez Nexus Image Engine"/>}
         <div className={styles.status}>{status}</div>
         <input ref={attachmentInputRef} type="file" multiple hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.xlsx,.pptx" onChange={event=>{addAttachments(event.target.files);event.currentTarget.value=''}}/>
         {attachments.length>0&&<div className={styles.attachmentList}>{attachments.map((file,index)=><span key={`${file.name}-${index}`} className={styles.attachmentChip}>{file.name}<button type="button" aria-label={`Usuń ${file.name}`} onClick={()=>setAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))}>×</button></span>)}</div>}
