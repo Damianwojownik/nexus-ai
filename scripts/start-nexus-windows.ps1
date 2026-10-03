@@ -60,6 +60,9 @@ if ((-not (Test-Path $nodeModules)) -or (-not (Test-Path $joseModule))) {
 }
 
 Step "Provider setup"
+$allowedOrigins="https://155877bd-a916-4527-8a1f-63d8e09ecf79.sandbox.floot.app,https://floot.com"
+[Environment]::SetEnvironmentVariable("NEXUS_AGENT_HUB_ALLOWED_ORIGINS",$allowedOrigins,"User")
+$env:NEXUS_AGENT_HUB_ALLOWED_ORIGINS=$allowedOrigins
 & (Join-Path $PSScriptRoot "connect-ai-stack-windows.ps1") -InstallMissing
 
 $ollamaUrl=$env:OLLAMA_BASE_URL
