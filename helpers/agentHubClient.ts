@@ -140,6 +140,71 @@ export class AgentHubClient {
     return response.blob();
   }
 
+  async getVideoHealth(): Promise<{ status: string; ok: boolean; message?: string }> {
+    return this.request('/api/video/health');
+  }
+
+  async generateVideo(input: {
+    prompt: string;
+    mode?: 'text-to-video' | 'image-to-video' | 'speech-to-video' | 'character-animate';
+    model?: 'auto' | 'wan2.2' | 'hunyuanvideo';
+    quality?: 'preview' | 'high' | 'ultra';
+    width?: number;
+    height?: number;
+    fps?: number;
+    duration_seconds?: number;
+    seed?: number;
+    image_url?: string;
+    audio_url?: string;
+  }): Promise<{ job_id: string; status: string }> {
+    return this.request('/api/video/generate', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30000) });
+  }
+
+  async getVideoJob(jobId: string): Promise<{
+    id: string;
+    status: 'queued' | 'running' | 'completed' | 'failed';
+    progress: number;
+    result?: { backend: string; video_url: string; poster_url?: string; metadata?: Record<string, unknown> } | null;
+    error?: string | null;
+  }> {
+    return this.request(`/api/video/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  async waitForVideo(jobId: string, intervalMs = 2500): Promise<Awaited<ReturnType<AgentHubClient['getVideoJob']>>> {
+    while (true) {
+      const job = await this.getVideoJob(jobId);
+      if (job.status === 'completed' || job.status === 'failed') return job;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+
+  async getSpeechHealth(): Promise<{ status: string; ok: boolean; provider?: string; message?: string }> {
+    return this.request('/api/speech/health');
+  }
+
+  async synthesizeSpeech(input: { text: string; voice?: string; language?: string; format?: 'mp3' | 'wav' | 'ogg' }): Promise<Blob> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/api/speech/synthesize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(5 * 60 * 1000),
+      });
+    } catch (error) {
+      throw new AgentHubClientError(error instanceof Error ? error.message : 'Speech synthesis endpoint is unreachable');
+    }
+    if (!response.ok) {
+      let detail = `Speech synthesis returned HTTP ${response.status}`;
+      try {
+        const body = await response.json() as { error?: string };
+        if (body.error) detail = body.error;
+      } catch {}
+      throw new AgentHubClientError(detail, response.status);
+    }
+    return response.blob();
+  }
+
   async getAgents(): Promise<Array<AgentRegistration & { lastHeartbeat: string }>> {
     const result = await this.request<{ agents: Array<AgentRegistration & { lastHeartbeat: string }> }>('/api/agents');
     return result.agents;
