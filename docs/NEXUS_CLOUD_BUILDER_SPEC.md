@@ -915,7 +915,7 @@ Nexus ma kontynuować pracę nawet wtedy, gdy bieżący dostawca AI przestanie o
 Preferowana kolejność:
 
 1. GitHub Copilot / Codex — używaj jako pierwszego dostawcy, jeśli jest dostępny i ma aktywny darmowy lub już opłacony limit użytkownika.
-2. ChatGPT plan direct — używaj wyłącznie wtedy, gdy lokalny Agent Hub potwierdzi:
+2. ChatGPT plan direct — chodzi o ChatGPT z aktualnego pakietu/subskrypcji użytkownika, tego samego konta używanego w ChatGPT, a NIE o płatne OpenAI API ani osobno kupowane kredyty. Używaj wyłącznie wtedy, gdy lokalny Agent Hub potwierdzi:
    connected=true
    planUsageEnabled=true
    Nie używaj płatnego OpenAI API jako automatycznego fallbacku.
