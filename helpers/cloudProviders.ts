@@ -1,8 +1,9 @@
 import { CopilotCliProvider } from './copilotCliProvider.ts';
 import { CodexCliProvider, ClaudeCliProvider } from './cliModelProviders.ts';
+import { ChatGptPlanProvider } from './chatgptPlanProvider.ts';
 
 export type CloudProviderHealth = {
-  id: 'copilot' | 'codex' | 'gemini' | 'claude-cli' | 'openai' | 'claude';
+  id: 'chatgpt-plan' | 'copilot' | 'codex' | 'gemini' | 'claude-cli' | 'openai' | 'claude';
   name: string;
   status: 'CONNECTED' | 'NOT_CONFIGURED' | 'OFFLINE' | 'ERROR';
   model?: string;
@@ -43,6 +44,11 @@ class GeminiProvider {
       return {id:this.id,name:this.name,status:'OFFLINE',model:this.model,error:e instanceof Error?e.message:'Gemini unavailable'};
     }
   }
+
+  async chatGptPlanStatus(){ return this.chatgptPlan.status(); }
+  async startChatGptPlanSignIn(){ return this.chatgptPlan.startAuthorization(); }
+  async handleChatGptPlanCallback(url:URL){ return this.chatgptPlan.handleCallback(url); }
+  async signOutChatGptPlan(){ return this.chatgptPlan.signOut(); }
 
   async generate(prompt:string, options:Record<string,any>={}):Promise<CloudGenerateResult>{
     if(!this.configured()) throw new Error('Google Gemini is not configured');
@@ -157,6 +163,7 @@ class ClaudeProvider {
 }
 
 export class NexusCloudRouter {
+  private readonly chatgptPlan=new ChatGptPlanProvider();
   private readonly copilot=new CopilotCliProvider();
   private readonly codex=new CodexCliProvider();
   private readonly gemini=new GeminiProvider();
@@ -165,15 +172,16 @@ export class NexusCloudRouter {
   private readonly claude=new ClaudeProvider();
 
   private order(){
-    const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'codex,copilot,gemini,claude-cli,openai,claude')
+    const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'chatgpt-plan,codex,copilot,gemini,claude-cli,openai,claude')
       .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
-    const valid=configured.filter((x):x is 'copilot'|'codex'|'gemini'|'claude-cli'|'openai'|'claude'=>
-      x==='copilot'||x==='codex'||x==='gemini'||x==='claude-cli'||x==='openai'||x==='claude');
-    return valid.length?valid:['codex','copilot','gemini','claude-cli','openai','claude'];
+    const valid=configured.filter((x):x is 'chatgpt-plan'|'copilot'|'codex'|'gemini'|'claude-cli'|'openai'|'claude'=>
+      x==='chatgpt-plan'||x==='copilot'||x==='codex'||x==='gemini'||x==='claude-cli'||x==='openai'||x==='claude');
+    return valid.length?valid:['chatgpt-plan','codex','copilot','gemini','claude-cli','openai','claude'];
   }
 
   async health():Promise<{status:'CONNECTED'|'OFFLINE'|'NOT_CONFIGURED'|'ERROR';providers:CloudProviderHealth[]}>{
-    const [copilot,codex,gemini,claudeCli,openai,claude]=await Promise.all([
+    const [chatgptPlan,copilot,codex,gemini,claudeCli,openai,claude]=await Promise.all([
+      this.chatgptPlan.health(),
       this.copilot.checkHealth().then(h=>({
         id:'copilot' as const,name:'GitHub Copilot CLI',
         status:h.status==='CONNECTED'?'CONNECTED' as const:h.status==='ERROR'?'ERROR' as const:'OFFLINE' as const,
@@ -193,7 +201,7 @@ export class NexusCloudRouter {
       this.openai.health(),
       this.claude.health()
     ]);
-    const providers=[copilot,codex,gemini,claudeCli,openai,claude];
+    const providers=[chatgptPlan,copilot,codex,gemini,claudeCli,openai,claude];
     const status=providers.some(p=>p.status==='CONNECTED')
       ? 'CONNECTED'
       : providers.every(p=>p.status==='NOT_CONFIGURED')
@@ -208,6 +216,11 @@ export class NexusCloudRouter {
     const errors:string[]=[];
     for(const id of this.order()){
       try{
+        if(id==='chatgpt-plan'){
+          const h=await this.chatgptPlan.health();
+          if(h.status!=='CONNECTED'){ errors.push(`chatgpt-plan: ${h.error||h.status}`); continue; }
+          return await this.chatgptPlan.generate(prompt);
+        }
         if(id==='copilot'){
           const h=await this.copilot.checkHealth();
           if(h.status!=='CONNECTED'){ errors.push(`copilot: ${h.error||h.status}`); continue; }
