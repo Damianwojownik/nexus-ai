@@ -433,6 +433,11 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
           audioMime: typeof body.audioMime === 'string' ? body.audioMime : undefined,
           drivingVideoBase64,
           drivingVideoMime: typeof body.drivingVideoMime === 'string' ? body.drivingVideoMime : undefined,
+          motionProfile: body.motionProfile === 'expressive' || body.motionProfile === 'calm' ? body.motionProfile : 'natural',
+          lipSync: body.lipSync === 'audio' || body.lipSync === 'viseme' ? body.lipSync : 'phoneme',
+          blink: typeof body.blink === 'boolean' ? body.blink : true,
+          breathing: typeof body.breathing === 'boolean' ? body.breathing : true,
+          expression: body.expression === 'neutral' || body.expression === 'warm' || body.expression === 'focused' ? body.expression : 'adaptive',
         });
         response.writeHead(200, {
           'Content-Type': rendered.contentType,
