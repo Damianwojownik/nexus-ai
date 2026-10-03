@@ -52,8 +52,10 @@ if (-not (Have "npm")) {
   throw "Brak npm/Node.js. Zainstaluj Node.js LTS."
 }
 
-if (-not (Test-Path (Join-Path $root "node_modules"))) {
-  Step "Instalacja zaleznosci projektu"
+$nodeModules=Join-Path $root "node_modules"
+$joseModule=Join-Path $nodeModules "jose"
+if ((-not (Test-Path $nodeModules)) -or (-not (Test-Path $joseModule))) {
+  Step "Instalacja/aktualizacja zaleznosci projektu"
   npm install
 }
 
@@ -120,6 +122,16 @@ if (-not (PortOpen 8788)) {
 }
 if (WaitHttp "http://127.0.0.1:8788/api/health" 25) {
   Write-Host "Agent Hub READY: http://127.0.0.1:8788" -ForegroundColor Green
+  try {
+    $plan=Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/chatgpt/status" -TimeoutSec 8
+    if($plan.connected -and $plan.planUsageEnabled){
+      Write-Host ("ChatGPT plan READY: " + $plan.model) -ForegroundColor Green
+    } else {
+      Write-Host "ChatGPT plan: jeszcze niepolaczony. W Nexusie wybierz Continue with ChatGPT." -ForegroundColor Yellow
+    }
+  } catch {
+    Write-Host ("ChatGPT plan status: " + $_.Exception.Message) -ForegroundColor Yellow
+  }
 } else {
   Write-Host "Agent Hub ERROR — backend nie wystartowal." -ForegroundColor Red
 }
