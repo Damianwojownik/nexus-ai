@@ -87,6 +87,22 @@ Important files:
 - `services/avatar_server/nexus_avatar_server.py`
 - `scripts/setup-faster-liveportrait-windows.ps1`
 
+## Image Engine
+
+Nexus now has the first real self-hosted image-generation vertical slice in GitHub:
+
+- `services/image_server/nexus_image_server.py` — authenticated FLUX.1-schnell FastAPI service with lazy model loading, warm reuse, CPU offload, seed control and 1–4 step generation.
+- `helpers/selfHostedImageServer.ts` — Agent Hub server-side adapter.
+- `GET /api/image/health` and `POST /api/image/generate` — binary image bridge through the local Agent Hub.
+- `helpers/nexusImageIntent.ts` — natural-language image intent and square/portrait/landscape routing.
+- `helpers/nexusOrchestrator.ts` — requests such as “Wygeneruj obraz kobiety siedzącej…” route to the image engine instead of only returning text.
+- `pages/_index.tsx` — displays the returned generated image directly in Nexus.
+- `helpers/nexusImageIntent.test.ts` and `helpers/nexusImageHub.test.ts` cover intent routing and the Agent Hub binary proxy.
+
+Validation after implementation: image-intent tests passed 3/3, image-hub proxy test passed 1/1, and `npm run build` completed successfully against the current GitHub main branch.
+
+Important limitation: this proves the Nexus code path and proxy, not a real FLUX GPU render. Do not mark the image engine GPU-ready until `NEXUS_IMAGE_SERVER_URL` / `NEXUS_IMAGE_SERVER_TOKEN` point at a real CUDA service and an actual PNG has been generated end-to-end.
+
 ## Resume instruction for a new session
 
 Start by reading this file, then inspect the latest commit and the exact files relevant to the requested task. Do not assume local services are running. Verify before claiming a provider, internet, Ollama or avatar backend is connected.
