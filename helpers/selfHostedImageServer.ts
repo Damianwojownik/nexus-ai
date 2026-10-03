@@ -147,14 +147,16 @@ export class SelfHostedImageServerClient {
       throw new Error(detail);
     }
 
-    const parsedSeed = Number(response.headers.get('x-nexus-seed'));
-    const parsedSteps = Number(response.headers.get('x-nexus-steps'));
+    const seedHeader = response.headers.get('x-nexus-seed');
+    const stepsHeader = response.headers.get('x-nexus-steps');
+    const parsedSeed = seedHeader === null ? undefined : Number(seedHeader);
+    const parsedSteps = stepsHeader === null ? undefined : Number(stepsHeader);
     return {
       contentType: response.headers.get('content-type') || 'image/png',
       data: Buffer.from(await response.arrayBuffer()),
       model: response.headers.get('x-nexus-model') || undefined,
-      seed: Number.isInteger(parsedSeed) ? parsedSeed : undefined,
-      steps: Number.isInteger(parsedSteps) ? parsedSteps : undefined,
+      seed: parsedSeed !== undefined && Number.isInteger(parsedSeed) ? parsedSeed : undefined,
+      steps: parsedSteps !== undefined && Number.isInteger(parsedSteps) ? parsedSteps : undefined,
     };
   }
 }
