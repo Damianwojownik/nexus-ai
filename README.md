@@ -20,7 +20,7 @@ Recommended on Windows: run the one-click launcher:
 scripts\\start-nexus-windows.bat
 ```
 
-It starts/validates Ollama, Agent Hub, the Vite frontend and then checks AI providers, web search and weather. Manual startup still works:
+It installs/updates the local dependencies when needed, starts/validates Ollama, Agent Hub and the Vite frontend, then checks ChatGPT-plan/provider status, web search and weather. Manual startup still works:
 
 ```powershell
 npm run hub
@@ -29,12 +29,16 @@ npm run dev
 
 Open `http://127.0.0.1:5173/`. The Hub stores runtime state under the user's local app data directory when started by the current Windows setup.
 
+To use the user's eligible ChatGPT plan as the primary model, open Nexus, connect the Browser Bridge, and choose **Continue with ChatGPT**. The OAuth callback is loopback-only on `127.0.0.1:8788`; the access/refresh credentials remain local.
+
 ## Local capabilities
 
 - Web search runs through DuckDuckGo from the local Hub and returns clickable source links/snippets.
 - File import accepts one file up to 10 MB into `%LOCALAPPDATA%/NexusAI/workspace` (or `NEXUS_WORKSPACE_DIR`). Executable/installer extensions are blocked; imports are never launched.
 - Windows software installs are restricted to the Hub's approved `winget` catalog and require an explicit UI confirmation for every app. The installer is disabled if `winget` is unavailable; Nexus does not install a package manager automatically.
-- The Primary Agent remains `NOT_CONFIGURED`. No remote ChatGPT credentials or connection are enabled.
+- The local Agent Hub supports opt-in **Continue with ChatGPT**. For eligible ChatGPT plans, the plan provider is first in AUTO routing, followed by Codex/Copilot/other configured providers and Ollama.
+- ChatGPT OAuth credentials are stored only in the local NexusAI app-data directory; Floot does not receive them.
+- The ChatGPT plan connection starts new Nexus conversations. It does not import existing ChatGPT conversation history or native ChatGPT memory; durable continuity is owned by Nexus memory.
 
 ## Next task
 
