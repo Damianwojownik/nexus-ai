@@ -264,7 +264,6 @@ export class NexusOrchestrator {
           width: dimensions.width,
           height: dimensions.height,
           steps: 4,
-          guidanceScale: 0,
         });
         if (imageStep >= 0) plan[imageStep].state = 'DONE';
 
