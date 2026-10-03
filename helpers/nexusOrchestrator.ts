@@ -4,6 +4,7 @@ import { AgentHubClient } from './agentHubClient.ts';
 import type { AgentTask } from './agentProtocol.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
 import type { InstallableApp, InstallOperation, WeatherResult, WebSearchResult } from './localCapabilitiesClient.ts';
+import { buildFallbackImagePrompt, imageDimensionsForText, isImageGenerationIntent } from './nexusImageIntent.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
 export type NexusPlanStepState = 'PENDING' | 'ACTIVE' | 'DONE' | 'SKIPPED' | 'FAILED';
@@ -42,8 +43,18 @@ export interface NexusWorkflowInput {
   attachments?: File[];
 }
 
+export interface NexusGeneratedImage {
+  blob: Blob;
+  prompt: string;
+  width: number;
+  height: number;
+  model?: string;
+  seed?: number;
+  steps?: number;
+}
+
 export type NexusWorkflowOutcome =
-  | { status: 'DONE'; taskId: string; text: string; plan: NexusPlanStep[]; searchResults: WebSearchResult[] }
+  | { status: 'DONE'; taskId: string; text: string; plan: NexusPlanStep[]; searchResults: WebSearchResult[]; image?: NexusGeneratedImage }
   | { status: 'WAITING_FOR_APPROVAL'; taskId: string; text: string; plan: NexusPlanStep[]; approval: NexusApprovalRequest; searchResults: WebSearchResult[] };
 
 interface PendingWorkflow {
@@ -75,6 +86,7 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   if (isWebSearchIntent(text)) plan.push({ id: 'search', label: 'Szukam informacji i źródeł', state: 'PENDING' });
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
   if (installationRequest(text)) plan.push({ id: 'approval', label: 'Sprawdzam instalację i wymagane zgody', state: 'PENDING' });
+  if (isImageGenerationIntent(text)) plan.push({ id: 'image', label: 'Generuję obraz własnym silnikiem', state: 'PENDING' });
   plan.push(
     { id: 'execute', label: 'Wykonuję zadanie', state: 'PENDING' },
     { id: 'verify', label: 'Weryfikuję i zapisuję wynik', state: 'PENDING' },
@@ -214,6 +226,90 @@ export class NexusOrchestrator {
       const relevantMemories = await this.memory.getRelevantMemories(input.text, 4);
       if (relevantMemories.length) {
         contextNotes.push(`Istotna pamięć Nexusa:\n${relevantMemories.map((entry) => `- ${entry.text}`).join('\n')}`);
+      }
+
+      if (isImageGenerationIntent(input.text)) {
+        const imageStep = plan.findIndex((step) => step.id === 'image');
+        if (imageStep >= 0) plan[imageStep].state = 'ACTIVE';
+        emit('WORKING', 'Generuję obraz własnym silnikiem Nexusa');
+
+        if (!hubAvailable) {
+          throw new Error('Nexus Image Engine wymaga działającego lokalnego Agent Hub.');
+        }
+
+        const health = await this.hub.getImageHealth();
+        if (!health.ok) {
+          throw new Error(health.message || 'Nexus Image Engine nie jest jeszcze podłączony do GPU.');
+        }
+
+        const dimensions = imageDimensionsForText(input.text);
+        let imagePrompt = buildFallbackImagePrompt(input.text);
+        try {
+          const promptResult = await this.agent.send({
+            text: 'Convert the user image request into one concise English production prompt for a photorealistic image generator. Preserve subject, pose, clothing, setting, camera direction and style. Add only useful visual detail for realism, anatomy, lighting and composition. Do not add text, logos or watermarks unless explicitly requested. Return only the prompt, no explanation. User request: ' + input.text,
+            mode: 'AUTO',
+            projectContext: relevantMemories.length
+              ? 'Relevant durable character/project memory:\n' + relevantMemories.map((entry) => '- ' + entry.text).join('\n')
+              : undefined,
+            maxOutputTokens: 220,
+          });
+          const candidate = promptResult.text.replace(/^```(?:text)?\s*/i, '').replace(/```$/i, '').trim();
+          if (candidate.length >= 12 && candidate.length <= 4000) imagePrompt = candidate;
+        } catch {
+          // The image engine can still run from the deterministic fallback prompt when the text model is unavailable.
+        }
+
+        const generated = await this.hub.generateImage({
+          prompt: imagePrompt,
+          width: dimensions.width,
+          height: dimensions.height,
+          steps: 4,
+          guidanceScale: 0,
+        });
+        if (imageStep >= 0) plan[imageStep].state = 'DONE';
+
+        const executeIndex = plan.findIndex((step) => step.id === 'execute');
+        if (executeIndex >= 0) plan[executeIndex].state = 'DONE';
+        const verifyIndex = plan.findIndex((step) => step.id === 'verify');
+        if (verifyIndex >= 0) plan[verifyIndex].state = 'ACTIVE';
+
+        const responseText = 'Wygenerowałem obraz ' + dimensions.width + '×' + dimensions.height
+          + (generated.model ? ' modelem ' + generated.model : '')
+          + (generated.seed !== undefined ? ' · seed ' + generated.seed : '') + '.';
+        emit('TESTING', 'Weryfikuję wynik i zapisuję parametry renderu');
+        await this.saveTaskMemory(input.text, responseText + '\nPrompt renderu: ' + imagePrompt, []);
+        if (task) {
+          await this.hub.completeTask(task.id, {
+            status: 'SUCCESS',
+            summary: responseText,
+            payload: {
+              image: true,
+              model: generated.model,
+              seed: generated.seed,
+              steps: generated.steps,
+              width: dimensions.width,
+              height: dimensions.height,
+            },
+          }).catch(() => undefined);
+        }
+        if (verifyIndex >= 0) plan[verifyIndex].state = 'DONE';
+        emit('DONE', 'Obraz gotowy');
+        return {
+          status: 'DONE',
+          taskId: currentTaskId(),
+          text: responseText,
+          plan: [...plan],
+          searchResults: [],
+          image: {
+            blob: generated.blob,
+            prompt: imagePrompt,
+            width: dimensions.width,
+            height: dimensions.height,
+            model: generated.model,
+            seed: generated.seed,
+            steps: generated.steps,
+          },
+        };
       }
 
       const inspectStep = plan.findIndex((step) => step.id === 'inspect');
