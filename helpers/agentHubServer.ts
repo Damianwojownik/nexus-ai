@@ -34,6 +34,14 @@ function sendJson(response: ServerResponse, statusCode: number, value: unknown):
   response.end(JSON.stringify(value));
 }
 
+function sendHtml(response: ServerResponse, statusCode: number, html: string): void {
+  response.writeHead(statusCode, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  response.end(html);
+}
+
 async function readJson(request: IncomingMessage, maxBytes = 1024 * 1024): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -164,6 +172,32 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/avatar/health') {
         sendJson(response, 200, await avatarServer.health());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/chatgpt/status') {
+        sendJson(response, 200, await cloudRouter.chatGptPlanStatus());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/chatgpt/sign-in/start') {
+        sendJson(response, 200, await cloudRouter.startChatGptPlanSignIn());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/chatgpt/sign-out') {
+        await cloudRouter.signOutChatGptPlan();
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/auth/callback') {
+        await cloudRouter.handleChatGptPlanCallback(url);
+        sendHtml(response, 200, `<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><title>Nexus — ChatGPT połączony</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui;background:#060913;color:#eef7ff;display:grid;place-items:center;min-height:100vh;margin:0}main{max-width:36rem;padding:2rem;border:1px solid #26445f;border-radius:20px;background:#0b1220}h1{color:#7ddcff}</style></head>
+<body><main><h1>ChatGPT połączony z Nexusem</h1><p>Możesz zamknąć tę kartę i wrócić do Nexusa.</p></main></body></html>`);
         return;
       }
 
