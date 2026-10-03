@@ -8,6 +8,8 @@ import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts'
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
+import { CloudVideoServerClient } from './cloudVideoServer.ts';
+import { CloudSpeechServerClient } from './cloudSpeechServer.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -209,6 +211,8 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
   const avatarServer = new SelfHostedAvatarServerClient();
   const imageServer = new SelfHostedImageServerClient();
   const cloudRouter = new NexusCloudRouter();
+  const videoServer = new CloudVideoServerClient();
+  const speechServer = new CloudSpeechServerClient();
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -266,6 +270,10 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
             'popup-relay',
             'ai-generate',
             'image-generate',
+            'video-generate',
+            'speech-synthesize',
+            'avatar-render',
+            'no-code-media',
             'workspace',
             'web-search',
             'weather',
@@ -306,6 +314,58 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
           ...(rendered.steps !== undefined ? { 'X-Nexus-Steps': String(rendered.steps) } : {}),
         });
         response.end(rendered.data);
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/video/health') {
+        sendJson(response, 200, await videoServer.health());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/video/generate') {
+        const body = await readJson(request, 128 * 1024);
+        const job = await videoServer.create({
+          prompt: requiredString(body, 'prompt'),
+          mode: typeof body.mode === 'string' ? body.mode as any : 'text-to-video',
+          model: typeof body.model === 'string' ? body.model as any : 'auto',
+          quality: typeof body.quality === 'string' ? body.quality as any : 'high',
+          width: typeof body.width === 'number' ? body.width : undefined,
+          height: typeof body.height === 'number' ? body.height : undefined,
+          fps: typeof body.fps === 'number' ? body.fps : undefined,
+          duration_seconds: typeof body.duration_seconds === 'number' ? body.duration_seconds : undefined,
+          seed: typeof body.seed === 'number' ? body.seed : undefined,
+          image_url: typeof body.image_url === 'string' ? body.image_url : undefined,
+          audio_url: typeof body.audio_url === 'string' ? body.audio_url : undefined,
+        });
+        sendJson(response, 202, job);
+        return;
+      }
+
+      if (method === 'GET' && segments.length === 4 && segments[0] === 'api' && segments[1] === 'video' && segments[2] === 'jobs') {
+        sendJson(response, 200, await videoServer.get(segments[3]));
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/speech/health') {
+        sendJson(response, 200, await speechServer.health());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/speech/synthesize') {
+        const body = await readJson(request, 64 * 1024);
+        const audio = await speechServer.synthesize({
+          text: requiredString(body, 'text'),
+          voice: typeof body.voice === 'string' ? body.voice : undefined,
+          language: typeof body.language === 'string' ? body.language : 'pl-PL',
+          format: body.format === 'wav' || body.format === 'ogg' ? body.format : 'mp3',
+        });
+        response.writeHead(200, {
+          'Content-Type': audio.contentType,
+          'Content-Length': audio.data.length,
+          'Cache-Control': 'no-store',
+          ...(audio.voice ? { 'X-Nexus-Voice': audio.voice } : {}),
+        });
+        response.end(audio.data);
         return;
       }
 
