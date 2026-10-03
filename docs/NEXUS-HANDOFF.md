@@ -16,14 +16,15 @@ Nexus is one embodied AI interface. The user talks to Nexus; orchestration, prov
 
 Current intended AUTO routing:
 
-1. GitHub Copilot CLI
-2. OpenAI Codex CLI
-3. Claude Code CLI
-4. OpenAI API if configured
-5. Anthropic API if configured
-6. local Ollama fallback from the frontend ModelRouter
+1. OpenAI Codex CLI signed in with the user's ChatGPT account
+2. GitHub Copilot CLI
+3. Google Gemini API if configured
+4. Claude Code CLI
+5. OpenAI API if configured
+6. Anthropic API if configured
+7. local Ollama fallback from the frontend ModelRouter
 
-If cloud quota/credits fail, `ModelRouter` catches the provider failure and falls through to local Ollama. Memory and project context are assembled by `NexusAgent` before provider routing, so the same context is used regardless of provider.
+When Floot/runtime cloud quota is unavailable, the local Agent Hub should prefer Codex CLI so Nexus can use the user's ChatGPT/Codex plan allowance before trying Copilot and other providers. If the local provider stack fails, `ModelRouter` can still fall through to local Ollama. Memory and project context are assembled by `NexusAgent` before provider routing, so the same context is used regardless of provider.
 
 Important files:
 - `helpers/cloudProviders.ts`
