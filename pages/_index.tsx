@@ -37,6 +37,15 @@ const agentHubClient = new AgentHubClient();
 const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
 const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not encode media'));
+    reader.onerror = () => reject(reader.error ?? new Error('Could not encode media'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 export default function Home() {
   const avatars: Array<{name:string;src:string;videoSrc?:string}>=[{name:'Nexus',src:'/avatars/nexus-boy.png',videoSrc:'/avatars/nexus-speaking.mp4'}];
   const [avatar,setAvatar]=useState(0);
@@ -61,6 +70,7 @@ export default function Home() {
   const [generatedImageUrl,setGeneratedImageUrl]=useState('');
   const [generatedVideoUrl,setGeneratedVideoUrl]=useState('');
   const [generatedAudioUrl,setGeneratedAudioUrl]=useState('');
+  const [avatarRenderUrl,setAvatarRenderUrl]=useState('');
   const [isThinking,setIsThinking]=useState(false);
   const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>([]);
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
@@ -75,10 +85,12 @@ export default function Home() {
   const pointerRef=useRef({x:0,y:0});
   const generatedImageUrlRef=useRef('');
   const generatedAudioUrlRef=useRef('');
+  const avatarRenderUrlRef=useRef('');
 
   useEffect(() => () => {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
     if (generatedAudioUrlRef.current) URL.revokeObjectURL(generatedAudioUrlRef.current);
+    if (avatarRenderUrlRef.current) URL.revokeObjectURL(avatarRenderUrlRef.current);
   }, []);
 
   useEffect(()=>{
@@ -191,6 +203,44 @@ export default function Home() {
     return () => { disposed = true; window.clearInterval(timer); };
   }, [approvalRequest?.taskId, approvalRequest?.kind]);
 
+  const clearSpeechDrivenAvatar = () => {
+    if (avatarRenderUrlRef.current) URL.revokeObjectURL(avatarRenderUrlRef.current);
+    avatarRenderUrlRef.current = '';
+    setAvatarRenderUrl('');
+  };
+
+  const prepareSpeechDrivenAvatar = async (audio: Blob): Promise<void> => {
+    try {
+      const health = await agentHubClient.getAvatarHealth();
+      if (!health.ok) return;
+      setStatus('Synchronizuję ruch ust i mimikę Nexusa…');
+      const sourceResponse = await fetch(avatars[avatar].src);
+      if (!sourceResponse.ok) throw new Error('Nie udało się wczytać bazowego awatara Nexusa');
+      const sourceImage = await sourceResponse.blob();
+      const [sourceImageBase64, audioBase64] = await Promise.all([
+        blobToDataUrl(sourceImage),
+        blobToDataUrl(audio),
+      ]);
+      const rendered = await agentHubClient.renderAvatar({
+        sourceImageBase64,
+        sourceImageMime: sourceImage.type || 'image/png',
+        audioBase64,
+        audioMime: audio.type || 'audio/mpeg',
+        motionProfile: 'natural',
+        lipSync: 'phoneme',
+        blink: true,
+        breathing: true,
+        expression: 'adaptive',
+      });
+      clearSpeechDrivenAvatar();
+      const url = URL.createObjectURL(rendered);
+      avatarRenderUrlRef.current = url;
+      setAvatarRenderUrl(url);
+    } catch {
+      clearSpeechDrivenAvatar();
+    }
+  };
+
   const publishWorkflowProgress = (progress: NexusWorkflowProgress) => {
     setWorkflowProgress(progress);
     setStatus(progress.message);
@@ -255,9 +305,19 @@ export default function Home() {
         setConversationHistory([...nextHistory, { role: 'assistant' as const, content: 'Lektor jest gotowy.' }].slice(-12));
         setPrompt('');
         setAttachments([]);
-        setStatus('Lektor wygenerowany');
+        await prepareSpeechDrivenAvatar(audio);
+        setStatus('Lektor wygenerowany · awatar zsynchronizowany');
         const player = new Audio(audioUrl);
-        await player.play().catch(() => undefined);
+        setSpeaking(true);
+        emitVoiceEvent('SPEAKING', 'Nexus mówi…');
+        await new Promise<void>((resolve) => {
+          player.onended = () => resolve();
+          player.onerror = () => resolve();
+          void player.play().catch(() => resolve());
+        });
+        setSpeaking(false);
+        clearSpeechDrivenAvatar();
+        emitVoiceEvent('IDLE', 'Nexus ready');
         return;
       }
       const result = await nexusOrchestrator.start({
@@ -391,6 +451,7 @@ export default function Home() {
         const health=await agentHubClient.getSpeechHealth();
         if(health.ok){
           const audio=await agentHubClient.synthesizeSpeech({text,language:'pl-PL',format:'mp3'});
+          await prepareSpeechDrivenAvatar(audio);
           if(generatedAudioUrlRef.current)URL.revokeObjectURL(generatedAudioUrlRef.current);
           const audioUrl=URL.createObjectURL(audio);
           generatedAudioUrlRef.current=audioUrl;
@@ -400,6 +461,7 @@ export default function Home() {
             player.onerror=()=>reject(new Error('Cloud speech playback failed'));
             void player.play().catch(reject);
           });
+          clearSpeechDrivenAvatar();
           return;
         }
       }catch{}
@@ -415,7 +477,7 @@ export default function Home() {
           window.speechSynthesis.speak(u);
         });
       }
-    })().finally(()=>{setSpeaking(false);emitVoiceEvent('IDLE','Nexus ready');setStatus('Gotowy do rozmowy')});
+    })().finally(()=>{clearSpeechDrivenAvatar();setSpeaking(false);emitVoiceEvent('IDLE','Nexus ready');setStatus('Gotowy do rozmowy')});
   };
   const startVoice=()=>{
     const w:any=window, SR=w.SpeechRecognition||w.webkitSpeechRecognition;
@@ -435,7 +497,7 @@ export default function Home() {
   return <main className={styles.shell}>
     <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
       <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
-        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/>{avatars[avatar].videoSrc?<video key={avatars[avatar].videoSrc} className={styles.person} src={avatars[avatar].videoSrc} poster={avatars[avatar].src} autoPlay loop muted playsInline aria-label="Nexus — super awatar"/>:<img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name}/>}<div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
+        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/>{avatarRenderUrl?<video key={avatarRenderUrl} className={styles.person} src={avatarRenderUrl} poster={avatars[avatar].src} autoPlay muted playsInline aria-label="Nexus — awatar zsynchronizowany z mową"/>:avatars[avatar].videoSrc?<video key={avatars[avatar].videoSrc} className={styles.person} src={avatars[avatar].videoSrc} poster={avatars[avatar].src} autoPlay loop muted playsInline aria-label="Nexus — super awatar"/>:<img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name}/>}<div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
         {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
         {generatedImageUrl&&<img className={styles.generatedImage} src={generatedImageUrl} alt="Obraz wygenerowany przez Nexus Image Engine"/>}
