@@ -106,8 +106,7 @@ function isAllowedOrigin(origin: string, configuredOrigins: string[]): boolean {
   if (configuredOrigins.includes(origin)) return true;
   try {
     const url = new URL(origin);
-    if (url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')) return true;
-    return url.protocol === 'https:' && url.hostname.endsWith('.sandbox.floot.app');
+    return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
   } catch {
     return false;
   }
