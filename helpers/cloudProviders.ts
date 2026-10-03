@@ -165,11 +165,11 @@ export class NexusCloudRouter {
   private readonly claude=new ClaudeProvider();
 
   private order(){
-    const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'copilot,codex,gemini,claude-cli,openai,claude')
+    const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'codex,copilot,gemini,claude-cli,openai,claude')
       .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
     const valid=configured.filter((x):x is 'copilot'|'codex'|'gemini'|'claude-cli'|'openai'|'claude'=>
       x==='copilot'||x==='codex'||x==='gemini'||x==='claude-cli'||x==='openai'||x==='claude');
-    return valid.length?valid:['copilot','codex','gemini','claude-cli','openai','claude'];
+    return valid.length?valid:['codex','copilot','gemini','claude-cli','openai','claude'];
   }
 
   async health():Promise<{status:'CONNECTED'|'OFFLINE'|'NOT_CONFIGURED'|'ERROR';providers:CloudProviderHealth[]}>{
