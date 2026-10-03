@@ -24,7 +24,7 @@ function PortOpen([int]$port) {
 }
 
 Step "Nexus AI provider stack"
-$order = "codex,copilot,gemini,claude-cli,openai,claude"
+$order = "chatgpt-plan,codex,copilot,gemini,claude-cli,openai,claude"
 [Environment]::SetEnvironmentVariable("NEXUS_AI_PROVIDER_ORDER", $order, "User")
 $env:NEXUS_AI_PROVIDER_ORDER = $order
 Write-Host "Kolejnosc chmury: $order" -ForegroundColor Green
@@ -167,6 +167,19 @@ try {
   $health | ConvertTo-Json -Depth 6
 
   try {
+    $chatgpt = Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/chatgpt/status" -TimeoutSec 12
+    if ($chatgpt.connected -and $chatgpt.planUsageEnabled) {
+      Write-Host ("CHATGPT    plan: CONNECTED  model=" + $chatgpt.model) -ForegroundColor Green
+    } elseif ($chatgpt.connected) {
+      Write-Host "CHATGPT    polaczony, ale uzycie planu nie jest aktywne." -ForegroundColor Yellow
+    } else {
+      Write-Host "CHATGPT    plan: niepolaczony — uzyj Continue with ChatGPT w Nexusie." -ForegroundColor DarkYellow
+    }
+  } catch {
+    Write-Host ("CHATGPT    status ERROR: " + $_.Exception.Message) -ForegroundColor Yellow
+  }
+
+  try {
     $search = Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/search?q=OpenAI" -TimeoutSec 20
     $count = @($search.results).Count
     if ($count -gt 0) { Write-Host ("INTERNET   DuckDuckGo search: OK (" + $count + " wynikow)") -ForegroundColor Green }
@@ -186,7 +199,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "AUTO: Codex (ChatGPT) -> Copilot -> Gemini -> Claude Code -> OpenAI API -> Claude API -> darmowy lokalny Ollama." -ForegroundColor Green
+Write-Host "AUTO: ChatGPT plan -> Codex -> Copilot -> Gemini -> Claude Code -> OpenAI API -> Claude API -> darmowy lokalny Ollama." -ForegroundColor Green
 Write-Host "Pamiec i narzedzia Nexusa pozostaja po stronie Nexusa, wiec zmiana providera nie kasuje kontekstu." -ForegroundColor Green
-Write-Host "Najpierw zaloguj Codex swoim kontem ChatGPT: codex" -ForegroundColor Yellow
+Write-Host "Po uruchomieniu Agent Hub polacz plan ChatGPT przyciskiem Continue with ChatGPT w Nexusie. Codex pozostaje drugim fallbackiem." -ForegroundColor Yellow
 Write-Host "Naprawa wszystkiego jednym poleceniem: scripts\repair-ai-stack-windows.bat" -ForegroundColor Cyan
