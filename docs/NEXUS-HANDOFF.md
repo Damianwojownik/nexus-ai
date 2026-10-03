@@ -105,4 +105,23 @@ Important limitation: this proves the Nexus code path and proxy, not a real FLUX
 
 ## Resume instruction for a new session
 
+### Portrait Studio — 2026-10-03
+
+The user's new request is one uploaded person photo → ten separate images with
+different expressions, eye states and arm poses, with high visual quality.
+`services/portrait_studio/` adds a standalone Polish Gradio studio using
+Qwen-Image-Edit-2511. Every variant and retry uses the original reference photos.
+It supports 1–3 references, PNG/ZIP export, per-image progress, graceful stop after
+the current image, partial-result recovery and individual retries. The new
+`notebooks/Nexus_Portrait_Studio.ipynb` launches an authenticated Colab UI.
+
+Validation: 8 CPU tests passed with Gradio 6.17.3, including UI callbacks, output
+archives, failed renders, retries, session isolation and input validation. The
+dependency resolver found a compatible package set; notebook code cells compile.
+There is **no real GPU render or visual-quality validation yet**. Both full and
+4bit loading need GPU smoke tests. This is a separate studio, not integrated into
+the main chat UI. The screenshot's `Nexus_Colab_Kaggle.ipynb` is not in this repo;
+do not claim it was modified. No paid image API or existing video pipeline was
+configured. See `services/portrait_studio/README.md` for resources and run steps.
+
 Start by reading this file, then inspect the latest commit and the exact files relevant to the requested task. Do not assume local services are running. Verify before claiming a provider, internet, Ollama or avatar backend is connected.

@@ -6,3 +6,7 @@ dist/
 .env.local
 .nexus-agent-state.json
 .nexus-memory.json
+__pycache__/
+.pytest_cache/
+.venv/
+portrait-output/
