@@ -67,6 +67,47 @@ export class AgentHubClient {
     return this.request('/api/avatar/health');
   }
 
+  async getImageHealth(): Promise<{ status: string; ok: boolean; message?: string; provider?: string; model?: string; mode?: string; device?: string; loaded?: boolean }> {
+    return this.request('/api/image/health');
+  }
+
+  async generateImage(input: {
+    prompt: string;
+    width?: number;
+    height?: number;
+    steps?: number;
+    seed?: number;
+    guidanceScale?: number;
+  }): Promise<{ blob: Blob; model?: string; seed?: number; steps?: number }> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/api/image/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(15 * 60 * 1000),
+      });
+    } catch (error) {
+      throw new AgentHubClientError(error instanceof Error ? error.message : 'Image generation endpoint is unreachable');
+    }
+    if (!response.ok) {
+      let detail = `Image generation returned HTTP ${response.status}`;
+      try {
+        const body = await response.json() as { error?: string };
+        if (body.error) detail = body.error;
+      } catch {}
+      throw new AgentHubClientError(detail, response.status);
+    }
+    const parsedSeed = Number(response.headers.get('x-nexus-seed'));
+    const parsedSteps = Number(response.headers.get('x-nexus-steps'));
+    return {
+      blob: await response.blob(),
+      model: response.headers.get('x-nexus-model') || undefined,
+      seed: Number.isInteger(parsedSeed) ? parsedSeed : undefined,
+      steps: Number.isInteger(parsedSteps) ? parsedSteps : undefined,
+    };
+  }
+
   async renderAvatar(input: {
     sourceImageBase64: string;
     sourceImageMime?: string;
