@@ -121,6 +121,88 @@ function isLoopbackOrigin(origin: string): boolean {
   }
 }
 
+function hubRelayHtml(targetOrigin: string): string {
+  const encodedOrigin=JSON.stringify(targetOrigin);
+  return `<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nexus Local Hub</title>
+<style>
+body{font-family:system-ui;background:#07111d;color:#eaf7ff;margin:0;min-height:100vh;display:grid;place-items:center}
+main{max-width:32rem;margin:1rem;padding:1.5rem;border:1px solid #26536d;border-radius:18px;background:#0c1a29}
+h1{font-size:1.25rem;color:#7de4ff}p{line-height:1.5}.ok{color:#7dffc2}
+</style>
+</head>
+<body><main>
+<h1>Nexus Local Hub</h1>
+<p class="ok">Połączenie lokalne gotowe.</p>
+<p>Zostaw to małe okno otwarte podczas korzystania z Nexusa. Tokeny ChatGPT pozostają na tym komputerze.</p>
+</main>
+<script>
+(() => {
+  const TARGET_ORIGIN=${encodedOrigin};
+  const openerWindow=window.opener;
+  if(!openerWindow){ document.body.innerHTML='<main><h1>Brak okna Nexusa</h1><p>Otwórz ten most z przycisku w Nexusie.</p></main>'; return; }
+
+  const send=(value)=>openerWindow.postMessage(value,TARGET_ORIGIN);
+  const json=async(response)=>{
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data?.error||('Agent Hub HTTP '+response.status));
+    return data;
+  };
+
+  window.addEventListener('message',async(event)=>{
+    if(event.source!==openerWindow||event.origin!==TARGET_ORIGIN)return;
+    const data=event.data;
+    if(!data||data.type!=='nexus-hub-call'||typeof data.id!=='string')return;
+    try{
+      let result;
+      switch(data.command){
+        case 'health':
+          result=await json(await fetch('/api/health',{headers:{Accept:'application/json'},cache:'no-store'}));
+          break;
+        case 'chatgpt_status':
+          result=await json(await fetch('/api/chatgpt/status',{headers:{Accept:'application/json'},cache:'no-store'}));
+          break;
+        case 'chatgpt_signin':
+          result=await json(await fetch('/api/chatgpt/sign-in/start',{
+            method:'POST',headers:{'content-type':'application/json',Accept:'application/json'},body:'{}'
+          }));
+          break;
+        case 'chatgpt_signout':
+          result=await json(await fetch('/api/chatgpt/sign-out',{
+            method:'POST',headers:{'content-type':'application/json',Accept:'application/json'},body:'{}'
+          }));
+          break;
+        case 'generate':
+          result=await json(await fetch('/api/ai/generate',{
+            method:'POST',
+            headers:{'content-type':'application/json',Accept:'application/json'},
+            body:JSON.stringify(data.args||{}),
+          }));
+          break;
+        default:
+          throw new Error('Nieobsługiwana komenda Local Hub Relay.');
+      }
+      send({type:'nexus-hub-result',id:data.id,ok:true,result});
+    }catch(error){
+      send({
+        type:'nexus-hub-result',
+        id:data.id,
+        ok:false,
+        error:error instanceof Error?error.message:String(error),
+      });
+    }
+  });
+
+  send({type:'nexus-hub-ready',version:'1.0'});
+  window.setInterval(()=>send({type:'nexus-hub-alive'}),5000);
+})();
+</script></body></html>`;
+}
+
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
   const avatarServer = new SelfHostedAvatarServerClient();
@@ -164,12 +246,22 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         throw new LocalCapabilityError(403, 'Software installation is only available from the local Nexus frontend');
       }
 
+      if (method === 'GET' && url.pathname === '/nexus-bridge') {
+        const targetOrigin=url.searchParams.get('origin')??'';
+        if(!targetOrigin||!isAllowedOrigin(targetOrigin,options.allowedOrigins??[])){
+          throw new HttpError(403,'Nexus bridge target origin is not allowed');
+        }
+        sendHtml(response,200,hubRelayHtml(targetOrigin));
+        return;
+      }
+
       if (method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, {
           ok: true,
-          version: '1.4.0',
+          version: '1.5.0',
           capabilities: [
             'chatgpt-plan-direct',
+            'popup-relay',
             'ai-generate',
             'workspace',
             'web-search',
