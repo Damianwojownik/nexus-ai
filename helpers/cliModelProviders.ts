@@ -28,7 +28,7 @@ class SafeCliRunner{
       };
       if(process.platform==='win32'){
         const encodedArgs=Buffer.from(JSON.stringify(args),'utf8').toString('base64');
-        const encodedCmd=Buffer.from(command,'utf8').toString('base64');
+        const encodedCmd=Buffer.from(`${command}.cmd`,'utf8').toString('base64');
         const script=[
           "$ErrorActionPreference='Stop'",
           `$cmd=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedCmd}'))`,
@@ -36,12 +36,14 @@ class SafeCliRunner{
           '& $cmd @a',
           'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
         ].join('; ');
-        execFile('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{
+        const child=execFile('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{
           cwd:this.cwd,timeout:timeoutMs,windowsHide:true,maxBuffer:8*1024*1024
         },finish);
+        child.stdin?.end();
         return;
       }
-      execFile(command,args,{cwd:this.cwd,timeout:timeoutMs,maxBuffer:8*1024*1024},finish);
+      const child=execFile(command,args,{cwd:this.cwd,timeout:timeoutMs,maxBuffer:8*1024*1024},finish);
+      child.stdin?.end();
     });
   }
 }

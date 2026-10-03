@@ -36,23 +36,25 @@ export class CopilotCliProvider {
         const script = [
           "$ErrorActionPreference='Stop'",
           `$a=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedArgs}')) | ConvertFrom-Json`,
-          '& copilot @a',
+          '& copilot.cmd @a',
           'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
         ].join('; ');
-        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        const child=execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
           cwd: this.cwd,
           timeout: timeoutMs,
           windowsHide: true,
           maxBuffer: 4 * 1024 * 1024,
         }, finish);
+        child.stdin?.end();
         return;
       }
 
-      execFile('copilot', args, {
+      const child=execFile('copilot', args, {
         cwd: this.cwd,
         timeout: timeoutMs,
         maxBuffer: 4 * 1024 * 1024,
       }, finish);
+      child.stdin?.end();
     });
   }
 

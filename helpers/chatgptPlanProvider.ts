@@ -261,7 +261,7 @@ export class ChatGptPlanProvider{
     return profile;
   }
 
-  async listModels(){
+  async listModels():Promise<Array<{slug:string;displayName:string}>>{
     const profile=await this.ensureAccessToken();
     const response=await fetch('https://api.openai.com/v1/models',{
       headers:{authorization:'Bearer '+profile.access_token,accept:'application/json'},

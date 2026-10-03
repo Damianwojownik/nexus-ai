@@ -295,7 +295,7 @@ test('workspace import is path-safe and installs require explicit confirmation',
 test('agent hub API exposes presence and streams task events', { timeout: 15000 }, async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'nexus-hub-api-'));
   const hub = new AgentHub({ stateFilePath: join(tempDir, 'hub-state.json') });
-  const server = createAgentHubServer(hub);
+  const server = createAgentHubServer(hub, { allowedOrigins: ['https://nexus.sandbox.floot.app'] });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   assert.ok(address && typeof address === 'object');

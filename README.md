@@ -12,6 +12,8 @@ This repository is the shared source bridge for VS Code/Codex work. Floot-specif
 
 ## Run locally
 
+On Windows the Hub's CLI bridges invoke the installed `.cmd` launchers rather than PowerShell `.ps1` shims, so they do not require changing the system execution policy. Child stdin is closed to prevent non-interactive CLI calls waiting for additional input. CLI version health checks prove installation only; verify generation separately. `/api/chatgpt/status` reports direct ChatGPT authorization independently of Codex login. A valid sign-in URL does not mean the user has completed authorization.
+
 Install dependencies with `npm install`. Configure `VITE_OLLAMA_BASE_URL` and `VITE_NEXUS_AGENT_HUB_URL` in `.env.local`; this machine's safe local defaults are `http://127.0.0.1:11435` and `http://127.0.0.1:8788`.
 
 Recommended on Windows: run the one-click launcher:
