@@ -117,6 +117,11 @@ export class AgentHubClient {
     audioMime?: string;
     drivingVideoBase64?: string;
     drivingVideoMime?: string;
+    motionProfile?: 'natural' | 'expressive' | 'calm';
+    lipSync?: 'audio' | 'phoneme' | 'viseme';
+    blink?: boolean;
+    breathing?: boolean;
+    expression?: 'adaptive' | 'neutral' | 'warm' | 'focused';
   }): Promise<Blob> {
     let response: Response;
     try {
