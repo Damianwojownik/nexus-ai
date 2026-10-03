@@ -98,13 +98,15 @@ export class AgentHubClient {
       } catch {}
       throw new AgentHubClientError(detail, response.status);
     }
-    const parsedSeed = Number(response.headers.get('x-nexus-seed'));
-    const parsedSteps = Number(response.headers.get('x-nexus-steps'));
+    const seedHeader = response.headers.get('x-nexus-seed');
+    const stepsHeader = response.headers.get('x-nexus-steps');
+    const parsedSeed = seedHeader === null ? undefined : Number(seedHeader);
+    const parsedSteps = stepsHeader === null ? undefined : Number(stepsHeader);
     return {
       blob: await response.blob(),
       model: response.headers.get('x-nexus-model') || undefined,
-      seed: Number.isInteger(parsedSeed) ? parsedSeed : undefined,
-      steps: Number.isInteger(parsedSteps) ? parsedSteps : undefined,
+      seed: parsedSeed !== undefined && Number.isInteger(parsedSeed) ? parsedSeed : undefined,
+      steps: parsedSteps !== undefined && Number.isInteger(parsedSteps) ? parsedSteps : undefined,
     };
   }
 
