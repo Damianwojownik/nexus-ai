@@ -51,6 +51,18 @@
         "helpers/agentHubStore.ts",
         "coordination/tasks.json"
       ]
+    },
+    {
+      "id": "image-engine-mvp",
+      "owner": "chatgpt",
+      "status": "WORKING",
+      "scope": "Self-hosted Nexus Image Engine: FLUX.1-schnell service, Agent Hub bridge, natural-language routing and UI output. Code path/build tests pass; real CUDA render still pending.",
+      "dependsOn": [
+        "agent-hub-runtime"
+      ],
+      "avoidPaths": [
+        "services/avatar_server/**"
+      ]
     }
   ]
 }
