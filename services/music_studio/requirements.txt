@@ -1,0 +1,5 @@
+# UI/proxy only. ACE-Step runs separately in its own uv environment.
+gradio==6.17.3
+httpx[socks]>=0.28,<0.29
+numpy>=1.26,<3
+soundfile==0.14.0
