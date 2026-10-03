@@ -105,6 +105,27 @@ Important limitation: this proves the Nexus code path and proxy, not a real FLUX
 
 ## Resume instruction for a new session
 
+### Music Studio — 2026-10-03
+
+The user requested a Suno-like generator with substantially better sound.
+`services/music_studio/` implements a standalone Polish Gradio UI and a client
+for a separately hosted ACE-Step 1.5 API. It offers reviewed lyric drafting,
+vocals/instrumental, model/BPM/key/duration/seed controls, two variants, lossless
+downloads, project journals, resume without a new generation request, signal
+measurements and optional two-pass FFmpeg loudness normalization to a new file.
+The original audio is never overwritten. `notebooks/Nexus_Music_Studio.ipynb`
+installs the pinned upstream backend into an isolated uv environment and starts
+an authenticated panel. Upstream commit: ca1e85fe9430179831e6bc6be790c332190a3866.
+
+13 tests passed with a mocked ACE API and real FFmpeg processing a synthetic tone.
+The actual Gradio server also served its page and configuration with HTTP 200;
+all music notebook code cells compile.
+These are not musical examples or GPU validation. No real generated song has
+been heard in this session; no claim of quality exceeding Suno is established.
+Read `services/music_studio/SUNO-COMPARISON.md` before making such claims. A real
+GPU model-load/render test and blind listening comparison are the next gates.
+The app is separate from the main Nexus chat; it is not a full MIDI/multitrack DAW.
+
 ### Portrait Studio — 2026-10-03
 
 The user's new request is one uploaded person photo → ten separate images with

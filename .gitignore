@@ -10,3 +10,4 @@ __pycache__/
 .pytest_cache/
 .venv/
 portrait-output/
+music-output/

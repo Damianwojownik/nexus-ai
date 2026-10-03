@@ -1,5 +1,13 @@
 # Nexus AI
 
+## Studio muzyczne — opis i tekst → piosenka
+
+[Nexus Music Studio](services/music_studio/README.md) dodaje tworzenie szkicu tekstu,
+wokal/instrumental przez własny ACE-Step, dwa warianty, WAV/FLAC, projekty ZIP
+i opcjonalne wyrównanie głośności. [Notebook Colab](notebooks/Nexus_Music_Studio.ipynb)
+uruchamia silnik i panel osobno. Testy protokołu i FFmpeg są niezależne od GPU;
+rzeczywiste generowanie oraz przewaga brzmienia nad Suno pozostają niezweryfikowane.
+
 ## Studio portretów — zdjęcie → 10 emocji i póz
 
 Nowy, osobny [moduł studia portretów](services/portrait_studio/README.md) obsługuje
