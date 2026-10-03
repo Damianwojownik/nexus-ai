@@ -45,11 +45,6 @@ class GeminiProvider {
     }
   }
 
-  async chatGptPlanStatus(){ return this.chatgptPlan.status(); }
-  async startChatGptPlanSignIn(){ return this.chatgptPlan.startAuthorization(); }
-  async handleChatGptPlanCallback(url:URL){ return this.chatgptPlan.handleCallback(url); }
-  async signOutChatGptPlan(){ return this.chatgptPlan.signOut(); }
-
   async generate(prompt:string, options:Record<string,any>={}):Promise<CloudGenerateResult>{
     if(!this.configured()) throw new Error('Google Gemini is not configured');
     const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`,{
@@ -211,6 +206,11 @@ export class NexusCloudRouter {
           : 'OFFLINE';
     return {status,providers};
   }
+
+  async chatGptPlanStatus(){ return this.chatgptPlan.status(); }
+  async startChatGptPlanSignIn(){ return this.chatgptPlan.startAuthorization(); }
+  async handleChatGptPlanCallback(url:URL){ return this.chatgptPlan.handleCallback(url); }
+  async signOutChatGptPlan(){ return this.chatgptPlan.signOut(); }
 
   async generate(prompt:string, options:Record<string,any>={}):Promise<CloudGenerateResult>{
     const errors:string[]=[];
