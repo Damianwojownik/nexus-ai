@@ -903,3 +903,61 @@ Najpierw:
 
 Nie deklaruj sukcesu na podstawie samego kodu.
 Sukces wymaga działającego testu.
+
+
+==================================================
+30. FREE-FIRST PROVIDER FALLBACK
+==================================================
+
+Cel:
+Nexus ma kontynuować pracę nawet wtedy, gdy bieżący dostawca AI przestanie odpowiadać albo wyczerpie bezpłatny limit/punkty.
+
+Preferowana kolejność:
+
+1. GitHub Copilot / Codex — używaj jako pierwszego dostawcy, jeśli jest dostępny i ma aktywny darmowy lub już opłacony limit użytkownika.
+2. ChatGPT plan direct — używaj wyłącznie wtedy, gdy lokalny Agent Hub potwierdzi:
+   connected=true
+   planUsageEnabled=true
+   Nie używaj płatnego OpenAI API jako automatycznego fallbacku.
+3. Ollama local — darmowy fallback końcowy, bez kredytów za zapytania.
+
+Jeśli ChatGPT plan direct nie jest dostępny albo planUsageEnabled=false:
+Copilot/Codex → Ollama.
+
+Jeśli Copilot/Codex zgłosi quota exhausted, rate limit, provider unavailable, credits exhausted lub odpowiednik błędu dostępności:
+- zapisz bieżący stan zadania,
+- NIE zaczynaj pracy od początku,
+- przełącz provider na następny dostępny,
+- kontynuuj z tym samym project context, memory, task state i workspace,
+- odnotuj zmianę providera w statusie zadania.
+
+Nie przełączaj automatycznie na płatne API, płatne kredyty ani nową subskrypcję.
+Jakiekolwiek nowe płatne użycie wymaga wyraźnej zgody użytkownika.
+
+Provider jest wymienny.
+Planner, Builder, Coder, Tester i Reviewer nie mogą być trwale związani z jednym modelem.
+
+Stan zadania musi być niezależny od providera:
+- project_id
+- task_id
+- current_step
+- completed_steps
+- pending_steps
+- files_changed
+- tests_passed
+- tests_failed
+- last_error
+- memory/context snapshot
+- provider_used
+
+Po zmianie providera agent ma najpierw odczytać stan i kontynuować od ostatniego bezpiecznego punktu.
+
+Wymagany test:
+1. rozpocznij zadanie na providerze A,
+2. zasymuluj błąd quota/rate-limit,
+3. przełącz na provider B,
+4. potwierdź, że zadanie kontynuuje bez powtórzenia ukończonych kroków,
+5. uruchom typecheck/testy,
+6. zapisz wynik.
+
+Nie deklaruj działania fallbacku, dopóki ten test nie przejdzie.
