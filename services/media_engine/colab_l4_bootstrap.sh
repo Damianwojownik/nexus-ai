@@ -61,6 +61,11 @@ PY
 )"
 fi
 
+# Persist the active worker token locally for this Colab runtime only.
+# The file lives under /content, is not committed, and is readable only by the current user.
+printf '%s' "$NEXUS_MEDIA_ENGINE_TOKEN" >/content/nexus-media-engine.token
+chmod 600 /content/nexus-media-engine.token
+
 if ! command -v cloudflared >/dev/null 2>&1; then
   echo "== Installing Cloudflare tunnel client =="
   sudo curl -L --fail --silent --show-error \
