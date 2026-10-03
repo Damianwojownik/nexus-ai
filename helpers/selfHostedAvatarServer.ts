@@ -13,6 +13,11 @@ export type AvatarRenderInput = {
   audioMime?: string;
   drivingVideoBase64?: string;
   drivingVideoMime?: string;
+  motionProfile?: 'natural' | 'expressive' | 'calm';
+  lipSync?: 'audio' | 'phoneme' | 'viseme';
+  blink?: boolean;
+  breathing?: boolean;
+  expression?: 'adaptive' | 'neutral' | 'warm' | 'focused';
 };
 
 export type AvatarRenderResult = {
@@ -101,6 +106,12 @@ export class SelfHostedAvatarServerClient {
       new Blob([new Uint8Array(decodeBase64(input.sourceImageBase64))], { type: input.sourceImageMime || 'image/png' }),
       'source.png',
     );
+    form.append('motion_profile', input.motionProfile || 'natural');
+    form.append('lip_sync', input.lipSync || 'phoneme');
+    form.append('blink', String(input.blink ?? true));
+    form.append('breathing', String(input.breathing ?? true));
+    form.append('expression', input.expression || 'adaptive');
+
     if (input.audioBase64) {
       form.append(
         'audio',
