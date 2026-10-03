@@ -512,3 +512,58 @@ test('tool registry enforces safe execution boundaries', async () => {
     /requires explicit approval/i,
   );
 });
+
+test('agent hub proxies image generation only to the configured engine and validates the PNG', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'nexus-hub-image-'));
+  const hub = new AgentHub({ stateFilePath: join(tempDir, 'hub-state.json') });
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  let forwardedUrl = '';
+  let forwardedAuthorization = '';
+  let forwardedPrompt = '';
+  const server = createAgentHubServer(hub, {
+    imageServerUrl: 'https://images.example.test',
+    imageServerToken: 'image-test-token',
+    imageServerFetch: async (input, init) => {
+      forwardedUrl = String(input);
+      forwardedAuthorization = new Headers(init?.headers).get('Authorization') ?? '';
+      forwardedPrompt = JSON.parse(String(init?.body)).prompt;
+      return new Response(png, { headers: { 'Content-Type': 'image/png' } });
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const generated = await fetch(`${baseUrl}/api/image/generate`, {
+      method: 'POST',
+      headers: {
+        Origin: 'http://127.0.0.1:5173',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt: 'Cybernetyczny Nexus w zielonej matrycy' }),
+    });
+    assert.equal(generated.status, 200);
+    assert.equal(generated.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await generated.arrayBuffer()), png);
+    assert.equal(forwardedUrl, 'https://images.example.test/v1/generate');
+    assert.equal(forwardedAuthorization, 'Bearer image-test-token');
+    assert.equal(forwardedPrompt, 'Cybernetyczny Nexus w zielonej matrycy');
+
+    const remoteOrigin = await fetch(`${baseUrl}/api/image/generate`, {
+      method: 'POST',
+      headers: {
+        Origin: 'https://untrusted.example',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt: 'should not be forwarded' }),
+    });
+    assert.equal(remoteOrigin.status, 403);
+    assert.equal(forwardedPrompt, 'Cybernetyczny Nexus w zielonej matrycy');
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});

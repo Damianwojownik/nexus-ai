@@ -14,6 +14,9 @@ const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', '
 export interface AgentHubServerOptions {
   allowedOrigins?: string[];
   workspaceDir?: string;
+  imageServerUrl?: string;
+  imageServerToken?: string;
+  imageServerFetch?: typeof fetch;
 }
 
 class HttpError extends Error {
@@ -159,6 +162,57 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/image/generate') {
+        if (origin && !isLoopbackOrigin(origin)) {
+          throw new HttpError(403, 'Image generation is only available from the local Nexus frontend');
+        }
+        const endpoint = options.imageServerUrl ?? process.env.NEXUS_IMAGE_SERVER_URL;
+        const token = options.imageServerToken ?? process.env.NEXUS_IMAGE_SERVER_TOKEN;
+        if (!endpoint || !token) {
+          throw new HttpError(503, 'Nexus Image Engine is not connected. Configure it in the Agent Hub environment.');
+        }
+        const body = await readJson(request, 16 * 1024);
+        const prompt = requiredString(body, 'prompt');
+        if (prompt.length > 4000) throw new HttpError(413, 'Image prompt exceeds 4000 characters');
+
+        let imageEndpoint: URL;
+        try {
+          imageEndpoint = new URL(endpoint);
+        } catch {
+          throw new HttpError(503, 'NEXUS_IMAGE_SERVER_URL must be a valid HTTPS URL or loopback HTTP URL');
+        }
+        const loopback = imageEndpoint.hostname === 'localhost'
+          || imageEndpoint.hostname === '127.0.0.1'
+          || imageEndpoint.hostname === '[::1]';
+        if ((imageEndpoint.protocol !== 'https:' && !(imageEndpoint.protocol === 'http:' && loopback))
+          || imageEndpoint.username || imageEndpoint.password) {
+          throw new HttpError(503, 'NEXUS_IMAGE_SERVER_URL must use HTTPS unless it points to loopback');
+        }
+
+        const imageResponse = await (options.imageServerFetch ?? fetch)(new URL('/v1/generate', imageEndpoint), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+          signal: AbortSignal.timeout(15 * 60 * 1000),
+        });
+        if (!imageResponse.ok) throw new HttpError(502, `Nexus Image Engine returned HTTP ${imageResponse.status}`);
+        if (imageResponse.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'image/png') {
+          throw new HttpError(502, 'Nexus Image Engine returned an unsupported image format');
+        }
+        const image = Buffer.from(await imageResponse.arrayBuffer());
+        if (image.length < 8 || image.length > 24 * 1024 * 1024
+          || !image.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+          throw new HttpError(502, 'Nexus Image Engine returned an invalid or oversized PNG');
+        }
+        response.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Content-Length': image.length,
+          'Cache-Control': 'no-store',
+        });
+        response.end(image);
         return;
       }
 

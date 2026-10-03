@@ -20,6 +20,8 @@ import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarM
 import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
 import type { VoiceEventType } from '../helpers/agentProtocol';
+import { parseCreationCommand } from '../helpers/creationCommand';
+import { generateNexusImage } from '../helpers/nexusImageGenerator';
 
 const ollamaClient = new OllamaClient();
 const memoryStore = new MemoryStore();
@@ -37,7 +39,7 @@ const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseU
 const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
 export default function Home() {
-  const avatars=[{name:'Kosmiczny',src:'/_cdn/static/8c1cadbc-855e-4488-a72b-e88cb715d899.png'},{name:'Luna',src:'/_cdn/static/cc2dde88-daa2-48c9-acc8-1ea16f85990d.png'},{name:'Kai',src:'/_cdn/static/6a74b8c4-e09a-4776-a01a-156edac8441f.png'},{name:'Nova',src:'/_cdn/static/364da496-a271-4b0c-b40e-e23f14fad3a2.png'},{name:'Orbit',src:'/_cdn/static/17f6bda3-9fc8-4e2d-9b46-fec5fc2d91d4.png'},{name:'Void',src:'/_cdn/static/2405769f-a406-4390-9af2-8b74c0fda46c.png'}];
+  const avatars: Array<{name:string;src:string;videoSrc?:string}> = [{name:'Nexus',src:'/avatars/nexus-boy.png',videoSrc:'/avatars/nexus-speaking.mp4'}];
   const [avatar,setAvatar]=useState(0);
   const [prompt,setPrompt]=useState('');
   const [status,setStatus]=useState('Gotowa do rozmowy');
@@ -57,6 +59,7 @@ export default function Home() {
   const [approvalBusy,setApprovalBusy]=useState(false);
   const [attachments,setAttachments]=useState<File[]>([]);
   const [response,setResponse]=useState('');
+  const [creationUrl,setCreationUrl]=useState('');
   const [isThinking,setIsThinking]=useState(false);
   const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>([]);
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
@@ -92,6 +95,8 @@ export default function Home() {
       setMemoryReady(true);
     })();
   }, []);
+
+  useEffect(()=>()=>{if(creationUrl.startsWith('blob:'))URL.revokeObjectURL(creationUrl)},[creationUrl]);
 
   useEffect(() => {
     let disposed = false;
@@ -191,14 +196,29 @@ export default function Home() {
     voiceEventBus.emit(eventType, 'nexus', progress.message, progress.taskId, { source: 'orchestrator' });
   };
 
-  const runNexusConversation = async () => {
-    const messageText = prompt.trim() || (attachments.length ? 'Przeanalizuj załączone pliki i zdjęcia.' : '');
+  const runNexusConversation = async (spokenText?:string) => {
+    const messageText = (spokenText??prompt).trim() || (attachments.length ? 'Przeanalizuj załączone pliki i zdjęcia.' : '');
     if (!messageText) return;
     setIsThinking(true);
     setApprovalRequest(null);
     setResponse('');
+    setCreationUrl('');
     const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-12);
     try {
+      const creation=parseCreationCommand(messageText);
+      if(creation){
+        if(attachments.length)throw new Error('Generator obrazów przyjmuje opis tekstowy. Usuń załączniki przed generowaniem.');
+        if(!creation.description)throw new Error('Dodaj opis obrazu w tej samej komendzie, np. „Wygeneruj mi cybernetycznego Nexusa w zielonej matrycy”.');
+        setStatus('Generuję obraz…');
+        const generated=await generateNexusImage(agentHubClient.baseUrl,creation.description);
+        setCreationUrl(URL.createObjectURL(generated.image));
+        setResponse('Obraz jest gotowy.');
+        setStatus('Obraz wygenerowany');
+        setPrompt('');
+        setAttachments([]);
+        speak('Gotowe. Wygenerowałem obraz.');
+        return;
+      }
       const result = await nexusOrchestrator.start({
         text: messageText,
         history: conversationHistory.slice(-10),
@@ -336,21 +356,23 @@ export default function Home() {
     const r=new SR(); recognitionRef.current=r;
     r.lang='pl-PL'; r.continuous=false; r.interimResults=true;
     r.onstart=()=>{setListening(true);setStatus('Nexus słucha…')};
-    r.onresult=(e:any)=>{let t=''; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; setPrompt(t); if(e.results[e.results.length-1].isFinal){setStatus('Rozpoznano mowę');}};
+    let submitted=false;
+    r.onresult=(e:any)=>{let t='';let finalText='';for(let i=0;i<e.results.length;i++){const transcript=e.results[i][0].transcript;t+=transcript;if(e.results[i].isFinal)finalText+=transcript;}setPrompt(t);if(finalText.trim()&&!submitted){submitted=true;setStatus('Rozpoznano mowę');void runNexusConversation(finalText.trim());}};
     r.onerror=(e:any)=>{emitVoiceEvent('ERROR', e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu':'Błąd mikrofonu — spróbuj ponownie'); setStatus(e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu':'Błąd mikrofonu — spróbuj ponownie');};
     r.onend=()=>{setListening(false); emitVoiceEvent('IDLE','Voice input ended');}; r.start();
   };
-  const run = runNexusConversation;
+  const run = () => { void runNexusConversation(); };
   return <main className={styles.shell}>
     <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
       <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
-        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
+        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/>{avatars[avatar].videoSrc?<video key={avatars[avatar].videoSrc} className={styles.person} src={avatars[avatar].videoSrc} poster={avatars[avatar].src} autoPlay loop muted playsInline aria-label="Nexus — animowany awatar z ruchem dłoni"/>:<img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/>}{!avatars[avatar].videoSrc&&<div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div>}<div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
         {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
+        {creationUrl&&<img className={styles.generatedImage} src={creationUrl} alt="Obraz wygenerowany przez Nexusa"/>}
         <div className={styles.status}>{status}</div>
         <input ref={attachmentInputRef} type="file" multiple hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.xlsx,.pptx" onChange={event=>{addAttachments(event.target.files);event.currentTarget.value=''}}/>
         {attachments.length>0&&<div className={styles.attachmentList}>{attachments.map((file,index)=><span key={`${file.name}-${index}`} className={styles.attachmentChip}>{file.name}<button type="button" aria-label={`Usuń ${file.name}`} onClick={()=>setAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))}>×</button></span>)}</div>}
-        <div className={styles.composer}><Button variant="secondary" onClick={()=>attachmentInputRef.current?.click()} aria-label="Dodaj załączniki"><Plus size={18}/> Dodaj</Button><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&run()} placeholder="Powiedz Nexusowi, co chcesz osiągnąć…"/><Button onClick={run} disabled={isThinking||(!prompt.trim()&&!attachments.length)} aria-label="Wyślij"><Send size={18}/></Button></div>
+        <div className={styles.composer}><Button variant="secondary" onClick={()=>attachmentInputRef.current?.click()} aria-label="Dodaj załączniki"><Plus size={18}/> Dodaj</Button><Input value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&run()} placeholder="Wpisz lub powiedz: Wygeneruj mi [opis]…"/><Button onClick={run} disabled={isThinking||(!prompt.trim()&&!attachments.length)} aria-label="Wyślij"><Send size={18}/></Button></div>
         {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button></div>
       </div>

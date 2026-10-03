@@ -32,6 +32,7 @@ Open `http://127.0.0.1:5173/`. The Hub stores runtime state under the user's loc
 ## Local capabilities
 
 - Web search runs through DuckDuckGo from the local Hub and returns clickable source links/snippets.
+- Nexus's default avatar is the looping `public/avatars/nexus-speaking.mp4` clip, with `nexus-boy.png` as its poster. The browser speech input accepts image commands such as `Wygeneruj mi cybernetycznego Nexusa w zielonej matrycy`; include the image description in the same utterance. Image generation requires the Agent Hub's server-only `NEXUS_IMAGE_SERVER_URL` and `NEXUS_IMAGE_SERVER_TOKEN` values; never put the token in a `VITE_` variable.
 - File import accepts one file up to 10 MB into `%LOCALAPPDATA%/NexusAI/workspace` (or `NEXUS_WORKSPACE_DIR`). Executable/installer extensions are blocked; imports are never launched.
 - Windows software installs are restricted to the Hub's approved `winget` catalog and require an explicit UI confirmation for every app. The installer is disabled if `winget` is unavailable; Nexus does not install a package manager automatically.
 - The Primary Agent remains `NOT_CONFIGURED`. No remote ChatGPT credentials or connection are enabled.
