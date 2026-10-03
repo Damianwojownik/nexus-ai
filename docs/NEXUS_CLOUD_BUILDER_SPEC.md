@@ -961,3 +961,237 @@ Wymagany test:
 6. zapisz wynik.
 
 Nie deklaruj działania fallbacku, dopóki ten test nie przejdzie.
+
+
+==================================================
+31. NEXUS MULTIMODAL CREATIVE ORCHESTRATOR
+==================================================
+
+Cel:
+Po wdrożeniu Nexus Image Engine połącz go z pozostałymi silnikami Nexusa w jeden wspólny pipeline kreatywny.
+
+Nie chodzi o kopiowanie pojedynczego zamkniętego generatora obrazu.
+Celem jest system wyspecjalizowany pod Nexusa, który może być lepszy dla jego konkretnych zastosowań dzięki współpracy wielu niezależnych silników.
+
+Główna architektura:
+
+USER
+↓
+NEXUS MAIN BRAIN
+↓
+INTENT / PROJECT CONTEXT / MEMORY
+↓
+CREATIVE ORCHESTRATOR
+├── Nexus Image Engine
+├── Nexus Identity Engine
+├── Nexus Pose / Composition Engine
+├── Nexus Face Engine
+├── Nexus Hand / Detail Repair Engine
+├── Nexus Cutout Engine
+├── Nexus Quality Engine
+├── Nexus Body / Video Engine
+├── Nexus Lip Engine
+├── Nexus Voice Engine
+└── Nexus Asset Manager
+
+==================================================
+31.1 IMAGE GENERATION PIPELINE
+==================================================
+
+Przykład polecenia:
+
+„Wygeneruj realistyczną Lunę siedzącą na fotelu, na wprost, miękkie światło, PNG bez tła.”
+
+Pipeline:
+
+1. Nexus odczytuje projekt i pamięć postaci.
+2. Identity Engine wybiera referencje Luny.
+3. Prompt Builder buduje techniczny prompt.
+4. Pose / Composition Engine ustala siedzącą pozę i kadr.
+5. Image Engine generuje bazowy obraz.
+6. Face Engine sprawdza / poprawia twarz.
+7. Hand / Detail Repair Engine poprawia dłonie i lokalne artefakty.
+8. Cutout Engine usuwa tło, jeśli wymagane.
+9. Quality Engine wykonuje upscale / detail pass.
+10. Asset Manager zapisuje wynik i wszystkie metadane.
+
+Nie regeneruj całego obrazu, jeśli poprawy wymaga tylko mały fragment.
+
+==================================================
+31.2 MULTI-MODEL ROUTING
+==================================================
+
+Creative Orchestrator ma wybierać model według zadania, zamiast zawsze uruchamiać jeden model.
+
+Przykłady:
+
+- szybki text-to-image → FLUX.1-schnell lub aktualnie wybrany główny darmowy model
+- lokalna poprawka → inpainting
+- spójna postać → reference / identity conditioning
+- poza → pose conditioning / ControlNet-equivalent workflow
+- przezroczyste tło → segmentation / background removal
+- finalna jakość → upscale / restoration
+
+Modele są wymienne.
+Interfejs Nexusa nie może zależeć od nazwy konkretnego modelu.
+
+==================================================
+31.3 AUTOMATYCZNY QUALITY LOOP
+==================================================
+
+Dodaj kontrolowaną pętlę jakości:
+
+GENERATE
+→ ANALYZE
+→ REPAIR IF NEEDED
+→ VERIFY
+→ SAVE
+
+Analiza jakości ma wykrywać co najmniej:
+- oczywiste deformacje dłoni,
+- dodatkowe kończyny,
+- duże błędy twarzy,
+- błędy tła,
+- niespójność z referencją postaci,
+- błędny kadr / brak wymaganej części ciała.
+
+Nie wykonuj nieskończonych retry.
+Ustaw limit prób i zapisuj przyczynę retry.
+
+==================================================
+31.4 IDENTITY LOCK
+==================================================
+
+Stałe postacie, zwłaszcza Luna i Nexus, powinny mieć profil tożsamości zawierający:
+- referencje front / 3/4 / side,
+- preferowane dobre rendery,
+- charakterystyczne cechy,
+- styl,
+- kolory,
+- proporcje,
+- outfit / armor profile,
+- seed i parametry, jeśli użyteczne.
+
+Każdy silnik korzystający z postaci powinien odczytać ten sam Identity Profile.
+
+==================================================
+31.5 IMAGE → VIDEO
+==================================================
+
+Gotowy obraz powinien móc stać się automatycznie wejściem do AI Video Studio.
+
+Pipeline:
+
+Nexus Image Engine
+→ Identity Lock
+→ VACE / Body Engine
+→ FasterLivePortrait / Face Engine
+→ MuseTalk / Lip Engine
+→ Polish TTS / Voice Engine
+→ Quality Engine
+→ final MP4
+
+Przykład:
+
+„Wygeneruj kobietę siedzącą na fotelu, a potem zrób 8-sekundowy film, w którym podnosi rękę i mówi po polsku.”
+
+Nexus ma:
+1. wygenerować obraz,
+2. zapisać asset,
+3. przekazać asset do video pipeline,
+4. zachować tożsamość postaci,
+5. wygenerować film,
+6. zapisać wynik bez ponownego ręcznego uploadu przez użytkownika.
+
+==================================================
+31.6 BUILDER INTEGRATION
+==================================================
+
+Cloud Builder powinien móc wywołać Creative Orchestrator.
+
+Przykład:
+
+„Zbuduj landing page AI i wygeneruj realistyczny obraz kobiety do sekcji hero.”
+
+Nexus:
+1. tworzy stronę,
+2. generuje obraz,
+3. zapisuje obraz jako project asset,
+4. wstawia asset do strony,
+5. uruchamia test / preview.
+
+Później:
+
+„Zrób z tej postaci krótki film i zamień obraz hero na video.”
+
+Nexus:
+1. bierze istniejący asset,
+2. uruchamia video pipeline,
+3. zapisuje video,
+4. aktualizuje stronę,
+5. testuje preview.
+
+==================================================
+31.7 FREE-FIRST RULE
+==================================================
+
+Preferuj darmowe / lokalne / już opłacone przez użytkownika zasoby.
+
+Nie uruchamiaj automatycznie:
+- płatnych image API,
+- płatnych video API,
+- nowych kredytów,
+- nowej subskrypcji.
+
+Płatne użycie wymaga wyraźnej zgody użytkownika.
+
+==================================================
+31.8 CEL JAKOŚCIOWY
+==================================================
+
+Nie deklaruj, że system jest „lepszy niż ChatGPT” albo „lepszy niż OpenAI” bez mierzalnego porównania.
+
+Celem jest:
+- lepsza kontrola dla Nexusa,
+- większa spójność własnych postaci,
+- automatyczne poprawki,
+- bezpośrednie połączenie obraz → video → strona/aplikacja,
+- brak opłaty za każdą generację przy lokalnych modelach,
+- możliwość wymiany modeli bez zmiany UX.
+
+Jeśli jakość ma być porównywana, przygotuj zestaw testów A/B:
+- photorealistic portrait
+- full body
+- difficult hands
+- transparent PNG
+- character consistency
+- edit / inpaint
+- image-to-video handoff
+
+Porównuj:
+- zgodność z promptem,
+- spójność twarzy,
+- jakość dłoni,
+- artefakty,
+- czas,
+- VRAM,
+- liczbę retry.
+
+==================================================
+31.9 WDRAŻANIE
+==================================================
+
+Najpierw uruchom i przetestuj sam Nexus Image Engine.
+
+Dopiero potem integruj kolejno:
+1. Identity Lock
+2. Pose / Composition
+3. Repair
+4. Cutout
+5. Quality
+6. Builder
+7. Video Studio
+
+Nie łącz wszystkiego naraz przed pierwszym działającym renderem.
+
+Sukces wymaga realnych plików wynikowych i testów end-to-end.
