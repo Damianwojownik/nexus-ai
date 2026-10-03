@@ -24,7 +24,7 @@ function PortOpen([int]$port) {
 }
 
 Step "Nexus AI provider stack"
-$order = "copilot,codex,gemini,claude-cli,openai,claude"
+$order = "codex,copilot,gemini,claude-cli,openai,claude"
 [Environment]::SetEnvironmentVariable("NEXUS_AI_PROVIDER_ORDER", $order, "User")
 $env:NEXUS_AI_PROVIDER_ORDER = $order
 Write-Host "Kolejnosc chmury: $order" -ForegroundColor Green
@@ -108,7 +108,7 @@ if (-not $gemini) { $gemini = UserEnv "NEXUS_GEMINI_API_KEY" }
 if ($gemini) {
   Write-Host "Gemini API: skonfigurowany" -ForegroundColor Green
 } else {
-  Write-Host "Gemini API: brak — nie blokuje pracy, bo Copilot/Codex/Ollama maja pierwszenstwo." -ForegroundColor DarkYellow
+  Write-Host "Gemini API: brak — nie blokuje pracy, bo Codex/Copilot/Ollama maja pierwszenstwo." -ForegroundColor DarkYellow
 }
 if ($env:OPENAI_API_KEY -or (UserEnv "OPENAI_API_KEY")) {
   Write-Host "OPENAI_API_KEY: skonfigurowany" -ForegroundColor Green
@@ -186,7 +186,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "AUTO: Copilot -> Codex -> Gemini -> Claude Code -> OpenAI API -> Claude API -> darmowy lokalny Ollama." -ForegroundColor Green
+Write-Host "AUTO: Codex (ChatGPT) -> Copilot -> Gemini -> Claude Code -> OpenAI API -> Claude API -> darmowy lokalny Ollama." -ForegroundColor Green
 Write-Host "Pamiec i narzedzia Nexusa pozostaja po stronie Nexusa, wiec zmiana providera nie kasuje kontekstu." -ForegroundColor Green
-Write-Host "Jesli Copilot nie jest zalogowany, uruchom: copilot login" -ForegroundColor Yellow
+Write-Host "Najpierw zaloguj Codex swoim kontem ChatGPT: codex" -ForegroundColor Yellow
 Write-Host "Naprawa wszystkiego jednym poleceniem: scripts\repair-ai-stack-windows.bat" -ForegroundColor Cyan
