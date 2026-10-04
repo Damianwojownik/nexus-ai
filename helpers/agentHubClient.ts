@@ -72,6 +72,61 @@ export class AgentHubClient {
     return this.request('/api/mis/aligner/health');
   }
 
+
+  async getMisHealth(): Promise<{
+    ok: boolean;
+    experimental: true;
+    aligner: { configured: boolean; ok: boolean; provider?: string; message?: string };
+    renderer: {
+      experimental: true;
+      live: { status?: string; ok: boolean; message?: string; provider?: string; mode?: string };
+      quality: { configured: boolean; ok: boolean; provider?: string; version?: string; message?: string; gpu?: unknown };
+    };
+  }> {
+    return this.request('/api/mis/health');
+  }
+
+  async renderMis(input: {
+    mode?: 'live' | 'quality';
+    sourceImageBase64: string;
+    sourceImageMime?: string;
+    audioBase64: string;
+    audioMime?: string;
+    bodyPrompt?: string;
+    negativePrompt?: string;
+    width?: number;
+    height?: number;
+    fps?: number;
+    numFrames?: number;
+    seed?: number;
+  }): Promise<{ blob: Blob; renderer?: string; fallbackUsed: boolean; engine?: string }> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/api/mis/render`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(90 * 60 * 1000),
+      });
+    } catch (error) {
+      throw new AgentHubClientError(error instanceof Error ? error.message : 'Miś render endpoint is unreachable');
+    }
+    if (!response.ok) {
+      let detail = `Miś render returned HTTP ${response.status}`;
+      try {
+        const body = await response.json() as { error?: string };
+        if (body.error) detail = body.error;
+      } catch {}
+      throw new AgentHubClientError(detail, response.status);
+    }
+    return {
+      blob: await response.blob(),
+      renderer: response.headers.get('x-mis-renderer') || undefined,
+      fallbackUsed: response.headers.get('x-mis-fallback') === 'true',
+      engine: response.headers.get('x-mis-engine') || undefined,
+    };
+  }
+
   async alignMisSpeech(input: {
     language: MisLanguage;
     transcript: string;
