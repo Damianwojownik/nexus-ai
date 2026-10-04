@@ -1,8 +1,8 @@
 import type { HapticClass, HapticCue, PhonemeCue } from './types.ts';
 
-const VOWELS = new Set(['a','æ','ɑ','ɛ','e','i','ɪ','ɨ','ɔ','o','u','y','ø','ʌ','ɒ','ɔ̃','ɛ̃','aɪ','ɔʏ']);
+const VOWELS = new Set(['a','æ','ɑ','ɛ','e','i','ɪ','ɨ','ɔ','o','u','y','ø','ʌ','ɒ','ɔ̃','ɛ̃','aɪ','aʊ','ɔʏ']);
 const NASALS = new Set(['m','n','ɲ','ŋ']);
-const PLOSIVES = new Set(['p','b','t','d','k','g','tɕ','dʑ','tʂ','dʐ']);
+const PLOSIVES = new Set(['p','b','t','d','k','g','c','ɟ','ts','dz','tɕ','dʑ','tʂ','dʐ','tʃ','dʒ']);
 const FRICATIVES = new Set(['f','v','s','z','ɕ','ʑ','ʂ','ʐ','ʃ','θ','ð','x','ç','h']);
 const VOICED = new Set(['b','d','g','v','z','ʑ','ʐ','ð','m','n','ɲ','ŋ','l','r','ɹ','ʁ','j','w']);
 
