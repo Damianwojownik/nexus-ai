@@ -1,3 +1,5 @@
+import type { ArticulationControlPoint } from './types.ts';
+
 export type MisMediaRenderInput = {
   sourceImageBase64:string;
   sourceImageMime?:string;
@@ -12,6 +14,8 @@ export type MisMediaRenderInput = {
   seed?:number;
   faceProtect?:number;
   feather?:number;
+  articulationControls?:ArticulationControlPoint[];
+  articulationStrength?:number;
 };
 
 export type MisMediaHealth = {
@@ -91,6 +95,11 @@ export class MisMediaRendererClient {
       [new Uint8Array(decodeBase64(input.audioBase64))],
       {type:input.audioMime || 'audio/wav'},
     ),'speech.wav');
+
+    if(input.articulationControls?.length){
+      form.append('articulation_json',JSON.stringify(input.articulationControls));
+      form.append('articulation_strength',String(input.articulationStrength ?? 0.35));
+    }
 
     const fields:Record<string,string|number|undefined>={
       body_prompt:input.bodyPrompt,
