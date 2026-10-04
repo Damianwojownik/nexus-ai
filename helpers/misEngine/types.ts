@@ -31,6 +31,13 @@ export type ArticulationFrame = {
   nasal: number;
 };
 
+export type ArticulationControlPoint = Pick<
+  ArticulationFrame,
+  'jawOpen' | 'lipWide' | 'lipRound' | 'lipProtrusion' | 'lipPress'
+> & {
+  atMs: number;
+};
+
 export type HapticClass =
   | 'silence'
   | 'vowel'
