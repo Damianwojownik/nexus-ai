@@ -14,6 +14,15 @@ export type AvatarRenderInput = {
   drivingVideoBase64?: string;
   drivingVideoMime?: string;
   subjectMode?: 'auto' | 'human' | 'animal';
+  articulationControls?: Array<{
+    atMs: number;
+    jawOpen: number;
+    lipWide: number;
+    lipRound: number;
+    lipProtrusion: number;
+    lipPress: number;
+  }>;
+  articulationStrength?: number;
 };
 
 export type AvatarRenderResult = {
@@ -103,6 +112,10 @@ export class SelfHostedAvatarServerClient {
       'source.png',
     );
     form.append('mode', input.subjectMode || 'auto');
+    if (input.articulationControls?.length) {
+      form.append('articulation_json', JSON.stringify(input.articulationControls));
+      form.append('articulation_strength', String(input.articulationStrength ?? 0.35));
+    }
     if (input.audioBase64) {
       form.append(
         'audio',
