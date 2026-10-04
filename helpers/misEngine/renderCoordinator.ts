@@ -1,6 +1,7 @@
 import { SelfHostedAvatarServerClient, type AvatarRenderResult } from '../selfHostedAvatarServer.ts';
 import { MisMediaRendererClient } from './mediaRenderer.ts';
 import type { MisRenderMode, MisRendererId } from './rendererRegistry.ts';
+import type { ArticulationControlPoint } from './types.ts';
 
 export type MisRenderInput = {
   sourceImageBase64:string;
@@ -14,6 +15,8 @@ export type MisRenderInput = {
   fps?:number;
   numFrames?:number;
   seed?:number;
+  articulationControls?:ArticulationControlPoint[];
+  articulationStrength?:number;
 };
 
 export type MisRenderOutput = {
@@ -65,6 +68,8 @@ export class MisRenderCoordinator {
         fps:input.fps,
         numFrames:input.numFrames,
         seed:input.seed,
+        articulationControls:input.articulationControls,
+        articulationStrength:input.articulationStrength,
       });
       return {
         renderer:'nexus-media-flp-ltx',
@@ -89,6 +94,8 @@ export class MisRenderCoordinator {
       audioBase64:input.audioBase64,
       audioMime:input.audioMime,
       subjectMode:'animal',
+      articulationControls:input.articulationControls,
+      articulationStrength:input.articulationStrength,
     });
     return {
       renderer:'faster-liveportrait',
