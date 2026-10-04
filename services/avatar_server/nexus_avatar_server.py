@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FLP_ROOT = Path(os.environ.get("FASTER_LIVEPORTRAIT_DIR", ROOT / "vendor" / "FasterLivePortrait")).resolve()
 TOKEN = os.environ.get("NEXUS_AVATAR_SERVER_TOKEN", "").strip()
 
-app = FastAPI(title="Nexus Avatar Server", version="1.0.0")
-_pipeline = None
+app = FastAPI(title="Nexus Avatar Server", version="1.1.0-test")
+_pipelines: dict[str, object] = {}
 _pipeline_lock = asyncio.Lock()
 
 
@@ -49,10 +49,20 @@ def _check_installation() -> list[str]:
     return missing
 
 
-def _load_pipeline():
-    global _pipeline
-    if _pipeline is not None:
-        return _pipeline
+def _subject_mode(value: str) -> str:
+    mode = (value or "auto").strip().lower()
+    if mode == "auto":
+        mode = os.environ.get("NEXUS_AVATAR_SUBJECT_MODE", "human").strip().lower()
+    if mode not in {"human", "animal"}:
+        raise ValueError("mode must be auto, human or animal")
+    return mode
+
+
+def _load_pipeline(subject_mode: str):
+    mode = _subject_mode(subject_mode)
+    cached = _pipelines.get(mode)
+    if cached is not None:
+        return cached
 
     missing = _check_installation()
     if missing:
@@ -70,8 +80,9 @@ def _load_pipeline():
 
         cfg = OmegaConf.load(str(FLP_ROOT / "configs" / "onnx_infer.yaml"))
         cfg.infer_params.flag_pasteback = True
-        _pipeline = GradioLivePortraitPipeline(cfg, is_animal=False)
-        return _pipeline
+        pipeline = GradioLivePortraitPipeline(cfg, is_animal=(mode == "animal"))
+        _pipelines[mode] = pipeline
+        return pipeline
     finally:
         os.chdir(previous_cwd)
 
@@ -101,24 +112,29 @@ def _cleanup(paths: list[Path]) -> None:
             pass
 
 
-def _run_audio(source_image: Path, audio: Path) -> Path:
-    pipe = _load_pipeline()
+def _resolve_output(output: str | Path) -> Path:
+    value = Path(output)
+    return value.resolve() if value.is_absolute() else (FLP_ROOT / value).resolve()
+
+
+def _run_audio(source_image: Path, audio: Path, subject_mode: str) -> Path:
+    pipe = _load_pipeline(subject_mode)
     previous_cwd = Path.cwd()
     os.chdir(FLP_ROOT)
     try:
         output, _preview, _elapsed = pipe.run_audio_driving(str(audio), str(source_image))
-        return (FLP_ROOT / output).resolve() if not Path(output).is_absolute() else Path(output)
+        return _resolve_output(output)
     finally:
         os.chdir(previous_cwd)
 
 
-def _run_video(source_image: Path, driving_video: Path) -> Path:
-    pipe = _load_pipeline()
+def _run_video(source_image: Path, driving_video: Path, subject_mode: str) -> Path:
+    pipe = _load_pipeline(subject_mode)
     previous_cwd = Path.cwd()
     os.chdir(FLP_ROOT)
     try:
         output, _preview, _elapsed = pipe.run_video_driving(str(driving_video), str(source_image))
-        return (FLP_ROOT / output).resolve() if not Path(output).is_absolute() else Path(output)
+        return _resolve_output(output)
     finally:
         os.chdir(previous_cwd)
 
@@ -135,10 +151,14 @@ async def health(
         "ok": not missing,
         "provider": "faster-liveportrait",
         "mode": "onnx",
+        "subjectModes": ["human", "animal"],
+        "defaultSubjectMode": os.environ.get("NEXUS_AVATAR_SUBJECT_MODE", "human"),
         "gpuPreferred": True,
         "installation": str(FLP_ROOT),
         "missing": missing,
-        "pipelineLoaded": _pipeline is not None,
+        "pipelineLoaded": bool(_pipelines),
+        "loadedSubjectModes": sorted(_pipelines.keys()),
+        "experimental": True,
     }
 
 
@@ -148,6 +168,7 @@ async def _animate_impl(
     audio: Optional[UploadFile],
     driving_audio: Optional[UploadFile],
     driving_video: Optional[UploadFile],
+    mode: str,
     authorization: Optional[str],
     x_nexus_token: Optional[str],
 ):
@@ -159,6 +180,11 @@ async def _animate_impl(
     if speech is None and driving_video is None:
         raise HTTPException(status_code=400, detail="audio/driving_audio or driving_video is required")
 
+    try:
+        subject_mode = _subject_mode(mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     work = Path(tempfile.mkdtemp(prefix="nexus-avatar-"))
     source_path = await _save_upload(source, work, "source.png")
     cleanup_paths = [work]
@@ -167,20 +193,30 @@ async def _animate_impl(
         async with _pipeline_lock:
             if speech is not None:
                 audio_path = await _save_upload(speech, work, "speech.wav")
-                output_path = await asyncio.to_thread(_run_audio, source_path, audio_path)
+                output_path = await asyncio.to_thread(_run_audio, source_path, audio_path, subject_mode)
             else:
                 video_path = await _save_upload(driving_video, work, "driving.mp4")
-                output_path = await asyncio.to_thread(_run_video, source_path, video_path)
+                output_path = await asyncio.to_thread(_run_video, source_path, video_path, subject_mode)
 
         if not output_path.exists():
             raise RuntimeError("FasterLivePortrait did not produce an output video")
-        cleanup_paths.append(output_path.parent)
+
+        # Never delete the renderer's shared output directory. Copy the result
+        # into this request's private temp directory and clean only that directory.
+        safe_output = work / "rendered.mp4"
+        if output_path.resolve() != safe_output.resolve():
+            shutil.copy2(output_path, safe_output)
+
         return FileResponse(
-            output_path,
+            safe_output,
             media_type="video/mp4",
             filename="nexus-avatar.mp4",
             background=BackgroundTask(_cleanup, cleanup_paths),
-            headers={"Cache-Control": "no-store"},
+            headers={
+                "Cache-Control": "no-store",
+                "X-Nexus-Avatar-Subject-Mode": subject_mode,
+                "X-Nexus-Experimental": "true",
+            },
         )
     except HTTPException:
         _cleanup(cleanup_paths)
@@ -203,13 +239,13 @@ async def animate(
     authorization: Optional[str] = Header(default=None),
     x_nexus_token: Optional[str] = Header(default=None),
 ):
-    del mode
     return await _animate_impl(
         source_image,
         image,
         audio,
         driving_audio,
         driving_video,
+        mode,
         authorization,
         x_nexus_token,
     )
