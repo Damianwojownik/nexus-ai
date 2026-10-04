@@ -6,6 +6,8 @@ import { classifyHaptic } from './hapticsEngine.ts';
 import { IdentityLock } from './identityLock.ts';
 import { buildEstimatedPhonemeTimeline } from './phonemeEngine.ts';
 import { selectMisRenderer } from './rendererRegistry.ts';
+import { composeMisFrame } from './runtime.ts';
+import { validateTimeline } from './benchmark.ts';
 
 test('Polish estimated timeline keeps MBP closure and vowel opening separate', () => {
   const timeline=buildEstimatedPhonemeTimeline('mama','pl');
@@ -63,4 +65,25 @@ test('identity lock requires front and both three-quarter references', () => {
 
 test('live renderer defaults to self-hosted FasterLivePortrait', () => {
   assert.equal(selectMisRenderer('live').id,'faster-liveportrait');
+});
+
+
+test('runtime samples articulation motion and haptics from one clock', () => {
+  const timeline=[
+    {phoneme:'m',startMs:0,endMs:100,confidence:1,source:'aligned-audio' as const},
+    {phoneme:'a',startMs:100,endMs:250,confidence:1,source:'aligned-audio' as const},
+  ];
+  const frame=composeMisFrame(timeline,'pl',125,'SPEAKING');
+  assert.equal(frame.phoneme.phoneme,'a');
+  assert.ok(frame.articulation.jawOpen>.7);
+  assert.equal(frame.motion.state,'SPEAKING');
+  assert.equal(frame.haptic.kind,'vowel');
+});
+
+test('timeline validator accepts ordered aligned phones', () => {
+  const timeline=[
+    {phoneme:'p',startMs:0,endMs:80,confidence:.9,source:'aligned-audio' as const},
+    {phoneme:'a',startMs:80,endMs:220,confidence:.95,source:'aligned-audio' as const},
+  ];
+  assert.deepEqual(validateTimeline(timeline),[]);
 });
