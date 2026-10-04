@@ -36,8 +36,9 @@ The default Nexus avatar is `public/avatars/nexus-android.mp4`, the accepted
 and checked against the saved SHA256; no new render was performed.
 `public/avatars/nexus-android.png` is its original first-frame poster and
 fallback if video decoding fails. Older working assets remain for rollback. The MP4
-plays muted in an animated preview when conversation-render mode is disabled.
-Idle motion is enabled by default and can be disabled to move only during TTS.
+plays muted only during ordinary TTS when conversation-render mode is disabled.
+When speech stops, playback pauses and resets. Idle looping is disabled because
+the stock film contains prerecorded lip movement as well as head movement.
 Its mouth is not synchronized to arbitrary live replies. Browser-local default-
 avatar preferences can override the built-in image; custom photos and Studio-
 rendered videos retain their existing paths.

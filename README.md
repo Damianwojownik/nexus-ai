@@ -86,9 +86,10 @@ then plays a new MP4 with its own audio, once. Browser TTS does not run alongsid
 the film. Until a free worker is connected and cloud consent is enabled,
 the reply remains text and a visible error explains the blocker.
 The accepted stock clip is never used as simulated synchronization.
-Ordinary TTS with the accepted muted stock video is the default. The animated
-preview moves between replies as well; disable idle motion in voice settings
-to animate only during speech. This mode is explicitly not per-reply lip sync.
+Ordinary TTS with the accepted muted stock video is the default. The video
+plays only during speech, then pauses and resets to its first frame. Idle
+looping is not offered because the stock film includes lip movement.
+This mode is explicitly not per-reply lip sync.
 Custom photos and Studio videos retain their existing paths.
 
 The main screen contains the avatar and one text/microphone/attachment composer.

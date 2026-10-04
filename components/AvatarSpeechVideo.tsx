@@ -1,10 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 
-export function AvatarSpeechVideo({ src, poster, speaking, animateIdle, className, onError }: {
+export function AvatarSpeechVideo({ src, poster, speaking, className, onError }: {
   src: string;
   poster: string;
   speaking: boolean;
-  animateIdle: boolean;
   className: string;
   onError: () => void;
 }) {
@@ -17,7 +16,7 @@ export function AvatarSpeechVideo({ src, poster, speaking, animateIdle, classNam
     if (!video) return;
     let active = true;
     const update = () => {
-      if (speaking || animateIdle) {
+      if (speaking) {
         void video.play().catch(error => {
           if (!active || (error instanceof DOMException && error.name === 'AbortError')) return;
           console.error('Nexus avatar playback failed:', error);
@@ -35,8 +34,8 @@ export function AvatarSpeechVideo({ src, poster, speaking, animateIdle, classNam
       video.removeEventListener('loadeddata', update);
       video.pause();
     };
-  }, [src, speaking, animateIdle]);
+  }, [src, speaking]);
 
   return <video ref={ref} loop muted playsInline preload="auto" className={className} src={src} poster={poster}
-    aria-label={animateIdle ? 'Nexus — androidka; animowany podgląd' : 'Nexus — androidka; animacja tylko podczas mowy'} onError={onError}/>;
+    aria-label="Nexus — androidka; animacja tylko podczas mowy" onError={onError}/>;
 }
