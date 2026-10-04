@@ -29,6 +29,7 @@ test('router falls back from a quota-limited cloud provider to local Ollama', as
     isLocal: false,
     async generate() { throw new AIProviderRequestError('quota reached', 'quota_exceeded'); },
   });
+
   const local = provider({ id: 'ollama', isLocal: true, async generate() { return 'local response'; } });
   const router = new AIProviderRouter([local, cloud], (event) => events.push(`${event.type}:${event.providerId}`));
 
@@ -43,6 +44,21 @@ test('router falls back from a quota-limited cloud provider to local Ollama', as
     'fallback_selected:ollama',
     'success:ollama',
   ]);
+});
+
+test('disabled local fallback never calls local health, generation or stream', async () => {
+  let localCalls = 0;
+  const local = provider({
+    id: 'local', isLocal: true,
+    async healthCheck() { localCalls++; return { status: 'healthy' }; },
+    async generate() { localCalls++; return 'unexpected'; },
+    async stream() { localCalls++; },
+  });
+  const cloud = provider({ id: 'cloud', isLocal: false, async healthCheck() { return { status: 'not_configured' }; } });
+  const router = new AIProviderRouter([local, cloud], () => {});
+  await assert.rejects(router.generate('hello', { allowLocalFallback: false }), /cloud: not_configured/);
+  await assert.rejects(router.stream('hello', () => {}, { allowLocalFallback: false }), /cloud:/);
+  assert.equal(localCalls, 0);
 });
 
 test('router cools down a rate-limited provider and does not retry it immediately', async () => {
@@ -183,4 +199,25 @@ test('Ollama selects an installed preferred model and refuses non-loopback URLs'
   assert.equal(await ollama.generate('hello'), 'local reply');
   assert.equal(generatedModel, 'qwen2.5:1.5b');
   assert.throws(() => new OllamaHttpProvider({ baseUrl: 'http://example.com:11434' }), /loopback/);
+});
+
+test('CPU-only Ollama forces zero GPU layers for generation and streaming', async () => {
+  const requests: Record<string, unknown>[] = [];
+  const ollama = new OllamaHttpProvider({
+    model: 'qwen2.5:1.5b',
+    cpuOnly: true,
+    fetcher: async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      requests.push(body);
+      return body.stream ? new Response('{"response":"CPU"}\n') : Response.json({ response: 'CPU' });
+    },
+  });
+  assert.equal(await ollama.generate('hello', { maxOutputTokens: 30 }), 'CPU');
+  const chunks: string[] = [];
+  await ollama.stream('hello', chunk => chunks.push(chunk), { maxOutputTokens: 30 });
+  assert.deepEqual(chunks, ['CPU']);
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.deepEqual(request.options, { num_gpu: 0, num_predict: 30 });
+  }
 });

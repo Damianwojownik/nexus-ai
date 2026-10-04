@@ -32,12 +32,15 @@ export class OllamaHttpProvider implements AIProvider {
   readonly priority = 10;
   readonly costClass = 'free-local' as const;
   readonly isLocal = true;
+  readonly cost = 0;
+  readonly routingTier = 1;
 
   readonly baseUrl: string;
   private readonly configuredModel?: string;
   private detectedModel?: string;
   private readonly fetcher: typeof fetch;
   private readonly timeoutMs: number;
+  readonly cpuOnly: boolean;
 
   get model(): string {
     return this.configuredModel ?? this.detectedModel ?? 'auto';
@@ -48,10 +51,12 @@ export class OllamaHttpProvider implements AIProvider {
     model?: string;
     fetcher?: typeof fetch;
     timeoutMs?: number;
+    cpuOnly?: boolean;
   } = {}) {
     this.baseUrl = localBaseUrl(options.baseUrl ?? process.env.NEXUS_OLLAMA_BASE_URL ?? process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434');
     this.configuredModel = options.model ?? process.env.OLLAMA_MODEL;
     this.fetcher = options.fetcher ?? fetch;
+    this.cpuOnly = options.cpuOnly ?? false;
     const configuredTimeout = options.timeoutMs ?? Number(process.env.OLLAMA_TIMEOUT_MS ?? 60000);
     this.timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 60000;
   }
@@ -88,6 +93,7 @@ export class OllamaHttpProvider implements AIProvider {
         prompt,
         stream: false,
         options: {
+          ...(this.cpuOnly ? { num_gpu: 0 } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.maxOutputTokens !== undefined ? { num_predict: options.maxOutputTokens } : {}),
         },
@@ -111,7 +117,11 @@ export class OllamaHttpProvider implements AIProvider {
     const response = await this.fetcher(`${this.baseUrl}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.model, prompt, stream: true }),
+      body: JSON.stringify({ model: this.model, prompt, stream: true,
+        options: { ...(this.cpuOnly ? { num_gpu: 0 } : {}),
+          ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+          ...(options.maxOutputTokens !== undefined ? { num_predict: options.maxOutputTokens } : {}) },
+      }),
       signal: combineSignal(options.signal, this.timeoutMs),
     });
     if (!response.ok) {

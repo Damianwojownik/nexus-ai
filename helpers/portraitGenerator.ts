@@ -158,17 +158,11 @@ Output: A single, cohesive prompt suitable for feeding directly to an image gene
 Keep it under 300 words but extremely detailed and descriptive.
     `;
 
-    const result = await aiProvider.generate({
-      systemPrompt,
-      messages: [
-        {
-          role: 'user',
-          content: `Create a detailed AI image generation prompt for Nexus based on this specification:\n${NEXUS_PORTRAIT_SPEC.description}\n\nMake it photorealistic and cinematic. Return ONLY the prompt, no explanations.`,
-        },
-      ],
-    });
-
-    return result?.content || generateFluxPrompt();
+    const result = await aiProvider.generate(
+      `${systemPrompt}\n\nCreate a detailed AI image generation prompt for Nexus based on this specification:\n${NEXUS_PORTRAIT_SPEC.description}\n\nMake it photorealistic and cinematic. Return ONLY the prompt, no explanations.`
+    );
+    if (!result.trim()) throw new Error('Portrait provider returned an empty prompt.');
+    return result;
   } catch (error) {
     console.warn('Gemini prompt generation failed, using default:', error);
     return generateFluxPrompt();

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,6 +101,73 @@ test('agent hub client uses the real API and reconnects SSE after disconnect', {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('Agent Hub securely proxies generated images from the configured Nexus Image Engine', async () => {
+  const hub = new AgentHub();
+  let upstreamAuthorization: string | undefined;
+  let upstreamPayload: unknown;
+  const upstream = createServer(async (request, response) => {
+    upstreamAuthorization = request.headers.authorization;
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    upstreamPayload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    response.writeHead(200, {
+      'Content-Type': 'image/png',
+      'X-Nexus-Model': 'test-model',
+      'X-Nexus-Seed': '42',
+    });
+    response.end(Buffer.from([137, 80, 78, 71]));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const upstreamAddress = upstream.address();
+  assert.ok(upstreamAddress && typeof upstreamAddress === 'object');
+
+  const server = createAgentHubServer(hub, {
+    imageServerUrl: `http://127.0.0.1:${upstreamAddress.port}`,
+    imageServerToken: 'image-test-token',
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const generated = await fetch(`${baseUrl}/api/image/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'A green cybernetic character' }),
+    });
+    assert.equal(generated.status, 200);
+    assert.equal(generated.headers.get('content-type'), 'image/png');
+    assert.equal(generated.headers.get('cache-control'), 'no-store');
+    assert.equal(generated.headers.get('x-nexus-model'), 'test-model');
+    assert.equal(generated.headers.get('x-nexus-seed'), '42');
+    assert.deepEqual([...new Uint8Array(await generated.arrayBuffer())], [137, 80, 78, 71]);
+    assert.equal(upstreamAuthorization, 'Bearer image-test-token');
+    assert.deepEqual(upstreamPayload, { prompt: 'A green cybernetic character' });
+
+    const invalidPrompt = await fetch(`${baseUrl}/api/image/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: ' '.repeat(3) }),
+    });
+    assert.equal(invalidPrompt.status, 400);
+
+    const remoteOrigin = await fetch(`${baseUrl}/api/image/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://attacker.example' },
+      body: JSON.stringify({ prompt: 'A green cybernetic character' }),
+    });
+    assert.equal(remoteOrigin.status, 403);
+  } finally {
+    server.closeAllConnections();
+    upstream.closeAllConnections();
+    await Promise.all([
+      new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+      new Promise<void>((resolve, reject) => upstream.close((error) => error ? reject(error) : resolve())),
+    ]);
   }
 });
 

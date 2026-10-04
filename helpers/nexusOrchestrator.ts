@@ -384,7 +384,7 @@ export class NexusOrchestrator {
     const response = await this.agent.send({
       text: `Użytkownik poprosił o instalację ${pending.approval.app.name}. Instalator zakończył się poprawnie. Potwierdź rezultat i podaj następny krok.`,
       mode: 'AUTO',
-      projectContext: pending.contextNotes.join('\n\n'),
+      projectContext: [pending.input.projectContext, ...pending.contextNotes].filter(Boolean).join('\n\n'),
       history: pending.input.history,
     });
     await this.saveTaskMemory(pending.input.text, response.text, []);

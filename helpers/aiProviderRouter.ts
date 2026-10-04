@@ -1,3 +1,5 @@
+import { nexusFreeMode, freeProviderBlock } from './freeMode.ts';
+
 export type AIProviderHealthStatus =
   | 'healthy'
   | 'unavailable'
@@ -8,7 +10,7 @@ export type AIProviderHealthStatus =
   | 'model_missing'
   | 'not_configured'
   | 'error';
-export type AIProviderCostClass = 'free-local' | 'included' | 'paid';
+export type AIProviderCostClass = 'free-local' | 'free' | 'included' | 'paid';
 export type AIRoutingMode = 'AUTO' | 'LOCAL' | 'CLOUD';
 export type AIProviderEventType = 'provider_attempt' | 'provider_failed' | 'fallback_selected' | 'success';
 
@@ -50,6 +52,10 @@ export interface AIProvider {
   readonly priority: number;
   readonly costClass: AIProviderCostClass;
   readonly isLocal: boolean;
+  readonly cost?: number;
+  readonly requiresCredits?: boolean;
+  readonly requiresSubscription?: boolean;
+  readonly routingTier?: number;
   healthCheck(): Promise<AIProviderHealth>;
   generate(prompt: string, options?: AIProviderGenerationOptions): Promise<string>;
   stream?(
@@ -99,13 +105,63 @@ export class AIProviderRouter {
   private readonly rateLimitCooldownMs = 60000;
   private readonly quotaCooldownMs = 15 * 60 * 1000;
   private readonly onProviderEvent: (event: AIProviderEvent) => void;
+  private readonly freeOnly: boolean;
+  private readonly healthCache = new Map<string, { until: number; health: AIProviderHealth }>();
+  private readonly healthPending = new Map<string, Promise<AIProviderHealth>>();
+  private readonly responseCache = new Map<string, { until: number; value: AIRoutedResponse }>();
+  private readonly latency = new Map<string, number>();
+  private readonly healthTtlMs: number;
+  private readonly responseTtlMs: number;
+  private readonly now: () => number;
 
   constructor(
     providers: AIProvider[],
     onProviderEvent: (event: AIProviderEvent) => void = (event) => console.info('[nexus:provider]', event),
+    options: { freeOnly?: boolean; freeMode?: boolean; healthTtlMs?: number; responseTtlMs?: number; now?: () => number } = {},
   ) {
     this.providers = [...providers].sort((left, right) => right.priority - left.priority);
     this.onProviderEvent = onProviderEvent;
+    this.freeOnly = options.freeMode ?? options.freeOnly ?? nexusFreeMode();
+    this.healthTtlMs = options.healthTtlMs ?? 5000;
+    this.responseTtlMs = options.responseTtlMs ?? 30000;
+    this.now = options.now ?? Date.now;
+    if (![this.healthTtlMs, this.responseTtlMs].every(value => Number.isFinite(value) && value >= 0)) {
+      throw new Error('Cache TTL must be finite and nonnegative');
+    }
+  }
+
+  inventory() {
+    return this.providers.map(provider => ({
+      id: provider.id, name: provider.name, local: provider.isLocal,
+      cost: provider.cost ?? (provider.costClass === 'free-local' ? 0 : null),
+      costClass: provider.costClass,
+      blocked: this.freeOnly ? freeProviderBlock(provider) ?? null : null,
+      latencyMs: this.latency.get(provider.id) ?? null,
+    }));
+  }
+
+  private async providerHealth(provider: AIProvider): Promise<AIProviderHealth> {
+    const blocked = this.freeOnly ? freeProviderBlock(provider) : undefined;
+    if (blocked) return { status: 'not_configured', message: `FREE MODE: ${blocked}` };
+    const cached = this.healthCache.get(provider.id);
+    if (cached && cached.until > this.now()) return cached.health;
+    const pending = this.healthPending.get(provider.id);
+    if (pending) return pending;
+    const task = (async () => {
+      let health: AIProviderHealth;
+      try { health = await provider.healthCheck(); }
+      catch (error) { health = { status: 'error', message: error instanceof Error ? error.message : 'Health check failed' }; }
+      this.healthCache.set(provider.id, { until: this.now() + this.healthTtlMs, health });
+      return health;
+    })();
+    this.healthPending.set(provider.id, task);
+    try { return await task; }
+    finally { this.healthPending.delete(provider.id); }
+  }
+
+  private recordLatency(providerId: string, elapsed: number): void {
+    const previous = this.latency.get(providerId);
+    this.latency.set(providerId, previous === undefined ? elapsed : previous * 0.7 + elapsed * 0.3);
   }
 
   async healthCheck(): Promise<Record<string, AIProviderHealth>> {
@@ -118,7 +174,7 @@ export class AIProviderRouter {
         } satisfies AIProviderHealth] as const;
       }
       try {
-        return [provider.id, await provider.healthCheck()] as const;
+        return [provider.id, await this.providerHealth(provider)] as const;
       } catch (error) {
         return [provider.id, {
           status: 'error',
@@ -131,10 +187,17 @@ export class AIProviderRouter {
 
   async generate(
     prompt: string,
-    options: AIProviderGenerationOptions & { mode?: AIRoutingMode } = {},
+    options: AIProviderGenerationOptions & { mode?: AIRoutingMode; allowLocalFallback?: boolean } = {},
   ): Promise<AIRoutedResponse> {
     const attempts: AIProviderAttempt[] = [];
-    const candidates = this.getCandidates(options.mode ?? 'AUTO');
+    throwIfAborted(options.signal);
+    const candidates = this.getCandidates(options.mode ?? 'AUTO', options.allowLocalFallback);
+    const cacheKey = JSON.stringify([prompt, options.temperature, options.maxOutputTokens, candidates.map(provider => provider.id)]);
+    const cached = this.responseCache.get(cacheKey);
+    const cacheable = options.temperature === 0;
+    if (cacheable && cached && cached.until > this.now()) {
+      return { ...cached.value, attempts: cached.value.attempts.map(attempt => ({ ...attempt, health: { ...attempt.health } })) };
+    }
 
     for (const provider of candidates) {
       throwIfAborted(options.signal);
@@ -148,7 +211,7 @@ export class AIProviderRouter {
       }
       let health: AIProviderHealth;
       try {
-        health = await provider.healthCheck();
+        health = await this.providerHealth(provider);
       } catch (error) {
         health = { status: 'error', message: error instanceof Error ? error.message : 'Health check failed' };
       }
@@ -162,13 +225,26 @@ export class AIProviderRouter {
       }
 
       try {
+        const started = this.now();
         const text = await provider.generate(prompt, options);
+        throwIfAborted(options.signal);
+        if (!text.trim()) throw new AIProviderRequestError('Empty provider response', 'unavailable');
+        this.recordLatency(provider.id, this.now() - started);
         this.failures.delete(provider.id);
         if (attempts.slice(0, -1).some((item) => item.health.status !== 'healthy' || item.error) && provider.isLocal) {
           this.onProviderEvent({ type: 'fallback_selected', providerId: provider.id });
         }
         this.onProviderEvent({ type: 'success', providerId: provider.id });
-        return { text, providerId: provider.id, attempts };
+        const result = { text, providerId: provider.id, attempts };
+        if (cacheable && this.responseTtlMs > 0) {
+          this.responseCache.delete(cacheKey);
+          if (this.responseCache.size >= 64) {
+            const oldest = this.responseCache.keys().next().value;
+            if (oldest !== undefined) this.responseCache.delete(oldest);
+          }
+          this.responseCache.set(cacheKey, { until: this.now() + this.responseTtlMs, value: result });
+        }
+        return result;
       } catch (error) {
         if (isAbortError(error, options.signal)) throw error;
         const status = error instanceof AIProviderRequestError ? error.status : 'unavailable';
@@ -184,10 +260,10 @@ export class AIProviderRouter {
   async stream(
     prompt: string,
     onChunk: (chunk: string) => void,
-    options: AIProviderGenerationOptions & { mode?: AIRoutingMode } = {},
+    options: AIProviderGenerationOptions & { mode?: AIRoutingMode; allowLocalFallback?: boolean } = {},
   ): Promise<{ providerId: string; attempts: AIProviderAttempt[] }> {
     const attempts: AIProviderAttempt[] = [];
-    const candidates = this.getCandidates(options.mode ?? 'AUTO');
+    const candidates = this.getCandidates(options.mode ?? 'AUTO', options.allowLocalFallback);
 
     for (const provider of candidates) {
       throwIfAborted(options.signal);
@@ -201,7 +277,7 @@ export class AIProviderRouter {
       }
       let health: AIProviderHealth;
       try {
-        health = await provider.healthCheck();
+        health = await this.providerHealth(provider);
       } catch (error) {
         health = { status: 'error', message: error instanceof Error ? error.message : 'Health check failed' };
       }
@@ -215,9 +291,16 @@ export class AIProviderRouter {
       }
 
       let emitted = false;
+      const started = this.now();
+      let timedFirstChunk = false;
       try {
         if (provider.stream) {
           await provider.stream(prompt, (chunk) => {
+            throwIfAborted(options.signal);
+            if (chunk.length && !timedFirstChunk) {
+              this.recordLatency(provider.id, this.now() - started);
+              timedFirstChunk = true;
+            }
             emitted = emitted || chunk.length > 0;
             onChunk(chunk);
           }, options);
@@ -227,6 +310,9 @@ export class AIProviderRouter {
             emitted = true;
             onChunk(text);
           }
+          throwIfAborted(options.signal);
+          if (!emitted) throw new AIProviderRequestError('Empty provider stream', 'unavailable');
+          if (!timedFirstChunk) this.recordLatency(provider.id, this.now() - started);
         }
         this.failures.delete(provider.id);
         if (attempts.slice(0, -1).some((item) => item.health.status !== 'healthy' || item.error) && provider.isLocal) {
@@ -247,7 +333,12 @@ export class AIProviderRouter {
     throw new AIProviderUnavailableError(attempts);
   }
 
-  private getCandidates(mode: AIRoutingMode): AIProvider[] {
+  private getCandidates(mode: AIRoutingMode, allowLocalFallback = true): AIProvider[] {
+    if (this.freeOnly) return this.providers.filter(provider => !freeProviderBlock(provider) && (mode !== 'LOCAL' || provider.isLocal))
+      .sort((a, b) => (a.routingTier ?? (a.isLocal ? 1 : 4)) - (b.routingTier ?? (b.isLocal ? 1 : 4))
+        || (this.latency.get(a.id) ?? Number.POSITIVE_INFINITY) - (this.latency.get(b.id) ?? Number.POSITIVE_INFINITY)
+        || b.priority - a.priority);
+    if (!allowLocalFallback) return mode === 'LOCAL' ? [] : this.providers.filter((provider) => !provider.isLocal);
     if (mode === 'LOCAL') return this.providers.filter((provider) => provider.isLocal);
     if (mode === 'CLOUD') {
       return [
@@ -267,5 +358,6 @@ export class AIProviderRouter {
         ? this.quotaCooldownMs
         : count >= 2 ? this.cooldownMs : 0;
     this.failures.set(providerId, { count, cooldownUntil: Date.now() + cooldownMs });
+    this.healthCache.delete(providerId);
   }
 }

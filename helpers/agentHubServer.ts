@@ -1,6 +1,10 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { RemoteAvatar } from './remoteAvatar.ts';
 import { AgentHub } from './agentHub.ts';
 import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
@@ -8,9 +12,12 @@ import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts'
 import { AIProviderRouter, AIProviderUnavailableError } from './aiProviderRouter.ts';
 import type { AIRoutingMode } from './aiProviderRouter.ts';
 import { GeminiAIProvider } from './geminiAIProvider.ts';
+import { CloudCliProvider } from './cloudCliProvider.ts';
+import { LocalSpeech, validateSpeechText } from './localSpeech.ts';
 import { OllamaHttpProvider } from './ollamaHttpProvider.ts';
 import { CapabilityRegistry, GitHubConnector } from './capabilityRegistry.ts';
 import type { ToolConnector } from './capabilityRegistry.ts';
+import { HeadroomLocalConnector, OmniRouteLocalConnector } from './localTooling.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -18,9 +25,16 @@ const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', '
 export interface AgentHubServerOptions {
   allowedOrigins?: string[];
   workspaceDir?: string;
+  imageServerUrl?: string;
+  imageServerToken?: string;
   aiRouter?: AIProviderRouter;
   capabilityRegistry?: CapabilityRegistry;
   connectors?: ToolConnector[];
+  freeOnly?: boolean;
+}
+
+interface AvatarAnimationJob {
+  videoId: string;
 }
 
 class HttpError extends Error {
@@ -90,6 +104,8 @@ function createDefaultCapabilityRegistry(localCapabilities: LocalCapabilities, c
     },
   });
   registry.register(new GitHubConnector());
+  registry.register(new OmniRouteLocalConnector());
+  registry.register(new HeadroomLocalConnector());
   for (const connector of connectors) registry.register(connector);
   return registry;
 }
@@ -156,11 +172,19 @@ function isLoopbackOrigin(origin: string): boolean {
 }
 
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
+  const localSpeech = new LocalSpeech();
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
-  const aiRouter = options.aiRouter ?? new AIProviderRouter([new GeminiAIProvider(), new OllamaHttpProvider()]);
+  const freeOnly = options.freeOnly ?? true;
+  const aiRouter = options.aiRouter ?? new AIProviderRouter([
+    new CloudCliProvider('codex'), new CloudCliProvider('copilot'), new CloudCliProvider('claude'),
+    new GeminiAIProvider(), new OllamaHttpProvider({ cpuOnly: true }),
+  ], undefined, { freeOnly });
   const capabilityRegistry = options.capabilityRegistry ?? createDefaultCapabilityRegistry(localCapabilities, options.connectors);
+  const fasterLivePortraitDir = resolve(process.env.FASTER_LIVE_PORTRAIT_DIR ?? join(homedir(), 'FasterLivePortrait'));
+  const avatarPortraitsDir = join(fasterLivePortraitDir, 'checkpoints', 'nexus_user_portraits');
+  const avatarJobs = new Map<string, AvatarAnimationJob>();
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     const origin = request.headers.origin;
     const corsAllowed = !!origin && isAllowedOrigin(origin, options.allowedOrigins ?? []);
     if (corsAllowed) {
@@ -193,6 +217,33 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         }
       });
       const method = request.method ?? 'GET';
+      if (url.pathname.startsWith('/api/speech/') && origin && !isLoopbackOrigin(origin)) {
+        throw new HttpError(403, 'Local speech is only available from the local Nexus UI.');
+      }
+      if (method === 'GET' && url.pathname === '/api/speech/health') {
+        sendJson(response, 200, await localSpeech.health());
+        return;
+      }
+      if (method === 'POST' && url.pathname === '/api/speech/synthesize') {
+        const body = await readJson(request, 32 * 1024);
+        let text: string;
+        try { text = validateSpeechText(body.text); }
+        catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Invalid speech text.'); }
+        if (!(await localSpeech.health()).available) throw new HttpError(503, 'Polish speech voice is not installed.');
+        const controller = new AbortController();
+        const abort = () => { if (!response.writableEnded) controller.abort(); };
+        request.once('aborted', abort);
+        response.once('close', abort);
+        try {
+          const audio = await localSpeech.synthesize(text, controller.signal);
+          response.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': audio.length, 'Cache-Control': 'no-store' });
+          response.end(audio);
+        } finally {
+          request.off('aborted', abort);
+          response.off('close', abort);
+        }
+        return;
+      }
 
       if (segments[0] === 'api' && segments[1] === 'install' && origin && !isLoopbackOrigin(origin)) {
         throw new LocalCapabilityError(403, 'Software installation is only available from the local Nexus frontend');
@@ -203,69 +254,172 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         return;
       }
 
-      if (method === 'POST' && url.pathname === '/api/avatar/animate') {
-        const body = await readJson(request, 256 * 1024);
-        const portraitPath = body.portraitPath ?? undefined; // Optional now
-        const text = body.text ?? undefined;
-        const audioPath = body.audioPath ?? undefined;
-        const lang = body.lang ?? 'pl';
-        
-        if (!text && !audioPath) {
-          throw new HttpError(400, 'Either text or audioPath is required');
+      if (method === 'POST' && url.pathname === '/api/image/generate') {
+        if (origin && !isLoopbackOrigin(origin)) throw new HttpError(403, 'Image generation is only available from the local Nexus frontend');
+        const endpoint = options.imageServerUrl ?? process.env.NEXUS_IMAGE_SERVER_URL;
+        const token = options.imageServerToken ?? process.env.NEXUS_IMAGE_SERVER_TOKEN;
+        if (!endpoint || !token) throw new HttpError(503, 'Nexus Image Engine is not connected. Set NEXUS_IMAGE_SERVER_URL and NEXUS_IMAGE_SERVER_TOKEN in the Agent Hub environment.');
+        const body = await readJson(request, 16 * 1024);
+        const prompt = requiredString(body, 'prompt');
+        if (prompt.length > 4000) throw new HttpError(413, 'Image prompt exceeds 4000 characters');
+
+        let imageEndpoint: URL;
+        try {
+          imageEndpoint = new URL(endpoint);
+        } catch {
+          throw new HttpError(503, 'NEXUS_IMAGE_SERVER_URL must be a valid HTTPS URL or loopback HTTP URL');
+        }
+        const loopback = imageEndpoint.hostname === 'localhost' || imageEndpoint.hostname === '127.0.0.1' || imageEndpoint.hostname === '[::1]';
+        if ((imageEndpoint.protocol !== 'https:' && !(imageEndpoint.protocol === 'http:' && loopback))
+          || imageEndpoint.username || imageEndpoint.password) {
+          throw new HttpError(503, 'NEXUS_IMAGE_SERVER_URL must use HTTPS unless it points to loopback');
         }
 
-        const animationScript = join(process.cwd(), '..', 'FasterLivePortrait', 'nexus_avatar_animator.py');
-        const pythonExe = process.env.PYTHON_EXE || 'python';
-
-        // Invoke animator subprocess (non-blocking)
-        const { spawn } = await import('child_process');
-        const args = [
-          animationScript,
-          '--lang', lang,
-          '--mode', 'onnx',
-          '--json',
-        ];
-
-        // Add portrait only if provided (auto-detect otherwise)
-        if (portraitPath) {
-          args.push('--portrait', portraitPath);
-        }
-
-        if (text) {
-          args.push('--text', text);
-        } else if (audioPath) {
-          args.push('--audio', audioPath);
-        }
-
-        let stdout = '';
-        let stderr = '';
-
-        const proc = spawn(pythonExe, args, {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: 120_000,
+        const imageResponse = await fetch(new URL('/v1/generate', imageEndpoint), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+          signal: AbortSignal.timeout(15 * 60 * 1000),
         });
-
-        proc.stdout?.on('data', (data) => {
-          stdout += data.toString();
-        });
-
-        proc.stderr?.on('data', (data) => {
-          stderr += data.toString();
-        });
-
-        proc.on('close', (code) => {
-          if (code !== 0) {
-            console.error(`Avatar animator failed: ${stderr}`);
+        if (!imageResponse.ok) {
+          const upstreamBody = await imageResponse.text();
+          let detail = `Nexus Image Engine returned HTTP ${imageResponse.status}`;
+          try {
+            const parsed: unknown = JSON.parse(upstreamBody);
+            if (isRecord(parsed) && typeof parsed.detail === 'string') detail += `: ${parsed.detail.slice(0, 500)}`;
+          } catch {
+            // Keep the upstream status when the server returned non-JSON diagnostics.
           }
+          throw new HttpError(502, detail);
+        }
+        if (imageResponse.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'image/png') {
+          throw new HttpError(502, 'Nexus Image Engine returned an unsupported image format');
+        }
+        const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
+        if (!imageBytes.length || imageBytes.length > 15 * 1024 * 1024) {
+          throw new HttpError(502, 'Nexus Image Engine returned an invalid or oversized image');
+        }
+        const model = imageResponse.headers.get('x-nexus-model');
+        const seed = imageResponse.headers.get('x-nexus-seed');
+        response.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Content-Length': imageBytes.length,
+          'Cache-Control': 'no-store',
+          ...(model ? { 'X-Nexus-Model': model } : {}),
+          ...(seed ? { 'X-Nexus-Seed': seed } : {}),
         });
+        response.end(imageBytes);
+        return;
+      }
 
-        proc.on('error', (err) => {
-          console.error(`Avatar animator process error: ${err.message}`);
+      if (method === 'GET' && url.pathname === '/api/ai/health') {
+        const providers = await aiRouter.healthCheck();
+        sendJson(response, 200, {
+          gemini: providers['google-gemini'] ?? { status: 'not_configured', message: 'Google Gemini provider is not registered.' },
+          ollama: providers['ollama-local'] ?? { status: 'not_configured', message: 'Ollama provider is not registered.' },
+          providers,
+          freeOnly,
+          ollamaCpuOnly: options.aiRouter === undefined,
+          cloud: Object.entries(providers).filter(([id]) => id !== 'ollama-local').some(([, health]) => health.status === 'healthy')
+            ? { status: 'healthy' } : { status: 'not_configured', message: 'No cloud CLI/API is ready.' },
         });
+        return;
+      }
 
-        // Return immediately with 202 Accepted; client polls /api/avatar/result/:id
-        const jobId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      if (method === 'POST' && url.pathname === '/api/avatar/portrait') {
+        if (origin && !isLoopbackOrigin(origin)) {
+          throw new LocalCapabilityError(403, 'Avatar portraits can only be uploaded from the local Nexus frontend');
+        }
+        const body = await readJson(request, 8 * 1024 * 1024);
+        const portraitData = requiredString(body, 'portraitData');
+        const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+=*)$/.exec(portraitData);
+        if (!match) throw new HttpError(400, 'Portrait must be a PNG, JPEG, or WebP data URL');
+        const imageBytes = Buffer.from(match[2], 'base64');
+        if (!imageBytes.length || imageBytes.length > 5 * 1024 * 1024) {
+          throw new HttpError(413, 'Portrait must be smaller than 5 MB after local resizing');
+        }
+        const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
+        await mkdir(avatarPortraitsDir, { recursive: true });
+        const portraitPath = join(avatarPortraitsDir, `${randomUUID()}.${extension}`);
+        await writeFile(portraitPath, imageBytes, { flag: 'wx' });
+        sendJson(response, 201, { portraitPath, bytes: imageBytes.length });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/avatar/config') {
+        sendJson(response, 200, {
+          provider: 'nexus-cloud',
+          localRenderingEnabled: false,
+          configured: !!process.env.NEXUS_AVATAR_SERVER_URL && !!process.env.NEXUS_AVATAR_SERVER_TOKEN,
+        });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/avatar/animate') {
+        if (origin && !isLoopbackOrigin(origin)) throw new HttpError(403, 'Cloud avatar generation is only available from the local Nexus frontend');
+        const body = await readJson(request, 256 * 1024);
+        if (body.provider !== 'nexus-cloud' || body.cloudConsent !== true) throw new HttpError(400, 'Local GPU rendering is disabled. Explicit Nexus cloud consent is required.');
+        const endpoint = process.env.NEXUS_AVATAR_SERVER_URL;
+        const token = process.env.NEXUS_AVATAR_SERVER_TOKEN;
+        if (!endpoint || !token) throw new HttpError(503, 'Własny serwer animacji nie jest podłączony. Ustaw NEXUS_AVATAR_SERVER_URL i NEXUS_AVATAR_SERVER_TOKEN. HeyGen nie jest wymagany; lokalny render GPU jest wyłączony.');
+        const portraitPath = requiredString(body, 'portraitPath');
+        const text = requiredString(body, 'text');
+        if (text.length > 5000) throw new HttpError(413, 'Avatar script exceeds 5000 characters');
+
+        const checkpointsDir = resolve(fasterLivePortraitDir, 'checkpoints');
+        if (portraitPath) {
+          const relativePortraitPath = relative(checkpointsDir, resolve(portraitPath));
+          if (relativePortraitPath === '..' || relativePortraitPath.startsWith(`..${sep}`) || isAbsolute(relativePortraitPath)) {
+            throw new HttpError(400, 'Portrait path must be inside FasterLivePortrait/checkpoints');
+          }
+        }
+
+        const extension = extname(portraitPath).toLowerCase();
+        if (!['.png', '.jpg', '.jpeg'].includes(extension)) throw new HttpError(400, 'The avatar engine requires PNG or JPEG. Select your portrait again to convert it.');
+        const image = await readFile(portraitPath);
+        if (!image.length || image.length > 5 * 1024 * 1024) throw new HttpError(413, 'Portrait must be smaller than 5 MB');
+        const videoId = await new RemoteAvatar(endpoint, token).generate(image, extension === '.png' ? 'image/png' : 'image/jpeg', text);
+        const jobId = randomUUID();
+        avatarJobs.set(jobId, { videoId });
         sendJson(response, 202, { jobId, status: 'processing' });
+        return;
+      }
+
+      if (method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar' && segments[2] === 'result') {
+        const job = avatarJobs.get(segments[3] ?? '');
+        if (!job) throw new HttpError(404, 'Avatar animation job not found');
+        const endpoint = process.env.NEXUS_AVATAR_SERVER_URL;
+        const token = process.env.NEXUS_AVATAR_SERVER_TOKEN;
+        if (!endpoint || !token) throw new HttpError(503, 'Nexus cloud avatar server is not configured');
+        const result = await new RemoteAvatar(endpoint, token).result(job.videoId);
+        sendJson(response, 200, { ...result, ...(result.status === 'complete' ? { videoUrl: `/api/avatar/video/${segments[3]}` } : {}) });
+        return;
+      }
+
+      if (method === 'GET' && segments[0] === 'api' && segments[1] === 'avatar' && segments[2] === 'video') {
+        const job = avatarJobs.get(segments[3] ?? '');
+        if (!job) throw new HttpError(404, 'Avatar job not found');
+        const endpoint = process.env.NEXUS_AVATAR_SERVER_URL;
+        const token = process.env.NEXUS_AVATAR_SERVER_TOKEN;
+        if (!endpoint || !token) throw new HttpError(503, 'Nexus cloud avatar server is not configured');
+        const video = await new RemoteAvatar(endpoint, token).video(job.videoId);
+        if (!video.body) throw new Error('Remote video response has no body');
+        const reader = video.body.getReader();
+        response.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
+        try {
+          while (!response.destroyed) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            await new Promise<void>((resolve, reject) => response.write(chunk.value, error => error ? reject(error) : resolve()));
+          }
+          response.end();
+        } catch (error) {
+          console.error('Remote avatar video streaming failed:', error);
+          response.destroy(error instanceof Error ? error : new Error(String(error)));
+        } finally {
+          await reader.cancel();
+          reader.releaseLock();
+        }
         return;
       }
 
@@ -273,17 +427,16 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         sendJson(response, 200, { ok: true });
         return;
       }
-        const providers = await aiRouter.healthCheck();
-        sendJson(response, 200, {
-          gemini: providers['google-gemini'] ?? { status: 'not_configured' },
-          ollama: providers['ollama-local'] ?? { status: 'unavailable' },
-        });
-        return;
-      }
 
       if (method === 'POST' && url.pathname === '/api/ai/generate') {
         const body = await readJson(request, 256 * 1024);
+        if (body.allowLocalFallback !== undefined && typeof body.allowLocalFallback !== 'boolean') {
+          throw new HttpError(400, 'allowLocalFallback must be a boolean');
+        }
         const prompt = requirePrompt(body);
+        if (freeOnly && body.provider !== undefined && body.provider !== 'ollama' && body.provider !== 'ollama-local') {
+          throw new HttpError(403, 'Only free local Ollama is allowed. Cloud providers are disabled.');
+        }
         const temperature = body.temperature;
         const maxOutputTokens = body.maxOutputTokens;
         if (temperature !== undefined && (typeof temperature !== 'number' || !Number.isFinite(temperature) || temperature < 0 || temperature > 2)) {
@@ -300,10 +453,11 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         response.once('close', abortIfDisconnected);
         try {
           const result = await aiRouter.generate(prompt, {
+            allowLocalFallback: body.allowLocalFallback !== false,
             mode: parseRoutingMode(body.mode),
             signal: controller.signal,
-            ...(temperature !== undefined ? { temperature } : {}),
-            ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+            ...(typeof temperature === 'number' ? { temperature } : {}),
+            ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
           });
           sendJson(response, 200, { text: result.text, providerId: result.providerId });
         } finally {
@@ -315,6 +469,9 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'POST' && url.pathname === '/api/ai/stream') {
         const body = await readJson(request, 256 * 1024);
+        if (body.allowLocalFallback !== undefined && typeof body.allowLocalFallback !== 'boolean') {
+          throw new HttpError(400, 'allowLocalFallback must be a boolean');
+        }
         const prompt = requirePrompt(body);
         const mode = parseRoutingMode(body.mode);
         const controller = new AbortController();
@@ -332,7 +489,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         try {
           const result = await aiRouter.stream(prompt, (chunk) => {
             if (!response.destroyed) response.write(`event: token\ndata: ${JSON.stringify({ text: chunk })}\n\n`);
-          }, { mode, signal: controller.signal });
+          }, { mode, signal: controller.signal, allowLocalFallback: body.allowLocalFallback !== false });
           if (!response.destroyed) {
             response.write(`event: complete\ndata: ${JSON.stringify({ providerId: result.providerId })}\n\n`);
             response.end();
@@ -547,4 +704,6 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       sendJson(response, statusCode, { error: message });
     }
   });
+  server.once('close', () => localSpeech.close());
+  return server;
 }

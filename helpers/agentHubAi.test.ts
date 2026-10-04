@@ -49,6 +49,13 @@ test('Agent Hub AI endpoint returns a local response after cloud quota is exhaus
     assert.equal(health.gemini.status, 'healthy');
     assert.equal(health.ollama.status, 'healthy');
 
+    const strictResponse = await fetch(`${baseUrl}/api/ai/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Cloud only.', allowLocalFallback: false }),
+    });
+    assert.equal(strictResponse.status, 503);
+
     const generateResponse = await fetch(`${baseUrl}/api/ai/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
