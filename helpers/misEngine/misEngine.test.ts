@@ -8,6 +8,7 @@ import { buildEstimatedPhonemeTimeline } from './phonemeEngine.ts';
 import { selectMisRenderer } from './rendererRegistry.ts';
 import { composeMisFrame } from './runtime.ts';
 import { validateTimeline } from './benchmark.ts';
+import { runMisSession } from './sessionClient.ts';
 import { MisRenderCoordinator } from './renderCoordinator.ts';
 import { normaliseAlignedPhone } from './phoneNormalization.ts';
 
@@ -140,4 +141,43 @@ test('MFA phone variants normalize into Miś articulation inventory', () => {
   assert.equal(normaliseAlignedPhone('ɡ'),'g');
   assert.equal(normaliseAlignedPhone('aw'),'aʊ');
   assert.equal(normaliseAlignedPhone('sp'),'sil');
+});
+
+
+test('session client connects aligned phones, runtime controls and renderer result', async () => {
+  const fakeHub = {
+    async alignMisSpeech() {
+      return {
+        experimental:true as const,
+        source:'aligned-audio' as const,
+        language:'pl' as const,
+        phones:[
+          {phoneme:'m',startMs:0,endMs:100,confidence:1,source:'aligned-audio' as const},
+          {phoneme:'a',startMs:100,endMs:240,confidence:1,source:'aligned-audio' as const},
+        ],
+      };
+    },
+    async renderMis() {
+      return {
+        blob:new Blob(['video'],{type:'video/mp4'}),
+        renderer:'faster-liveportrait',
+        fallbackUsed:false,
+        engine:undefined,
+      };
+    },
+  };
+
+  const result=await runMisSession(fakeHub,{
+    language:'pl',
+    transcript:'ma',
+    sourceImageBase64:'aW1hZ2U=',
+    audioBase64:'YXVkaW8=',
+    controlFps:20,
+  });
+
+  assert.equal(result.alignment,'aligned-audio');
+  assert.equal(result.renderer,'faster-liveportrait');
+  assert.equal(result.phones[0].phoneme,'m');
+  assert.ok(result.frames.some(frame=>frame.phoneme.phoneme==='a'));
+  assert.ok(result.frames.some(frame=>frame.haptic.kind==='vowel'));
 });
