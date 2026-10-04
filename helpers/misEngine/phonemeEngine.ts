@@ -29,21 +29,21 @@ const RULES: Record<MisLanguage, Rule[]> = {
   ],
 };
 
-const CHARS: Record<MisLanguage, Record<string, string>> = {
+const CHARS: Record<MisLanguage, Record<string, string[]>> = {
   pl: {
-    a:'a', ą:'ɔ̃', b:'b', c:'ts', ć:'tɕ', d:'d', e:'ɛ', ę:'ɛ̃', f:'f', g:'g',
-    h:'x', i:'i', j:'j', k:'k', l:'l', ł:'w', m:'m', n:'n', ń:'ɲ', o:'ɔ', ó:'u',
-    p:'p', r:'r', s:'s', ś:'ɕ', t:'t', u:'u', w:'v', y:'ɨ', z:'z', ź:'ʑ', ż:'ʐ'
+    a:['a'], ą:['ɔ̃'], b:['b'], c:['t','s'], ć:['tɕ'], d:['d'], e:['ɛ'], ę:['ɛ̃'], f:['f'], g:['g'],
+    h:['x'], i:['i'], j:['j'], k:['k'], l:['l'], ł:['w'], m:['m'], n:['n'], ń:['ɲ'], o:['ɔ'], ó:['u'],
+    p:['p'], r:['r'], s:['s'], ś:['ɕ'], t:['t'], u:['u'], w:['v'], y:['ɨ'], z:['z'], ź:['ʑ'], ż:['ʐ']
   },
   en: {
-    a:'æ', b:'b', c:'k', d:'d', e:'ɛ', f:'f', g:'g', h:'h', i:'ɪ', j:'dʒ',
-    k:'k', l:'l', m:'m', n:'n', o:'ɒ', p:'p', q:'k', r:'ɹ', s:'s', t:'t',
-    u:'ʌ', v:'v', w:'w', x:'ks', y:'j', z:'z'
+    a:['æ'], b:['b'], c:['k'], d:['d'], e:['ɛ'], f:['f'], g:['g'], h:['h'], i:['ɪ'], j:['dʒ'],
+    k:['k'], l:['l'], m:['m'], n:['n'], o:['ɒ'], p:['p'], q:['k'], r:['ɹ'], s:['s'], t:['t'],
+    u:['ʌ'], v:'v', w:'w', x:['k','s'], y:['j'], z:['z']
   },
   de: {
-    a:'a', ä:'ɛ', b:'b', c:'k', d:'d', e:'e', f:'f', g:'g', h:'h', i:'ɪ',
-    j:'j', k:'k', l:'l', m:'m', n:'n', o:'o', ö:'ø', p:'p', q:'k', r:'ʁ',
-    s:'z', ß:'s', t:'t', u:'u', ü:'y', v:'f', w:'v', x:'ks', y:'y', z:'ts'
+    a:['a'], ä:['ɛ'], b:['b'], c:['k'], d:['d'], e:['e'], f:['f'], g:['g'], h:['h'], i:['ɪ'],
+    j:['j'], k:['k'], l:['l'], m:['m'], n:['n'], o:'o', ö:['ø'], p:['p'], q:['k'], r:['ʁ'],
+    s:['z'], ß:['s'], t:['t'], u:['u'], ü:['y'], v:['f'], w:['v'], x:['k','s'], y:'y', z:['t','s']
   },
 };
 
@@ -70,7 +70,7 @@ export function estimatePhonemes(text: string, language: MisLanguage): string[] 
     }
 
     const mapped = CHARS[language][ch];
-    if (mapped) out.push(...mapped.split(''));
+    if (mapped) out.push(...mapped);
     i += 1;
   }
 
