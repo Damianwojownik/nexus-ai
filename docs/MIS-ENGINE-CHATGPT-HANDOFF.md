@@ -91,3 +91,15 @@ When Codex finishes its current branch:
 5. run `npm run test:mis` and `npm run build`,
 6. run one real MFA PL sample and one real animal FasterLivePortrait sample,
 7. only then consider a selective merge toward `main`.
+
+
+## Unified Miś pipeline
+
+Connected on the ChatGPT branch:
+
+- `GET /api/mis/health` — combined aligner + live/quality renderer health.
+- `POST /api/mis/align` — audio + transcript -> aligned phoneme timeline.
+- `POST /api/mis/render` — `live` routes to animal FasterLivePortrait; `quality` routes to Nexus Media Engine (FLP + LTX + compositor) with live fallback.
+- `helpers/misEngine/sessionClient.ts` — one application-level call starts render and alignment from the same audio, then creates articulation, Nexus motion and haptic frames from the aligned timeline.
+
+Current boundary: the neural visual renderer is still audio-driven. Miś articulatory targets already drive deterministic control/haptic data, but are not yet injected as direct neural mouth controls into FasterLivePortrait/LTX. Do not describe this as direct articulatory control of the neural renderer until that adapter exists.
