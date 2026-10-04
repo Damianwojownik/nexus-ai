@@ -69,6 +69,8 @@ const CONSONANTS: Record<string, ArticulationFrame> = {
   'dʑ': frame({jawOpen:.18,lipWide:.56,tongueX:.34,tongueY:.84,tongueTip:.72,teethGap:.14,voicing:1,airflow:.64}),
   'tʂ': frame({jawOpen:.20,lipRound:.18,tongueX:.58,tongueY:.80,tongueTip:.84,teethGap:.16,voicing:0,airflow:.80}),
   'dʐ': frame({jawOpen:.20,lipRound:.18,tongueX:.58,tongueY:.80,tongueTip:.84,teethGap:.16,voicing:1,airflow:.66}),
+  'tʃ': frame({jawOpen:.20,lipRound:.18,lipProtrusion:.16,tongueX:.50,tongueY:.80,tongueTip:.78,teethGap:.16,voicing:0,airflow:.80}),
+  'dʒ': frame({jawOpen:.20,lipRound:.18,lipProtrusion:.16,tongueX:.50,tongueY:.80,tongueTip:.78,teethGap:.16,voicing:1,airflow:.66}),
 };
 
 const NASAL_VOWELS: Record<string, ArticulationFrame> = {
