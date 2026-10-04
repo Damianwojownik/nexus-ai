@@ -1,3 +1,5 @@
+import { normaliseAlignedPhone } from './phoneNormalization.ts';
+
 import type { MisLanguage, PhonemeCue, TimelineSource } from './types.ts';
 
 type Rule = { text: string; phonemes: string[] };
@@ -132,7 +134,7 @@ export function acceptAlignedPhonemes(items: AlignedPhoneInput[]): PhonemeCue[] 
     .filter(x => Number.isFinite(x.startMs) && Number.isFinite(x.endMs) && x.endMs > x.startMs)
     .sort((a,b) => a.startMs - b.startMs)
     .map(x => ({
-      phoneme: x.phoneme.trim() || 'sil',
+      phoneme: normaliseAlignedPhone(x.phoneme),
       startMs: Math.max(0, x.startMs),
       endMs: Math.max(0, x.endMs),
       confidence: Math.max(0, Math.min(1, x.confidence ?? 1)),
