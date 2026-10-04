@@ -311,6 +311,41 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         const mode = body.mode === 'quality' ? 'quality' : 'live';
         const sourceImageBase64 = requiredString(body, 'sourceImageBase64');
         const audioBase64 = requiredString(body, 'audioBase64');
+        const rawControls = body.articulationControls;
+        let articulationControls: Array<{
+          atMs: number;
+          jawOpen: number;
+          lipWide: number;
+          lipRound: number;
+          lipProtrusion: number;
+          lipPress: number;
+        }> | undefined;
+        if (rawControls !== undefined) {
+          if (!Array.isArray(rawControls) || rawControls.length > 60000) {
+            throw new HttpError(400, 'articulationControls must be an array with at most 60000 points');
+          }
+          articulationControls = rawControls.map((item, index) => {
+            if (!isRecord(item)) throw new HttpError(400, `articulationControls[${index}] must be an object`);
+            const keys = ['atMs', 'jawOpen', 'lipWide', 'lipRound', 'lipProtrusion', 'lipPress'] as const;
+            const values = Object.fromEntries(keys.map((key) => {
+              const value = item[key];
+              if (typeof value !== 'number' || !Number.isFinite(value)) {
+                throw new HttpError(400, `articulationControls[${index}].${key} must be finite`);
+              }
+              return [key, value];
+            })) as Record<(typeof keys)[number], number>;
+            if (values.atMs < 0) throw new HttpError(400, `articulationControls[${index}].atMs must be >= 0`);
+            for (const key of keys.slice(1)) {
+              if (values[key] < 0 || values[key] > 1) {
+                throw new HttpError(400, `articulationControls[${index}].${key} must be between 0 and 1`);
+              }
+            }
+            return values;
+          });
+        }
+        const articulationStrength = typeof body.articulationStrength === 'number'
+          ? Math.max(0, Math.min(1, body.articulationStrength))
+          : undefined;
         const rendered = await misRenderer.render(mode, {
           sourceImageBase64,
           sourceImageMime: typeof body.sourceImageMime === 'string' ? body.sourceImageMime : undefined,
@@ -323,6 +358,8 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
           fps: typeof body.fps === 'number' ? body.fps : undefined,
           numFrames: typeof body.numFrames === 'number' ? body.numFrames : undefined,
           seed: typeof body.seed === 'number' ? body.seed : undefined,
+          articulationControls,
+          articulationStrength,
         });
         response.writeHead(200, {
           'Content-Type': rendered.contentType,
