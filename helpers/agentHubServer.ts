@@ -9,6 +9,7 @@ import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
 import { LocalPhonemeAligner } from './misEngine/phonemeAligner.ts';
+import { MisRenderCoordinator } from './misEngine/renderCoordinator.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -211,6 +212,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
   const imageServer = new SelfHostedImageServerClient();
   const cloudRouter = new NexusCloudRouter();
   const misAligner = new LocalPhonemeAligner();
+  const misRenderer = new MisRenderCoordinator();
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -268,6 +270,10 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
             'popup-relay',
             'ai-generate',
             'image-generate',
+            'mis-engine',
+            'mis-align',
+            'mis-render-live',
+            'mis-render-quality',
             'workspace',
             'web-search',
             'weather',
@@ -283,6 +289,51 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/mis/aligner/health') {
         sendJson(response, 200, await misAligner.health());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/mis/health') {
+        const [aligner, renderer] = await Promise.all([
+          misAligner.health(),
+          misRenderer.health(),
+        ]);
+        sendJson(response, 200, {
+          ok: Boolean(renderer.live.ok || renderer.quality.ok),
+          experimental: true,
+          aligner,
+          renderer,
+        });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/mis/render') {
+        const body = await readJson(request, 48 * 1024 * 1024);
+        const mode = body.mode === 'quality' ? 'quality' : 'live';
+        const sourceImageBase64 = requiredString(body, 'sourceImageBase64');
+        const audioBase64 = requiredString(body, 'audioBase64');
+        const rendered = await misRenderer.render(mode, {
+          sourceImageBase64,
+          sourceImageMime: typeof body.sourceImageMime === 'string' ? body.sourceImageMime : undefined,
+          audioBase64,
+          audioMime: typeof body.audioMime === 'string' ? body.audioMime : undefined,
+          bodyPrompt: typeof body.bodyPrompt === 'string' ? body.bodyPrompt : undefined,
+          negativePrompt: typeof body.negativePrompt === 'string' ? body.negativePrompt : undefined,
+          width: typeof body.width === 'number' ? body.width : undefined,
+          height: typeof body.height === 'number' ? body.height : undefined,
+          fps: typeof body.fps === 'number' ? body.fps : undefined,
+          numFrames: typeof body.numFrames === 'number' ? body.numFrames : undefined,
+          seed: typeof body.seed === 'number' ? body.seed : undefined,
+        });
+        response.writeHead(200, {
+          'Content-Type': rendered.contentType,
+          'Content-Length': rendered.data.length,
+          'Cache-Control': 'no-store',
+          'X-Mis-Experimental': 'true',
+          'X-Mis-Renderer': rendered.renderer,
+          'X-Mis-Fallback': rendered.fallbackUsed ? 'true' : 'false',
+          ...(rendered.engine ? { 'X-Mis-Engine': rendered.engine } : {}),
+        });
+        response.end(rendered.data);
         return;
       }
 
