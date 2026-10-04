@@ -117,6 +117,7 @@ export class AgentHubClient {
     audioMime?: string;
     drivingVideoBase64?: string;
     drivingVideoMime?: string;
+    subjectMode?: 'auto' | 'human' | 'animal';
   }): Promise<Blob> {
     let response: Response;
     try {
