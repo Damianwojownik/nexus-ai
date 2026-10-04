@@ -99,9 +99,9 @@ function blendFrame(a:ArticulationFrame,b:ArticulationFrame,t:number):Articulati
  */
 export function articulationAt(timeline:PhonemeCue[], atMs:number):ArticulationFrame {
   if (!timeline.length) return REST;
-  const index=Math.max(0,timeline.findIndex(c => atMs>=c.startMs && atMs<c.endMs));
-  const cue=timeline[index === -1 ? timeline.length-1 : index];
-  const i=index === -1 ? timeline.length-1 : index;
+  const found=timeline.findIndex(c => atMs>=c.startMs && atMs<c.endMs);
+  const i=found >= 0 ? found : atMs < timeline[0].startMs ? 0 : timeline.length-1;
+  const cue=timeline[i];
   const current=articulationTarget(cue.phoneme);
   const prev=articulationTarget(timeline[Math.max(0,i-1)]?.phoneme ?? 'sil');
   const next=articulationTarget(timeline[Math.min(timeline.length-1,i+1)]?.phoneme ?? 'sil');
