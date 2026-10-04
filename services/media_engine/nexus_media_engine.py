@@ -161,26 +161,40 @@ def make_face_mask(width: int, height: int, protect: float, feather: float, outp
     return output
 
 
-def run_flp(source: Path, audio: Path, output: Path) -> Path:
+def run_flp(
+    source: Path,
+    audio: Path,
+    output: Path,
+    articulation_json: Optional[str] = None,
+    articulation_strength: float = 0.35,
+) -> Path:
     worker = SERVICE_ROOT / "flp_worker.py"
     if not FLP_ROOT.exists():
         raise RuntimeError(f"FasterLivePortrait missing: {FLP_ROOT}")
-    run_checked(
-        [
-            sys.executable,
-            str(worker),
-            "--flp-root",
-            str(FLP_ROOT),
-            "--source",
-            str(source),
-            "--audio",
-            str(audio),
-            "--output",
-            str(output),
-        ],
-        cwd=ROOT,
-        timeout=1800,
-    )
+    cmd = [
+        sys.executable,
+        str(worker),
+        "--flp-root",
+        str(FLP_ROOT),
+        "--source",
+        str(source),
+        "--audio",
+        str(audio),
+        "--output",
+        str(output),
+        "--subject-mode",
+        "animal",
+    ]
+    if articulation_json:
+        controls_path = output.parent / "articulation-controls.json"
+        controls_path.write_text(articulation_json, encoding="utf-8")
+        cmd += [
+            "--articulation-json-file",
+            str(controls_path),
+            "--articulation-strength",
+            str(max(0.0, min(1.0, articulation_strength))),
+        ]
+    run_checked(cmd, cwd=ROOT, timeout=1800)
     if not output.exists():
         raise RuntimeError("FasterLivePortrait output missing")
     return output
@@ -317,11 +331,18 @@ async def render_avatar_pipeline(
     feather: float,
     work: Path,
     output: Path,
+    articulation_json: Optional[str] = None,
+    articulation_strength: float = 0.35,
 ) -> Path:
     async with GPU_LOCK:
         face_source = square_face_crop(source, work / "face-source.png")
         face_video = await asyncio.to_thread(
-            run_flp, face_source, audio, work / "face.mp4"
+            run_flp,
+            face_source,
+            audio,
+            work / "face.mp4",
+            articulation_json,
+            articulation_strength,
         )
         body_video = await asyncio.to_thread(
             run_ltx,
@@ -375,6 +396,8 @@ async def health(
             "ready": (LTX_ROOT / "inference.py").exists(),
             "config": str(LTX_CONFIG),
         },
+        "directArticulationInjection": True,
+        "directArticulationChannels": ["jawOpen", "lipWide", "lipRound", "lipProtrusion", "lipPress"],
         "defaults": {
             "width": 608,
             "height": 768,
@@ -404,6 +427,8 @@ async def avatar_render(
     seed: int = Form(default=7),
     face_protect: float = Form(default=0.42),
     feather: float = Form(default=0.10),
+    articulation_json: Optional[str] = Form(default=None),
+    articulation_strength: float = Form(default=0.35),
     authorization: Optional[str] = Header(default=None),
     x_nexus_token: Optional[str] = Header(default=None),
 ):
@@ -434,6 +459,8 @@ async def avatar_render(
             feather,
             work,
             output,
+            articulation_json,
+            max(0.0, min(1.0, articulation_strength)),
         )
         return FileResponse(
             output,
@@ -442,6 +469,7 @@ async def avatar_render(
             headers={
                 "Cache-Control": "no-store",
                 "X-Nexus-Engine": "flp+ltx+composite",
+                "X-Mis-Articulation-Injection": "true" if articulation_json else "false",
             },
         )
     finally:
