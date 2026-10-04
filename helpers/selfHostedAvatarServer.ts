@@ -13,6 +13,7 @@ export type AvatarRenderInput = {
   audioMime?: string;
   drivingVideoBase64?: string;
   drivingVideoMime?: string;
+  subjectMode?: 'auto' | 'human' | 'animal';
 };
 
 export type AvatarRenderResult = {
@@ -101,6 +102,7 @@ export class SelfHostedAvatarServerClient {
       new Blob([new Uint8Array(decodeBase64(input.sourceImageBase64))], { type: input.sourceImageMime || 'image/png' }),
       'source.png',
     );
+    form.append('mode', input.subjectMode || 'auto');
     if (input.audioBase64) {
       form.append(
         'audio',
