@@ -14,6 +14,8 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from starlette.background import BackgroundTask
 from fastapi.responses import FileResponse, JSONResponse
 
+from mis_articulation_injector import parse_controls, render_controlled_audio
+
 ROOT = Path(__file__).resolve().parents[2]
 FLP_ROOT = Path(os.environ.get("FASTER_LIVEPORTRAIT_DIR", ROOT / "vendor" / "FasterLivePortrait")).resolve()
 TOKEN = os.environ.get("NEXUS_AVATAR_SERVER_TOKEN", "").strip()
@@ -117,11 +119,27 @@ def _resolve_output(output: str | Path) -> Path:
     return value.resolve() if value.is_absolute() else (FLP_ROOT / value).resolve()
 
 
-def _run_audio(source_image: Path, audio: Path, subject_mode: str) -> Path:
+def _run_audio(
+    source_image: Path,
+    audio: Path,
+    subject_mode: str,
+    articulation_json: Optional[str] = None,
+    articulation_strength: float = 0.35,
+) -> Path:
     pipe = _load_pipeline(subject_mode)
     previous_cwd = Path.cwd()
     os.chdir(FLP_ROOT)
     try:
+        controls = parse_controls(articulation_json)
+        if controls:
+            return render_controlled_audio(
+                pipe,
+                audio,
+                source_image,
+                source_image.parent / "controlled",
+                controls,
+                articulation_strength,
+            )
         output, _preview, _elapsed = pipe.run_audio_driving(str(audio), str(source_image))
         return _resolve_output(output)
     finally:
@@ -158,6 +176,8 @@ async def health(
         "missing": missing,
         "pipelineLoaded": bool(_pipelines),
         "loadedSubjectModes": sorted(_pipelines.keys()),
+        "directArticulationInjection": True,
+        "directArticulationChannels": ["jawOpen", "lipWide", "lipRound", "lipProtrusion", "lipPress"],
         "experimental": True,
     }
 
@@ -169,6 +189,8 @@ async def _animate_impl(
     driving_audio: Optional[UploadFile],
     driving_video: Optional[UploadFile],
     mode: str,
+    articulation_json: Optional[str],
+    articulation_strength: float,
     authorization: Optional[str],
     x_nexus_token: Optional[str],
 ):
@@ -193,7 +215,14 @@ async def _animate_impl(
         async with _pipeline_lock:
             if speech is not None:
                 audio_path = await _save_upload(speech, work, "speech.wav")
-                output_path = await asyncio.to_thread(_run_audio, source_path, audio_path, subject_mode)
+                output_path = await asyncio.to_thread(
+                    _run_audio,
+                    source_path,
+                    audio_path,
+                    subject_mode,
+                    articulation_json,
+                    articulation_strength,
+                )
             else:
                 video_path = await _save_upload(driving_video, work, "driving.mp4")
                 output_path = await asyncio.to_thread(_run_video, source_path, video_path, subject_mode)
@@ -216,6 +245,7 @@ async def _animate_impl(
                 "Cache-Control": "no-store",
                 "X-Nexus-Avatar-Subject-Mode": subject_mode,
                 "X-Nexus-Experimental": "true",
+                "X-Mis-Articulation-Injection": "true" if articulation_json else "false",
             },
         )
     except HTTPException:
@@ -236,6 +266,8 @@ async def animate(
     driving_audio: Optional[UploadFile] = File(default=None),
     driving_video: Optional[UploadFile] = File(default=None),
     mode: str = Form(default="auto"),
+    articulation_json: Optional[str] = Form(default=None),
+    articulation_strength: float = Form(default=0.35),
     authorization: Optional[str] = Header(default=None),
     x_nexus_token: Optional[str] = Header(default=None),
 ):
@@ -246,6 +278,8 @@ async def animate(
         driving_audio,
         driving_video,
         mode,
+        articulation_json,
+        max(0.0, min(1.0, articulation_strength)),
         authorization,
         x_nexus_token,
     )
