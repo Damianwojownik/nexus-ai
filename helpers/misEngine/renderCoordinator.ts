@@ -24,8 +24,8 @@ export type MisRenderOutput = {
   engine?:string;
 };
 
-type LiveRenderer = Pick<SelfHostedAvatarServerClient,'configured'|'render'>;
-type QualityRenderer = Pick<MisMediaRendererClient,'configured'|'render'>;
+type LiveRenderer = Pick<SelfHostedAvatarServerClient,'configured'|'render'|'health'>;
+type QualityRenderer = Pick<MisMediaRendererClient,'configured'|'render'|'health'>;
 
 /**
  * TEST / EXPERIMENTAL renderer coordinator.
@@ -38,6 +38,15 @@ export class MisRenderCoordinator {
     private readonly live:LiveRenderer=new SelfHostedAvatarServerClient(),
     private readonly quality:QualityRenderer=new MisMediaRendererClient(),
   ){}
+
+  async health():Promise<{
+    experimental:true;
+    live:Awaited<ReturnType<LiveRenderer['health']>>;
+    quality:Awaited<ReturnType<QualityRenderer['health']>>;
+  }>{
+    const [live,quality]=await Promise.all([this.live.health(),this.quality.health()]);
+    return {experimental:true,live,quality};
+  }
 
   async render(mode:MisRenderMode,input:MisRenderInput):Promise<MisRenderOutput>{
     if(!input.sourceImageBase64) throw new Error('sourceImageBase64 is required');
