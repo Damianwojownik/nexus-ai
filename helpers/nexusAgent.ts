@@ -2,7 +2,7 @@ import { ModelRouter } from './modelRouter.ts';
 import type { AIModelMode } from './modelRouter.ts';
 import { MemoryStore } from './memoryStore.ts';
 import { ToolRegistry } from './toolRegistry.ts';
-import { LUNA_IDENTITY } from './assistantPersona.ts';
+import { LUNA_IDENTITY, LUNA_EMOTION_CONTEXT } from './assistantPersona.ts';
 
 export type NexusMessageInput = {
   text: string;
@@ -61,6 +61,7 @@ export class NexusAgent {
       memoryContext,
       historyContext,
       LUNA_IDENTITY,
+      LUNA_EMOTION_CONTEXT,
       `User message: ${input.text}`,
     ].join('\n\n');
 

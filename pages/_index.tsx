@@ -442,7 +442,7 @@ export default function Home() {
           const image=attachments.find(file=>file.type.startsWith('image/'));
           if(!image)throw new Error('Dodaj zdjęcie przyciskiem „Dodaj zdjęcie / plik”, a następnie powiedz „Ustaw awatara z tego zdjęcia”.');
           await loadPortrait(image);
-          setResponse('Ustawiłem Twoje zdjęcie jako portret awatara. To portret, nie wygenerowany model 3D. Aby zamówić film, powiedz „Animuj awatara: …”.');
+          setResponse('Ustawiłam Twoje zdjęcie jako portret awatara. To portret, nie wygenerowany model 3D. Aby zamówić film, powiedz „Animuj awatara: …”.');
           setStatus('Awatar ustawiony');
         }else if(creation.kind==='website'){
           setStatus('Tworzę lokalny podgląd strony…');
@@ -531,9 +531,9 @@ export default function Home() {
     if (!approvalRequest) return;
     await nexusOrchestrator.cancel(approvalRequest.taskId);
     setApprovalRequest(null);
-    setResponse('Anulowałem tę operację.');
+    setResponse('Anulowałam tę operację.');
     setStatus('Gotowe');
-    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałem tę operację.' }].slice(-12));
+    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałam tę operację.' }].slice(-12));
   };
 
   const addAttachments = (files: FileList|null) => {
@@ -993,7 +993,7 @@ export default function Home() {
       if(e.error==='aborted'){if(!submitted)setStatus('Nasłuchiwanie zatrzymane');return;}
       const message=e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu'
         :e.error==='network'?'Usługa rozpoznawania mowy jest niedostępna przez sieć. Spróbuj w zwykłym Edge/Chrome.'
-        :e.error==='no-speech'?'Nie usłyszałem polecenia. Sprawdź domyślny mikrofon i spróbuj ponownie.'
+        :e.error==='no-speech'?'Nie usłyszałam polecenia. Sprawdź domyślny mikrofon i spróbuj ponownie.'
         :`Błąd rozpoznawania mowy: ${e.error}`;
       console.error('Speech recognition failed:',e.error);
       setMicrophoneError(message);setStatus(message);emitVoiceEvent('ERROR',message);

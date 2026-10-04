@@ -275,7 +275,7 @@ export class NexusOrchestrator {
         const verifyIndex = plan.findIndex((step) => step.id === 'verify');
         if (verifyIndex >= 0) plan[verifyIndex].state = 'ACTIVE';
 
-        const responseText = 'Wygenerowałem obraz ' + dimensions.width + '×' + dimensions.height
+        const responseText = 'Wygenerowałam obraz ' + dimensions.width + '×' + dimensions.height
           + (generated.model ? ' modelem ' + generated.model : '')
           + (generated.seed !== undefined ? ' · seed ' + generated.seed : '') + '.';
         emit('TESTING', 'Weryfikuję wynik i zapisuję parametry renderu');
@@ -413,7 +413,7 @@ export class NexusOrchestrator {
           if (!task) throw new Error('Agent Hub nie utworzył zadania instalacyjnego');
           const approval: NexusApprovalRequest = catalog.available
             ? { kind: 'INSTALL_APP', taskId: task.id, app, message: `Czy mam zainstalować ${app.name}?` }
-            : { kind: 'INSTALLER_SETUP', taskId: task.id, app, message: `Nie wykryłem winget ani bezpiecznego instalatora. Czy mam otworzyć Microsoft Store dla App Installer? Po jego skonfigurowaniu Nexus zapyta osobno o instalację ${app.name}.` };
+            : { kind: 'INSTALLER_SETUP', taskId: task.id, app, message: `Nie wykryłam winget ani bezpiecznego instalatora. Czy mam otworzyć Microsoft Store dla App Installer? Po jego skonfigurowaniu Luna zapyta osobno o instalację ${app.name}.` };
           await this.hub.leaseTask(task.id, 'nexus-ui', 60 * 60 * 1000);
           plan[plan.findIndex((step) => step.id === 'approval')].state = 'ACTIVE';
           this.pendingWorkflows.set(task.id, { input, task, plan, approval, searchResults, contextNotes });
@@ -468,7 +468,7 @@ export class NexusOrchestrator {
         }
       }
       const responseText = repairSummary && repairedPath
-        ? `${repairSummary}\n\nZaktualizowałem ${repairedPath} i potwierdziłem zapis przez ponowny odczyt. Nie uruchamiałem testów projektu.`
+        ? `${repairSummary}\n\nZaktualizowałam ${repairedPath} i potwierdziłam zapis przez ponowny odczyt. Nie uruchamiałam testów projektu.`
         : (await this.agent.send({
           text: input.text,
           mode: 'AUTO',
@@ -524,7 +524,7 @@ export class NexusOrchestrator {
 
     if (pending.approval.kind === 'INSTALLER_SETUP') {
       await this.capabilities.openInstallerSetup(true);
-      const message = 'Otworzyłem Microsoft Store. Zainstaluj App Installer; Nexus sprawdzi dostępność winget i będzie kontynuował.';
+      const message = 'Otworzyłam Microsoft Store. Zainstaluj App Installer; Luna sprawdzi dostępność winget i będzie kontynuowała.';
       onProgress({ state: 'WAITING_FOR_APPROVAL', message, taskId, plan: [...pending.plan] });
       return { status: 'WAITING_FOR_APPROVAL', taskId, text: message, plan: [...pending.plan], approval: pending.approval, searchResults: [] };
     }
