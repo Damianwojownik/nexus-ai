@@ -7,18 +7,16 @@ Current architecture includes:
 - Nexus cinematic UI
 - browser SpeechRecognition (pl-PL)
 - browser SpeechSynthesis
-- six selectable avatars persisted in localStorage
+- one built-in boy avatar; users may still select a custom portrait
+- optional Nexus Image Engine portrait generation; generated default-avatar preferences are browser-local until the Floot project asset is explicitly updated and published
 - Floot agent scaffold in helpers/ and endpoints/
 - postgres + superjson dependencies injected by Floot
 
-Important: pages/_index.tsx currently has a mocked run() function. Ollama integration should replace this mock through NexusAgent/ModelRouter, not by coupling UI directly to Ollama.
+The local checkout no longer uses a mocked run(): `pages/_index.tsx` runs the existing `NexusOrchestrator` -> `NexusAgent` -> `ModelRouter` -> Agent Hub pipeline. The Hub enforces FREE / LOCAL FIRST, provides SSE streaming, local caching and optional local Headroom/Task Observer capabilities. This describes repository source, not a verified Floot deployment.
 
-Floot-hosted avatar paths used by the UI:
-- /_cdn/static/8c1cadbc-855e-4488-a72b-e88cb715d899.png
-- /_cdn/static/cc2dde88-daa2-48c9-acc8-1ea16f85990d.png
-- /_cdn/static/6a74b8c4-e09a-4776-a01a-156edac8441f.png
-- /_cdn/static/364da496-a271-4b0c-b40e-e23f14fad3a2.png
-- /_cdn/static/17f6bda3-9fc8-4e2d-9b46-fec5fc2d91d4.png
-- /_cdn/static/2405769f-a406-4390-9af2-8b74c0fda46c.png
+The Floot connector was visibly enabled in Claude's Connectors menu. Its resource menu is available, but this does not give this VS Code session direct Floot write tools or prove that current source changes have been synchronized. Do not send a paid Claude prompt, consume Floot credits or press Publish to perform source synchronization. Save source/draft only through an authorized free editor/import path, then verify by reloading the project.
+
+The built-in avatar is `public/avatars/nexus-boy.png`. The older Floot CDN
+portraits are no longer referenced by the application UI.
 
 Note: this is a Floot virtual project, so a conventional local package.json/build scaffold is not part of the Floot source snapshot. Do not invent a replacement app merely to make it conventional; preserve the existing source and adapt deliberately.

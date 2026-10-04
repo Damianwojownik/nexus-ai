@@ -6,3 +6,8 @@ dist/
 .env.local
 .nexus-agent-state.json
 .nexus-memory.json
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example

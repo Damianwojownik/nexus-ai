@@ -5,13 +5,15 @@
   "type": "module",
   "scripts": {
     "test:tooling": "node --test scripts/claude-stack.test.mjs",
+    "test:free": "node --test helpers/freeMode.test.ts",
     "dev": "vite --host 127.0.0.1",
     "hub": "node --experimental-strip-types helpers/agentHubRuntime.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test:hub": "node --experimental-strip-types --test helpers/agentHub.test.ts",
     "test:image": "node --experimental-strip-types --test helpers/nexusImageIntent.test.ts",
-    "test:image-hub": "node --experimental-strip-types --test helpers/nexusImageHub.test.ts"
+    "test:image-hub": "node --experimental-strip-types --test helpers/nexusImageHub.test.ts",
+    "test:providers": "node --experimental-strip-types --test helpers/aiProviderRouter.test.ts helpers/capabilityRegistry.test.ts helpers/agentHubAi.test.ts"
   },
   "dependencies": {
     "cheerio": "^1.2.0",

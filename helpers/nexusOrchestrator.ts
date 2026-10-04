@@ -41,6 +41,8 @@ export interface NexusWorkflowInput {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   projectContext?: string;
   attachments?: File[];
+  onToken?: (chunk: string) => void;
+  compressContext?: boolean;
 }
 
 export interface NexusGeneratedImage {
@@ -451,13 +453,27 @@ export class NexusOrchestrator {
 
       plan[plan.findIndex((step) => step.id === 'execute')].state = 'ACTIVE';
       emit('WORKING', 'Pracuję nad Twoim zadaniem');
+      let projectContext = [input.projectContext, ...contextNotes].filter(Boolean).join('\n\n');
+      if (input.compressContext && projectContext.length >= 8000) {
+        try {
+          const result = await this.capabilities.executeCapability<{ compressed: string; originalVerified: boolean }>(
+            'context.compress', { content: projectContext },
+          );
+          if (!result.result.originalVerified || typeof result.result.compressed !== 'string') throw new Error('Headroom source verification failed');
+          projectContext = result.result.compressed;
+        } catch (error) {
+          console.warn('[nexus:headroom] Context compression unavailable; original retained.', error);
+          emit('WORKING', 'Headroom niedostępny — zachowuję pełny oryginalny kontekst');
+        }
+      }
       const responseText = repairSummary && repairedPath
         ? `${repairSummary}\n\nZaktualizowałem ${repairedPath} i potwierdziłem zapis przez ponowny odczyt. Nie uruchamiałem testów projektu.`
         : (await this.agent.send({
           text: input.text,
           mode: 'AUTO',
-          projectContext: [input.projectContext, ...contextNotes].filter(Boolean).join('\n\n'),
+          projectContext,
           history: input.history,
+          onToken: input.onToken,
         })).text;
       if (!responseText.trim()) throw new Error('Nexus nie otrzymał odpowiedzi od dostępnego modelu');
 
@@ -528,7 +544,7 @@ export class NexusOrchestrator {
     const response = await this.agent.send({
       text: `Użytkownik poprosił o instalację ${pending.approval.app.name}. Instalator zakończył się poprawnie. Potwierdź rezultat i podaj następny krok.`,
       mode: 'AUTO',
-      projectContext: pending.contextNotes.join('\n\n'),
+      projectContext: [pending.input.projectContext, ...pending.contextNotes].filter(Boolean).join('\n\n'),
       history: pending.input.history,
     });
     await this.saveTaskMemory(pending.input.text, response.text, []);

@@ -9,6 +9,7 @@ export type NexusMessageInput = {
   projectContext?: string;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   maxOutputTokens?: number;
+  onToken?: (chunk: string) => void;
 };
 
 export type NexusAgentResult = {
@@ -64,6 +65,7 @@ export class NexusAgent {
     const responseText = await this.router.route(prompt, {
       temperature: 0.2,
       numPredict: input.maxOutputTokens,
+      onToken: input.onToken,
     });
 
     await this.memoryStore.saveMemory({

@@ -110,6 +110,11 @@ export class SelfHostedImageServerClient {
 
   async generate(input: ImageGenerateInput): Promise<ImageGenerateResult> {
     if (!this.configured()) throw new Error('Self-hosted image server is not configured');
+    const endpoint = new URL(this.baseUrl);
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname);
+    if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && loopback)) || endpoint.username || endpoint.password) {
+      throw new Error('NEXUS_IMAGE_SERVER_URL must use HTTPS unless it points to loopback');
+    }
     const prompt = input.prompt.trim();
     if (!prompt) throw new Error('prompt is required');
     if (prompt.length > 4000) throw new Error('prompt is too long');
@@ -137,6 +142,7 @@ export class SelfHostedImageServerClient {
         guidance_scale: guidanceScale,
       }),
       signal: AbortSignal.timeout(15 * 60 * 1000),
+      redirect: 'error',
     });
     if (!response.ok) {
       let detail = `Image server HTTP ${response.status}`;
@@ -147,13 +153,17 @@ export class SelfHostedImageServerClient {
       throw new Error(detail);
     }
 
+    const contentType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+    if (contentType !== 'image/png') throw new Error('Nexus Image Engine returned an unsupported image format');
+    const data = Buffer.from(await response.arrayBuffer());
+    if (!data.length || data.length > 15 * 1024 * 1024) throw new Error('Nexus Image Engine returned an invalid or oversized image');
     const seedHeader = response.headers.get('x-nexus-seed');
     const stepsHeader = response.headers.get('x-nexus-steps');
     const parsedSeed = seedHeader === null ? undefined : Number(seedHeader);
     const parsedSteps = stepsHeader === null ? undefined : Number(stepsHeader);
     return {
-      contentType: response.headers.get('content-type') || 'image/png',
-      data: Buffer.from(await response.arrayBuffer()),
+      contentType,
+      data,
       model: response.headers.get('x-nexus-model') || undefined,
       seed: parsedSeed !== undefined && Number.isInteger(parsedSeed) ? parsedSeed : undefined,
       steps: parsedSteps !== undefined && Number.isInteger(parsedSteps) ? parsedSteps : undefined,

@@ -1,0 +1,11 @@
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-devel
+RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg espeak-ng build-essential libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/Soul-AILab/SoulX-FlashHead.git /opt/SoulX-FlashHead && cd /opt/SoulX-FlashHead && git checkout 9bc03de06bb0de82cd6bc477804512ae06144bf2
+RUN sed '/^nvidia-nccl-cu12==2.27.3$/d' /opt/SoulX-FlashHead/requirements.txt > /opt/nexus-flashhead-requirements.txt && printf '\nnvidia-nccl-cu12==2.26.2\ntorch==2.7.1\ntorchvision==0.22.1\n' >> /opt/nexus-flashhead-requirements.txt
+RUN python -m pip install --no-cache-dir ninja huggingface_hub && python -m pip install --no-cache-dir -r /opt/nexus-flashhead-requirements.txt
+RUN MAX_JOBS=2 python -m pip install --no-cache-dir flash_attn==2.8.0.post2 --no-build-isolation
+WORKDIR /opt/nexus-avatar
+COPY worker.py render.py render_flashhead.py flashhead_worker.py setup_flashhead_models.py ./
+ENV NEXUS_CLOUD_WORKER=1 NEXUS_FLASHHEAD_DIR=/opt/SoulX-FlashHead NEXUS_JOB_DIR=/data/jobs MPLBACKEND=Agg
+EXPOSE 8000
+CMD ["python", "flashhead_worker.py"]

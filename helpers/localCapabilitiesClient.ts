@@ -32,6 +32,16 @@ export interface WeatherResult {
   }>;
 }
 
+export interface CapabilityAvailability {
+  id: string;
+  name: string;
+  readOnly: boolean;
+  connectorId: string;
+  connectorName: string;
+  status: 'healthy' | 'unavailable' | 'unauthenticated' | 'rate_limited' | 'not_configured' | 'error';
+  message?: string;
+}
+
 export interface ImportedWorkspaceFile {
   filename: string;
   bytes: number;
@@ -114,7 +124,28 @@ export class LocalCapabilitiesClient {
   }
 
   async searchWeb(query: string): Promise<{ query: string; provider: string; results: WebSearchResult[] }> {
-    return this.request(`/api/search?q=${encodeURIComponent(query)}`);
+    const result = await this.executeCapability<{ query: string; provider: string; results: WebSearchResult[] }>(
+      'browser.search',
+      { query },
+    );
+    return result.result;
+  }
+
+  async listCapabilities(): Promise<CapabilityAvailability[]> {
+    const result = await this.request<{ capabilities: CapabilityAvailability[] }>('/api/capabilities');
+    return result.capabilities;
+  }
+
+  async executeCapability<T = unknown>(
+    capability: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<{ connectorId: string; result: T }> {
+    return this.request(`/api/capabilities/${encodeURIComponent(capability)}`, {
+      method: 'POST',
+      body: JSON.stringify({ args }),
+      ...(signal ? { signal } : {}),
+    });
   }
 
   async getWeather(query: string): Promise<WeatherResult> {

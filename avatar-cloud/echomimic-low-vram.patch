@@ -1,0 +1,58 @@
+diff --git a/app/services/lipsync/echomimic_lib/pipeline_wan_fun_inpaint_audio_2512.py b/app/services/lipsync/echomimic_lib/pipeline_wan_fun_inpaint_audio_2512.py
+index 46a667b..2c21a77 100644
+--- a/app/services/lipsync/echomimic_lib/pipeline_wan_fun_inpaint_audio_2512.py
++++ b/app/services/lipsync/echomimic_lib/pipeline_wan_fun_inpaint_audio_2512.py
+@@ -549,13 +549,12 @@ class WanFunInpaintAudioPipeline(DiffusionPipeline):
+         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+         weight_dtype = self.text_encoder.dtype
+ 
+-        # Ensure all models are on GPU (may have been offloaded after previous chunk)
+-        if hasattr(self, 'vae') and self.vae is not None:
+-            self.vae.to(device)
+-        if hasattr(self, 'clip_image_encoder') and self.clip_image_encoder is not None:
+-            self.clip_image_encoder.to(device)
+-        if hasattr(self, 'text_encoder') and self.text_encoder is not None:
+-            self.text_encoder.to(device)
++        # Keep only the active stage's weights on GPU, including between chunks.
++        self.transformer.to("cpu")
++        self.vae.to("cpu")
++        self.clip_image_encoder.to("cpu")
++        torch.cuda.empty_cache()
++        self.text_encoder.to(device)
+ 
+         do_classifier_free_guidance = guidance_scale > 1.0
+ 
+@@ -570,6 +569,9 @@ class WanFunInpaintAudioPipeline(DiffusionPipeline):
+             max_sequence_length=max_sequence_length,
+             device=device,
+         )
++        self.text_encoder.to("cpu")
++        torch.cuda.empty_cache()
++        self.vae.to(device)
+         
+         # 4. Prepare timesteps
+         if isinstance(self.scheduler, FlowMatchEulerDiscreteScheduler):
+@@ -651,6 +653,10 @@ class WanFunInpaintAudioPipeline(DiffusionPipeline):
+                 mask_condition = mask_condition.transpose(1, 2)
+                 mask_latents = resize_mask(1 - mask_condition, masked_video_latents, True).to(device, weight_dtype) 
+ 
++        self.vae.to("cpu")
++        torch.cuda.empty_cache()
++        self.clip_image_encoder.to(device)
++
+         # Prepare clip latent variables
+         if clip_image is not None:
+             clip_image = TF.to_tensor(clip_image).sub_(0.5).div_(0.5).to(device, weight_dtype) 
+diff --git a/app/services/lipsync/echomimic_service.py b/app/services/lipsync/echomimic_service.py
+index 710ddd8..624fa5e 100644
+--- a/app/services/lipsync/echomimic_service.py
++++ b/app/services/lipsync/echomimic_service.py
+@@ -177,7 +177,7 @@ class EchoMimicV3Service:
+                 scheduler=scheduler,
+                 clip_image_encoder=clip_image_encoder,
+             )
+-            pipeline.to(device=self.device)
++            pipeline.to(device="cpu")
+ 
+             # 8. Wav2Vec2 audio encoder (runs on CPU to save VRAM)
+             logger.info("Loading Wav2Vec2 audio encoder...")
