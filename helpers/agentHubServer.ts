@@ -373,6 +373,9 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
           audioMime: typeof body.audioMime === 'string' ? body.audioMime : undefined,
           drivingVideoBase64,
           drivingVideoMime: typeof body.drivingVideoMime === 'string' ? body.drivingVideoMime : undefined,
+          subjectMode: body.subjectMode === 'animal' || body.subjectMode === 'human' || body.subjectMode === 'auto'
+            ? body.subjectMode
+            : undefined,
         });
         response.writeHead(200, {
           'Content-Type': rendered.contentType,
