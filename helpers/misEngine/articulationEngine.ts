@@ -71,6 +71,11 @@ const CONSONANTS: Record<string, ArticulationFrame> = {
   'dʐ': frame({jawOpen:.20,lipRound:.18,tongueX:.58,tongueY:.80,tongueTip:.84,teethGap:.16,voicing:1,airflow:.66}),
   'tʃ': frame({jawOpen:.20,lipRound:.18,lipProtrusion:.16,tongueX:.50,tongueY:.80,tongueTip:.78,teethGap:.16,voicing:0,airflow:.80}),
   'dʒ': frame({jawOpen:.20,lipRound:.18,lipProtrusion:.16,tongueX:.50,tongueY:.80,tongueTip:.78,teethGap:.16,voicing:1,airflow:.66}),
+  'ts': frame({jawOpen:.17,lipWide:.68,tongueX:.46,tongueY:.76,tongueTip:.88,teethGap:.13,voicing:0,airflow:.82}),
+  'dz': frame({jawOpen:.17,lipWide:.68,tongueX:.46,tongueY:.76,tongueTip:.88,teethGap:.13,voicing:1,airflow:.68}),
+  'c': frame({jawOpen:.17,lipWide:.54,tongueX:.34,tongueY:.86,tongueTip:.48,teethGap:.13,voicing:0,airflow:.58}),
+  'ɟ': frame({jawOpen:.17,lipWide:.54,tongueX:.34,tongueY:.86,tongueTip:.48,teethGap:.13,voicing:1,airflow:.46}),
+  'ʔ': frame({jawOpen:.18,lipWide:.30,tongueX:.50,tongueY:.44,tongueTip:.18,teethGap:.14,voicing:0,airflow:.08}),
 };
 
 const NASAL_VOWELS: Record<string, ArticulationFrame> = {
@@ -85,6 +90,7 @@ export function articulationTarget(phoneme:string): ArticulationFrame {
   if (CONSONANTS[phoneme]) return CONSONANTS[phoneme];
 
   if (phoneme === 'aɪ') return frame({...VOWELS.a, lipWide:.54, tongueY:.42});
+  if (phoneme === 'aʊ') return frame({...VOWELS.a, lipRound:.44, lipProtrusion:.38, tongueX:.62, tongueY:.48});
   if (phoneme === 'ɔʏ') return frame({...VOWELS['ɔ'], lipRound:.72, tongueX:.45, tongueY:.56});
   return REST;
 }
