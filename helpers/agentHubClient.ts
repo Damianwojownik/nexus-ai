@@ -99,6 +99,15 @@ export class AgentHubClient {
     fps?: number;
     numFrames?: number;
     seed?: number;
+    articulationControls?: Array<{
+      atMs: number;
+      jawOpen: number;
+      lipWide: number;
+      lipRound: number;
+      lipProtrusion: number;
+      lipPress: number;
+    }>;
+    articulationStrength?: number;
   }): Promise<{ blob: Blob; renderer?: string; fallbackUsed: boolean; engine?: string }> {
     let response: Response;
     try {
