@@ -1,7 +1,7 @@
 import type { AgentHubClient } from '../agentHubClient.ts';
 import { buildEstimatedPhonemeTimeline } from './phonemeEngine.ts';
 import { sampleMisRuntime, type MisRuntimeFrame } from './runtime.ts';
-import type { MisLanguage, PhonemeCue } from './types.ts';
+import type { ArticulationControlPoint, MisLanguage, PhonemeCue } from './types.ts';
 
 type MisHub = Pick<AgentHubClient,'alignMisSpeech'|'renderMis'>;
 
@@ -22,6 +22,7 @@ export type MisSessionInput = {
   seed?:number;
   controlFps?:number;
   allowEstimatedFallback?:boolean;
+  articulationStrength?:number;
 };
 
 export type MisSessionResult = {
@@ -51,21 +52,6 @@ export async function runMisSession(
   if(!input.sourceImageBase64) throw new Error('sourceImageBase64 is required');
   if(!input.audioBase64) throw new Error('audioBase64 is required');
 
-  const renderPromise=hub.renderMis({
-    mode:input.renderMode ?? 'live',
-    sourceImageBase64:input.sourceImageBase64,
-    sourceImageMime:input.sourceImageMime,
-    audioBase64:input.audioBase64,
-    audioMime:input.audioMime,
-    bodyPrompt:input.bodyPrompt,
-    negativePrompt:input.negativePrompt,
-    width:input.width,
-    height:input.height,
-    fps:input.fps,
-    numFrames:input.numFrames,
-    seed:input.seed,
-  });
-
   let phones:PhonemeCue[];
   let alignment:'aligned-audio'|'estimated-text-fallback'='aligned-audio';
   let alignmentError:string|undefined;
@@ -81,7 +67,6 @@ export async function runMisSession(
   }catch(error){
     if(!input.allowEstimatedFallback){
       // Do not silently downgrade a speech-training run to guessed timings.
-      await renderPromise.catch(()=>undefined);
       throw error;
     }
     alignment='estimated-text-fallback';
@@ -89,13 +74,37 @@ export async function runMisSession(
     phones=buildEstimatedPhonemeTimeline(input.transcript,input.language);
   }
 
-  const rendered=await renderPromise;
   const frames=sampleMisRuntime(
     phones,
     input.language,
     Math.max(10,Math.min(60,input.controlFps ?? 50)),
     'SPEAKING',
   );
+  const articulationControls:ArticulationControlPoint[]=frames.map(frame=>({
+    atMs:frame.atMs,
+    jawOpen:frame.articulation.jawOpen,
+    lipWide:frame.articulation.lipWide,
+    lipRound:frame.articulation.lipRound,
+    lipProtrusion:frame.articulation.lipProtrusion,
+    lipPress:frame.articulation.lipPress,
+  }));
+
+  const rendered=await hub.renderMis({
+    mode:input.renderMode ?? 'live',
+    sourceImageBase64:input.sourceImageBase64,
+    sourceImageMime:input.sourceImageMime,
+    audioBase64:input.audioBase64,
+    audioMime:input.audioMime,
+    bodyPrompt:input.bodyPrompt,
+    negativePrompt:input.negativePrompt,
+    width:input.width,
+    height:input.height,
+    fps:input.fps,
+    numFrames:input.numFrames,
+    seed:input.seed,
+    articulationControls,
+    articulationStrength:Math.max(0,Math.min(1,input.articulationStrength ?? .35)),
+  });
 
   return {
     experimental:true,
