@@ -4,14 +4,14 @@ Read `docs/NEXUS-HANDOFF.md` (or `NEXUS_HANDOFF.md` if the docs copy is not pres
 
 ## Session protocol
 
-At the start of every task-oriented session where tools will be used or deliverables will be produced, invoke the `task-observer` skill and run its Session Start Protocol before the first substantive tool call. Check its observation log for open observations relevant to the current work.
+For substantial multi-step tasks, invoke the `task-observer` skill and follow its Session Start Protocol. Check its observation log for relevant open observations. If the optional skill is unavailable, report that and continue using the existing task tracking rather than blocking work.
 
 ## Tooling stack
 
-- Claude Code is the primary coding agent for this workspace.
-- OmniRoute may be used as the local routing/gateway layer when it is running on `127.0.0.1:20128`.
+- Claude Code is an additional development agent, not a replacement for Nexus runtime, Copilot, Floot or Agent Hub.
+- OmniRoute is optional. Start it with `scripts/start-omniroute-local.*`, never a bare `omniroute` command (its upstream default may bind all interfaces). Its absence must not block Nexus startup.
 - Headroom may compress large tool outputs/context. Preserve raw source files and never treat compressed output as the only copy of important data.
-- claude-setup provides build/debug/refactor/QA/review workflows. Prefer those workflows for substantial engineering changes.
+- claude-setup provides optional development workflows. Use only commands actually listed by the installed plugin; do not assume slash commands exist.
 - Keep authentication tokens and provider credentials outside Git. Never write secrets into tracked files.
 
 ## Nexus engineering rules

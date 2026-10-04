@@ -31,6 +31,12 @@ npm run dev
 
 Open `http://127.0.0.1:5173/`. The Hub stores runtime state under the user's local app data directory when started by the current Windows setup.
 
+### Optional Claude development tools
+
+See [Claude tooling setup and diagnostics](docs/CLAUDE-TOOLING.md) for Claude Code,
+loopback-only OmniRoute, optional Headroom compression and Task Observer.
+These development tools do not replace Nexus runtime or block startup when offline.
+
 To use the user's eligible ChatGPT plan as the primary model, open Nexus, connect the Browser Bridge, and choose **Continue with ChatGPT**. The OAuth callback is loopback-only on `127.0.0.1:8788`; the access/refresh credentials remain local.
 
 ## Local capabilities

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:tooling": "node --test scripts/claude-stack.test.mjs",
     "dev": "vite --host 127.0.0.1",
     "hub": "node --experimental-strip-types helpers/agentHubRuntime.ts",
     "build": "tsc --noEmit && vite build",
