@@ -171,7 +171,8 @@ export default function Home() {
   const [voiceURI,setVoiceURI]=useState(()=>localStorage.getItem('nexus-speech-voice')||'');
   const [voices,setVoices]=useState<SpeechSynthesisVoice[]>([]);
   const [voiceEnabled,setVoiceEnabled]=useState(()=>localStorage.getItem('nexus-voice-enabled')!=='false');
-  const [conversationLipSync,setConversationLipSync]=useState(()=>localStorage.getItem('nexus-conversation-lipsync')!=='false');
+  const [conversationLipSync,setConversationLipSync]=useState(()=>localStorage.getItem('nexus-conversation-lipsync')==='true');
+  const [avatarIdleMotion,setAvatarIdleMotion]=useState(()=>localStorage.getItem('nexus-avatar-idle-motion')!=='false');
   const [conversationConsent,setConversationConsent]=useState(()=>localStorage.getItem('nexus-conversation-cloud-consent')==='true');
   const [conversationVideo,setConversationVideo]=useState<string|null>(null);
   const conversationControllerRef=useRef<AbortController|null>(null);
@@ -1049,7 +1050,7 @@ export default function Home() {
                   ? <img className={styles.person} src={nexusAvatarSrc} alt="Nexus — zapisany portret androidki" onError={()=>setAvatarImageFailed(true)}/>
                   : conversationLipSync
                     ? <img className={styles.person} src={nexusAvatarSrc} alt="Nexus — androidka oczekująca na zsynchronizowaną odpowiedź" onError={()=>setAvatarImageFailed(true)}/>
-                    : <AvatarSpeechVideo speaking={speaking} className={styles.person} src={NEXUS_DEFAULT_AVATAR.video} poster={nexusAvatarSrc} onError={()=>{setAvatarVideoFailed(true);setAvatarAnimationError('Nie udało się odtworzyć filmu androidki; pokazuję jej zapisany portret.');}}/>
+                    : <AvatarSpeechVideo speaking={speaking} animateIdle={avatarIdleMotion} className={styles.person} src={NEXUS_DEFAULT_AVATAR.video} poster={nexusAvatarSrc} onError={()=>{setAvatarVideoFailed(true);setAvatarAnimationError('Nie udało się odtworzyć filmu androidki; pokazuję jej zapisany portret.');}}/>
               : <img key={portraitSource} className={styles.person} src={portraitSource} alt={isNexus?'Nexus — mówiący, poruszający się i mrugający cyborg':customPortrait||defaultAvatarPortrait?'Nexus — zapisany portret postaci':'Nexus — cyborg'} onError={()=>setAvatarImageFailed(true)}/>}
           {!isNexus&&(!customPortrait||cameraView==='face')&&!avatarImageFailed&&!animationVideoUrl&&(
             <div className={styles.faceRig} aria-hidden="true">
@@ -1121,6 +1122,7 @@ export default function Home() {
             {SPEECH_LANGUAGES.map(item=><option key={item.code} value={item.code}>{item.label}</option>)}
           </select>
           <label htmlFor="nexus-speech-voice">Głos Nexusa</label>
+          <label><input type="checkbox" checked={avatarIdleMotion} onChange={event=>{setAvatarIdleMotion(event.target.checked);localStorage.setItem('nexus-avatar-idle-motion',String(event.target.checked));}}/> Animuj androidkę także między odpowiedziami — zapisany film bez dźwięku</label>
           <label><input type="checkbox" checked={conversationLipSync} disabled={speaking||speechPreparing} onChange={event=>{setConversationLipSync(event.target.checked);localStorage.setItem('nexus-conversation-lipsync',String(event.target.checked));cancelSpeech();setSpeaking(false);setSpeechPreparing(false);}}/> Ruch ust do aktualnej odpowiedzi — nowy film EchoMimic w darmowym Colabie</label>
           {conversationLipSync&&<><label><input type="checkbox" checked={conversationConsent} onChange={event=>{setConversationConsent(event.target.checked);localStorage.setItem('nexus-conversation-cloud-consent',String(event.target.checked));if(!event.target.checked){cancelSpeech();setSpeaking(false);setSpeechPreparing(false);}}}/> Zgadzam się wysłać portret androidki, treść odpowiedzi i jej audio do mojego darmowego renderera Colab</label><p className={styles.status}>Ten tryb używa lokalnej Pauliny i jednego filmu z dźwiękiem. Oczekiwanie może trwać kilka minut. Maksymalnie 30 sekund mowy, bez obcinania. Bez kredytów i płatnego fallbacku. Brak renderera pozostawia odpowiedź jako tekst. Wyłączenie tej opcji przywraca zwykły odczyt i starą animację, która nie jest synchronizacją ust.</p></>}
           {speechConfigError&&<p role="alert" className={styles.status}>{speechConfigError}</p>}
@@ -1150,7 +1152,7 @@ export default function Home() {
           {!customPortrait&&defaultAvatarPortrait&&<Button variant="secondary" disabled={avatarRendering||batchBusy} onClick={restoreNexusAvatar}>Przywróć fabrycznego Nexusa</Button>}
           <Button variant="secondary" disabled={avatarRendering||!response.trim()||!cloudRenderReady||!cloudConsent} onClick={()=>void animateAvatar(response)}>{avatarRendering?'Silnik Nexusa renderuje…':'Animuj odpowiedź — silnik Nexusa'}</Button>
         </div>
-        {isNexus&&<p className={styles.status}>{conversationLipSync?'Tryb rozmowy wymaga nowego filmu z głosem aktualnej odpowiedzi. Stary film nie zastępuje synchronizacji ust.':'Androidka animuje się tylko podczas odczytu odpowiedzi. Po zakończeniu lub zatrzymaniu głosu wraca do nieruchomej pierwszej klatki. Film jest wyciszony. To odtwarzanie w czasie mowy, nie synchronizacja ust z poszczególnymi głoskami.'}</p>}
+        {isNexus&&<p className={styles.status}>{conversationLipSync?'Tryb rozmowy wymaga nowego filmu z głosem aktualnej odpowiedzi. Stary film nie zastępuje synchronizacji ust.':avatarIdleMotion?'Androidka porusza się w zapętlonym, wyciszonym podglądzie także między odpowiedziami. Aktualną odpowiedź czyta lokalny głos. To nie jest dokładna synchronizacja ust.':'Androidka animuje się tylko podczas odczytu odpowiedzi. Po zakończeniu lub zatrzymaniu głosu wraca do nieruchomej pierwszej klatki. Film jest wyciszony. To odtwarzanie w czasie mowy, nie synchronizacja ust z poszczególnymi głoskami.'}</p>}
         <p className={styles.status}>Lokalny render GPU wyłączony. Animacja wymaga własnego serwera Nexusa w chmurze; przycisk wysyła tam zdjęcie i odpowiedź. Bez HeyGen.</p>
         <details className={styles.batchPanel}>
           <summary>Generator obrazów Nexus</summary>

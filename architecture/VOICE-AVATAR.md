@@ -36,14 +36,17 @@ The default Nexus avatar is `public/avatars/nexus-android.mp4`, the accepted
 and checked against the saved SHA256; no new render was performed.
 `public/avatars/nexus-android.png` is its original first-frame poster and
 fallback if video decoding fails. Older working assets remain for rollback. The MP4
-plays muted only during ordinary TTS when conversation-render mode is disabled.
+plays muted in an animated preview when conversation-render mode is disabled.
+Idle motion is enabled by default and can be disabled to move only during TTS.
 Its mouth is not synchronized to arbitrary live replies. Browser-local default-
 avatar preferences can override the built-in image; custom photos and Studio-
 rendered videos retain their existing paths.
 
 ## Per-reply conversation rendering
 
-The default android's voice settings enable a separate batch lip-sync mode.
+The default android's voice settings offer a separate opt-in batch lip-sync mode.
+It is off by default so an unavailable renderer does not freeze the ordinary
+animated preview or prevent local TTS.
 `POST /api/avatar/conversation` accepts the actual current reply and explicit
 cloud consent. The Hub checks `NEXUS_AVATAR_FREE_CONFIRMED=true` and a healthy
 zero-cost EchoMimic worker with supplied-audio support before starting synthesis.

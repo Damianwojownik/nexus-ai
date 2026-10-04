@@ -78,15 +78,17 @@ preview. `public/avatars/nexus-android.mp4` is 768x768, 25 FPS and 3.2 seconds,
 SHA256 `7c3c47c550b44a574a7c0edfa49562d9048c6fd6ec86906f5943b8e2572095fd`.
 Its original first frame is the PNG poster/fallback. This is the accepted
 EchoMimicV3 Flash Pro result, not a new render or a rejected Luna hand test.
-Conversation lip sync is selected separately in voice settings. It synthesizes
+Conversation lip sync is opt-in in voice settings, off by default until a free
+renderer is available. It synthesizes
 the current reply with local Microsoft Paulina as mono 16 kHz PCM, submits
 that exact WAV and the android poster to a verified zero-cost EchoMimic worker,
 then plays a new MP4 with its own audio, once. Browser TTS does not run alongside
 the film. Until a free worker is connected and cloud consent is enabled,
 the reply remains text and a visible error explains the blocker.
 The accepted stock clip is never used as simulated synchronization.
-Disabling this mode restores ordinary TTS with the stock video playing muted
-only during speech; that fallback mode is explicitly not per-reply lip sync.
+Ordinary TTS with the accepted muted stock video is the default. The animated
+preview moves between replies as well; disable idle motion in voice settings
+to animate only during speech. This mode is explicitly not per-reply lip sync.
 Custom photos and Studio videos retain their existing paths.
 
 The main screen contains the avatar and one text/microphone/attachment composer.
