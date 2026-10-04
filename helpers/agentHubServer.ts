@@ -8,6 +8,7 @@ import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts'
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
+import { LocalPhonemeAligner } from './misEngine/phonemeAligner.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -209,6 +210,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
   const avatarServer = new SelfHostedAvatarServerClient();
   const imageServer = new SelfHostedImageServerClient();
   const cloudRouter = new NexusCloudRouter();
+  const misAligner = new LocalPhonemeAligner();
 
   return createServer(async (request, response) => {
     const origin = request.headers.origin;
@@ -276,6 +278,34 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
 
       if (method === 'GET' && url.pathname === '/api/avatar/health') {
         sendJson(response, 200, await avatarServer.health());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/mis/aligner/health') {
+        sendJson(response, 200, await misAligner.health());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/mis/align') {
+        const body = await readJson(request, 48 * 1024 * 1024);
+        const language = requiredString(body, 'language');
+        if (!['pl', 'en', 'de'].includes(language)) {
+          throw new HttpError(400, 'language must be pl, en or de');
+        }
+        const transcript = requiredString(body, 'transcript');
+        const audioBase64 = requiredString(body, 'audioBase64');
+        const phones = await misAligner.align({
+          language: language as 'pl' | 'en' | 'de',
+          transcript,
+          audioBase64,
+          audioMime: typeof body.audioMime === 'string' ? body.audioMime : undefined,
+        });
+        sendJson(response, 200, {
+          experimental: true,
+          source: 'aligned-audio',
+          language,
+          phones,
+        });
         return;
       }
 
