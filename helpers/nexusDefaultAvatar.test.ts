@@ -17,3 +17,11 @@ test('default android has a valid original-frame PNG poster at full resolution',
   assert.equal(poster.readUInt32BE(16), NEXUS_DEFAULT_AVATAR.width);
   assert.equal(poster.readUInt32BE(20), NEXUS_DEFAULT_AVATAR.height);
 });
+
+test('idle blink uses its own verified silent clip, not the talking loop', async () => {
+  assert.notEqual(NEXUS_DEFAULT_AVATAR.idleVideo, NEXUS_DEFAULT_AVATAR.video);
+  const video = await readFile(new URL(`../public${NEXUS_DEFAULT_AVATAR.idleVideo}`, import.meta.url));
+  assert.equal(createHash('sha256').update(video).digest('hex'), NEXUS_DEFAULT_AVATAR.idleSha256);
+  assert.equal(video.toString('ascii', 4, 8), 'ftyp');
+  assert.equal(NEXUS_DEFAULT_AVATAR.idleDurationSeconds, 5.04);
+});

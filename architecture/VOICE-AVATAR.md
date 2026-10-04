@@ -39,6 +39,13 @@ fallback if video decoding fails. Older working assets remain for rollback. The 
 plays muted only during ordinary TTS when conversation-render mode is disabled.
 When speech stops, playback pauses and resets. Idle looping is disabled because
 the stock film contains prerecorded lip movement as well as head movement.
+The separate silent `public/avatars/luna-idle-blink.mp4` now plays in idle
+instead of that talking loop. Its source is a reviewed 3.2-second EchoMimic
+experiment with silent input, audio guidance disabled and seed 7. The model
+closed its eyes without reopening them, so the genuine eyelid motion was
+retimed and reversed for reopening, followed by a neutral hold (5.04 seconds,
+25 FPS, 126 frames, no audio). This is edited generated motion, not a live
+facial rig or painted eyelid overlay. It is not an emotion-specific clip.
 Its mouth is not synchronized to arbitrary live replies. Browser-local default-
 avatar preferences can override the built-in image; custom photos and Studio-
 rendered videos retain their existing paths.
@@ -57,7 +64,7 @@ profiles and their selector are not implemented by this change.
 The conversation prompt asks for contextual warmth, compassion for sadness and
 calm acknowledgement of frustration, without aggression or emotion labels in
 speech. This governs wording, not facial animation. Automatic facial emotion
-selection and reviewed idle/emotion clips are not yet available.
+selection and reviewed sadness/displeasure clips are not yet available.
 
 The default android's voice settings offer a separate opt-in batch lip-sync mode.
 It is off by default so an unavailable renderer does not freeze the ordinary

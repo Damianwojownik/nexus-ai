@@ -1039,7 +1039,7 @@ export default function Home() {
             ? <video ref={conversationVideoRef} autoPlay controls playsInline className={styles.person} src={conversationVideo}
                 onPlay={()=>{setSpeaking(true);setStatus('Luna mówi — audio i ruch ust z tego samego renderu');emitVoiceEvent('SPEAKING','Luna mówi');}}
                 onPause={()=>setSpeaking(false)}
-                onEnded={()=>{cancelSpeech();setSpeaking(false);setStatus('Gotowa do rozmowy');emitVoiceEvent('IDLE','Nexus ready');}}
+                onEnded={()=>{cancelSpeech();setSpeaking(false);setConversationVideo(null);setStatus('Gotowa do rozmowy');emitVoiceEvent('IDLE','Luna ready');}}
                 onError={()=>{cancelSpeech();setSpeaking(false);setAvatarAnimationError('Nie można odtworzyć zsynchronizowanej odpowiedzi. Nie uruchomiono starej animacji ani zastępczego głosu.');}}/>
             : animationVideoUrl
             ? <video autoPlay controls={!isNexus&&!importedVideo} loop={isNexus||!!importedVideo} muted={isNexus||!!importedVideo} playsInline className={styles.person} src={animationVideoUrl} onEnded={()=>setAnimationVideoUrl(null)} onError={()=>{setAnimationVideoUrl(null);setAvatarAnimationError('Nie udało się odtworzyć filmu postaci.');}}/>
@@ -1048,9 +1048,7 @@ export default function Home() {
               : isNexus
                 ? avatarVideoFailed
                   ? <img className={styles.person} src={nexusAvatarSrc} alt="Luna — zapisany portret androidki" onError={()=>setAvatarImageFailed(true)}/>
-                  : conversationLipSync
-                    ? <img className={styles.person} src={nexusAvatarSrc} alt="Luna — androidka oczekująca na zsynchronizowaną odpowiedź" onError={()=>setAvatarImageFailed(true)}/>
-                    : <AvatarSpeechVideo speaking={speaking} className={styles.person} src={NEXUS_DEFAULT_AVATAR.video} poster={nexusAvatarSrc} onError={()=>{setAvatarVideoFailed(true);setAvatarAnimationError('Nie udało się odtworzyć filmu androidki; pokazuję jej zapisany portret.');}}/>
+                  : <AvatarSpeechVideo speaking={speaking&&!conversationLipSync} className={styles.person} src={NEXUS_DEFAULT_AVATAR.video} idleSrc={NEXUS_DEFAULT_AVATAR.idleVideo} poster={nexusAvatarSrc} onError={()=>{setAvatarVideoFailed(true);setAvatarAnimationError('Nie udało się odtworzyć filmu androidki; pokazuję jej zapisany portret.');}}/>
               : <img key={portraitSource} className={styles.person} src={portraitSource} alt={isNexus?'Luna — androidka':customPortrait||defaultAvatarPortrait?'Nexus — zapisany portret postaci':'Luna — androidka'} onError={()=>setAvatarImageFailed(true)}/>}
           {!isNexus&&(!customPortrait||cameraView==='face')&&!avatarImageFailed&&!animationVideoUrl&&(
             <div className={styles.faceRig} aria-hidden="true">
@@ -1121,7 +1119,7 @@ export default function Home() {
           <select id="nexus-speech-language" disabled={listening||isThinking||speaking||speechPreparing} value={language} onChange={event=>{setLanguage(speechLanguage(event.target.value).code);localStorage.setItem('nexus-speech-language',event.target.value);setVoiceURI('');localStorage.removeItem('nexus-speech-voice');}}>
             {SPEECH_LANGUAGES.map(item=><option key={item.code} value={item.code}>{item.label}</option>)}
           </select>
-          <label htmlFor="nexus-speech-voice">Głos Nexusa</label>
+          <label htmlFor="nexus-speech-voice">Głos Luny</label>
           <label><input type="checkbox" checked={conversationLipSync} disabled={speaking||speechPreparing} onChange={event=>{setConversationLipSync(event.target.checked);localStorage.setItem('nexus-conversation-lipsync',String(event.target.checked));cancelSpeech();setSpeaking(false);setSpeechPreparing(false);}}/> Ruch ust do aktualnej odpowiedzi — nowy film EchoMimic w darmowym Colabie</label>
           {conversationLipSync&&<><label><input type="checkbox" checked={conversationConsent} onChange={event=>{setConversationConsent(event.target.checked);localStorage.setItem('nexus-conversation-cloud-consent',String(event.target.checked));if(!event.target.checked){cancelSpeech();setSpeaking(false);setSpeechPreparing(false);}}}/> Zgadzam się wysłać portret androidki, treść odpowiedzi i jej audio do mojego darmowego renderera Colab</label><p className={styles.status}>Ten tryb używa lokalnej Pauliny i jednego filmu z dźwiękiem. Oczekiwanie może trwać kilka minut. Maksymalnie 30 sekund mowy, bez obcinania. Bez kredytów i płatnego fallbacku. Brak renderera pozostawia odpowiedź jako tekst. Wyłączenie tej opcji przywraca zwykły odczyt i starą animację, która nie jest synchronizacją ust.</p></>}
           {speechConfigError&&<p role="alert" className={styles.status}>{speechConfigError}</p>}
@@ -1151,7 +1149,7 @@ export default function Home() {
           {!customPortrait&&defaultAvatarPortrait&&<Button variant="secondary" disabled={avatarRendering||batchBusy} onClick={restoreNexusAvatar}>Przywróć fabrycznego Nexusa</Button>}
           <Button variant="secondary" disabled={avatarRendering||!response.trim()||!cloudRenderReady||!cloudConsent} onClick={()=>void animateAvatar(response)}>{avatarRendering?'Silnik Nexusa renderuje…':'Animuj odpowiedź — silnik Nexusa'}</Button>
         </div>
-        {isNexus&&<p className={styles.status}>{conversationLipSync?'Tryb rozmowy wymaga nowego filmu z głosem aktualnej odpowiedzi. Stary film nie zastępuje synchronizacji ust.':'Androidka animuje się tylko podczas odczytu odpowiedzi. Po zakończeniu lub zatrzymaniu głosu wraca do nieruchomej pierwszej klatki. Film jest wyciszony. To odtwarzanie w czasie mowy, nie synchronizacja ust z poszczególnymi głoskami.'}</p>}
+        {isNexus&&<p className={styles.status}>{conversationLipSync?'Tryb rozmowy wymaga nowego filmu z głosem aktualnej odpowiedzi. Stary film nie zastępuje synchronizacji ust. W oczekiwaniu Luna odtwarza osobną, wyciszoną animację mrugania.':'W ciszy Luna odtwarza osobną animację spokojnego mrugania. Podczas mowy odtwarza wyciszony film mówienia; po niej wraca do animacji oczekiwania. Zwykły film mówienia nie jest synchronizowany z poszczególnymi głoskami.'}</p>}
         <p className={styles.status}>Lokalny render GPU wyłączony. Animacja wymaga własnego serwera Nexusa w chmurze; przycisk wysyła tam zdjęcie i odpowiedź. Bez HeyGen.</p>
         <details className={styles.batchPanel}>
           <summary>Generator obrazów Nexus</summary>

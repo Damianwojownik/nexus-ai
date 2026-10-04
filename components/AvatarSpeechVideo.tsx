@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 
-export function AvatarSpeechVideo({ src, poster, speaking, className, onError }: {
+export function AvatarSpeechVideo({ src, idleSrc, poster, speaking, className, onError }: {
   src: string;
+  idleSrc?: string;
   poster: string;
   speaking: boolean;
   className: string;
@@ -10,13 +11,14 @@ export function AvatarSpeechVideo({ src, poster, speaking, className, onError }:
   const ref = useRef<HTMLVideoElement>(null);
   const errorRef = useRef(onError);
   errorRef.current = onError;
+  const activeSrc = !speaking && idleSrc ? idleSrc : src;
 
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
     let active = true;
     const update = () => {
-      if (speaking) {
+      if (speaking || idleSrc) {
         void video.play().catch(error => {
           if (!active || (error instanceof DOMException && error.name === 'AbortError')) return;
           console.error('Nexus avatar playback failed:', error);
@@ -34,8 +36,8 @@ export function AvatarSpeechVideo({ src, poster, speaking, className, onError }:
       video.removeEventListener('loadeddata', update);
       video.pause();
     };
-  }, [src, speaking]);
+  }, [activeSrc, speaking, idleSrc]);
 
-  return <video ref={ref} loop muted playsInline preload="auto" className={className} src={src} poster={poster}
-    aria-label="Luna — androidka; animacja tylko podczas mowy" onError={onError}/>;
+  return <video ref={ref} loop muted playsInline preload="auto" className={className} src={activeSrc} poster={poster}
+    aria-label={speaking ? 'Luna — animacja podczas mowy' : idleSrc ? 'Luna — spokojne mruganie w ciszy' : 'Luna — androidka; animacja tylko podczas mowy'} onError={onError}/>;
 }
