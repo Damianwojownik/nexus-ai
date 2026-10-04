@@ -1,5 +1,6 @@
 import type { AgentRegistration } from './agentHub.ts';
 import type { AgentEvent, AgentPresence, AgentResult, AgentTask, AgentTaskStatus } from './agentProtocol.ts';
+import type { MisLanguage, PhonemeCue } from './misEngine/types.ts';
 
 export type AgentHubConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
 export type NewAgentHubTask = Pick<AgentTask, 'goal' | 'createdBy' | 'assignedTo' | 'scope'> & { contextRefs?: string[] };
@@ -65,6 +66,22 @@ export class AgentHubClient {
 
   async getAvatarHealth(): Promise<{ status: string; ok: boolean; message?: string; provider?: string; mode?: string }> {
     return this.request('/api/avatar/health');
+  }
+
+  async getMisAlignerHealth(): Promise<{ configured: boolean; ok: boolean; provider?: string; message?: string }> {
+    return this.request('/api/mis/aligner/health');
+  }
+
+  async alignMisSpeech(input: {
+    language: MisLanguage;
+    transcript: string;
+    audioBase64: string;
+    audioMime?: string;
+  }): Promise<{ experimental: boolean; source: 'aligned-audio'; language: MisLanguage; phones: PhonemeCue[] }> {
+    return this.request('/api/mis/align', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   }
 
   async getImageHealth(): Promise<{ status: string; ok: boolean; message?: string; provider?: string; model?: string; mode?: string; device?: string; loaded?: boolean }> {
