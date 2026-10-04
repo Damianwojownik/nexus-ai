@@ -10,7 +10,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test:hub": "node --experimental-strip-types --test helpers/agentHub.test.ts",
     "test:image": "node --experimental-strip-types --test helpers/nexusImageIntent.test.ts",
-    "test:image-hub": "node --experimental-strip-types --test helpers/nexusImageHub.test.ts"
+    "test:image-hub": "node --experimental-strip-types --test helpers/nexusImageHub.test.ts",
+    "test:mis": "node --experimental-strip-types --test helpers/misEngine/misEngine.test.ts"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
