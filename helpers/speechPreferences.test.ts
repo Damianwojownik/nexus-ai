@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFinalSpeechSubmission, matchingVoices, selectSpeechVoice, speechLanguage, speechReplyContext, speechPreview } from './speechPreferences.ts';
+import { createFinalSpeechSubmission, matchingVoices, selectSpeechVoice, speechLanguage, speechReplyContext, speechPreview, SPEECH_LANGUAGES } from './speechPreferences.ts';
+
+test('voice previews introduce Luna and Polish uses feminine self-reference', () => {
+  for (const language of SPEECH_LANGUAGES) {
+    assert.match(speechPreview(language.code), /Luna/);
+    assert.doesNotMatch(speechPreview(language.code), /jestem Nexus|I am Nexus/);
+  }
+  assert.match(speechPreview('pl-PL'), /asystentka Nexus AI.*Jestem gotowa/);
+});
 
 const voices = [
   { voiceURI: 'pl-system', name: 'Paulina', lang: 'pl-PL', localService: true, default: true },

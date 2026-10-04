@@ -45,6 +45,16 @@ rendered videos retain their existing paths.
 
 ## Per-reply conversation rendering
 
+The android assistant introduces herself as Luna, the assistant of Nexus AI.
+Conversation and company agents share this identity and use feminine Polish
+self-reference (for example, "jestem gotowa"). Nexus AI remains the application
+name; Paulina remains the local speech voice, not the assistant's name.
+Voice previews and new Studio greeting text use Luna. Previously rendered
+clips retain their original audio; changing the persona does not rewrite them.
+This is the current Luna persona, not a rule for every future avatar. The
+planned male Nexus persona will use masculine self-reference. Multiple avatar
+profiles and their selector are not implemented by this change.
+
 The default android's voice settings offer a separate opt-in batch lip-sync mode.
 It is off by default so an unavailable renderer does not freeze the ordinary
 animated preview or prevent local TTS.

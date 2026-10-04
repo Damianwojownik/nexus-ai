@@ -42,14 +42,14 @@ export function selectSpeechVoice<T extends VoiceChoice>(voices: T[], language: 
 
 export function speechPreview(code: string): string {
   const samples: Record<string, string> = {
-    'pl-PL': 'Cześć, jestem Nexus. Tak brzmi mój głos.',
-    'en-US': 'Hello, I am Nexus. This is my voice.',
-    'en-GB': 'Hello, I am Nexus. This is my voice.',
-    'de-DE': 'Hallo, ich bin Nexus. So klingt meine Stimme.',
-    'fr-FR': 'Bonjour, je suis Nexus. Voici ma voix.',
-    'es-ES': 'Hola, soy Nexus. Esta es mi voz.',
-    'it-IT': 'Ciao, sono Nexus. Questa è la mia voce.',
-    'uk-UA': 'Привіт, я Nexus. Так звучить мій голос.',
+    'pl-PL': 'Cześć, jestem Luna, asystentka Nexus AI. Jestem gotowa do rozmowy. Tak brzmi mój głos.',
+    'en-US': 'Hello, I am Luna, the Nexus AI assistant. This is my voice.',
+    'en-GB': 'Hello, I am Luna, the Nexus AI assistant. This is my voice.',
+    'de-DE': 'Hallo, ich bin Luna, die Assistentin von Nexus AI. So klingt meine Stimme.',
+    'fr-FR': 'Bonjour, je suis Luna, votre assistante Nexus AI. Voici ma voix.',
+    'es-ES': 'Hola, soy Luna, la asistente de Nexus AI. Esta es mi voz.',
+    'it-IT': 'Ciao, sono Luna, la tua assistente Nexus AI. Questa è la mia voce.',
+    'uk-UA': 'Привіт, я Luna, асистентка Nexus AI. Так звучить мій голос.',
   };
   return samples[speechLanguage(code).code];
 }

@@ -37,5 +37,5 @@ export function AvatarSpeechVideo({ src, poster, speaking, className, onError }:
   }, [src, speaking]);
 
   return <video ref={ref} loop muted playsInline preload="auto" className={className} src={src} poster={poster}
-    aria-label="Nexus — androidka; animacja tylko podczas mowy" onError={onError}/>;
+    aria-label="Luna — androidka; animacja tylko podczas mowy" onError={onError}/>;
 }

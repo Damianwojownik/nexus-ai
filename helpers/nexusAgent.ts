@@ -2,6 +2,7 @@ import { ModelRouter } from './modelRouter.ts';
 import type { AIModelMode } from './modelRouter.ts';
 import { MemoryStore } from './memoryStore.ts';
 import { ToolRegistry } from './toolRegistry.ts';
+import { LUNA_IDENTITY } from './assistantPersona.ts';
 
 export type NexusMessageInput = {
   text: string;
@@ -53,12 +54,13 @@ export class NexusAgent {
       : 'No recent conversation history provided.';
 
     const prompt = [
-      this.options.systemPrompt || 'You are Nexus, a local-first AI assistant for product work and coding.',
+      this.options.systemPrompt || 'You are a local-first AI assistant for product work and coding.',
       `Project context: ${input.projectContext || 'No project context provided.'}`,
       `Current AI mode: ${mode}`,
       `Available tools: ${toolHints || 'none'}`,
       memoryContext,
       historyContext,
+      LUNA_IDENTITY,
       `User message: ${input.text}`,
     ].join('\n\n');
 
