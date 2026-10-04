@@ -8,6 +8,7 @@ import { buildEstimatedPhonemeTimeline } from './phonemeEngine.ts';
 import { selectMisRenderer } from './rendererRegistry.ts';
 import { composeMisFrame } from './runtime.ts';
 import { validateTimeline } from './benchmark.ts';
+import { MisRenderCoordinator } from './renderCoordinator.ts';
 
 test('Polish estimated timeline keeps MBP closure and vowel opening separate', () => {
   const timeline=buildEstimatedPhonemeTimeline('mama','pl');
@@ -86,4 +87,47 @@ test('timeline validator accepts ordered aligned phones', () => {
     {phoneme:'a',startMs:80,endMs:220,confidence:.95,source:'aligned-audio' as const},
   ];
   assert.deepEqual(validateTimeline(timeline),[]);
+});
+
+
+test('quality render uses Codex media engine when configured', async () => {
+  const live={
+    configured:()=>true,
+    render:async()=>({contentType:'video/mp4',data:Buffer.from('live')}),
+  };
+  const quality={
+    configured:()=>true,
+    render:async()=>({contentType:'video/mp4',data:Buffer.from('quality'),engine:'flp+ltx+composite'}),
+  };
+  const coordinator=new MisRenderCoordinator(live,quality);
+  const result=await coordinator.render('quality',{
+    sourceImageBase64:Buffer.from('image').toString('base64'),
+    audioBase64:Buffer.from('audio').toString('base64'),
+  });
+  assert.equal(result.renderer,'nexus-media-flp-ltx');
+  assert.equal(result.fallbackUsed,false);
+  assert.equal(result.data.toString(),'quality');
+});
+
+test('quality render falls back to animal FasterLivePortrait when media engine is unavailable', async () => {
+  let receivedMode:string|undefined;
+  const live={
+    configured:()=>true,
+    render:async(input:{subjectMode?:string})=>{
+      receivedMode=input.subjectMode;
+      return {contentType:'video/mp4',data:Buffer.from('live')};
+    },
+  };
+  const quality={
+    configured:()=>false,
+    render:async()=>{ throw new Error('must not be called'); },
+  };
+  const coordinator=new MisRenderCoordinator(live,quality);
+  const result=await coordinator.render('quality',{
+    sourceImageBase64:Buffer.from('image').toString('base64'),
+    audioBase64:Buffer.from('audio').toString('base64'),
+  });
+  assert.equal(result.renderer,'faster-liveportrait');
+  assert.equal(result.fallbackUsed,true);
+  assert.equal(receivedMode,'animal');
 });
