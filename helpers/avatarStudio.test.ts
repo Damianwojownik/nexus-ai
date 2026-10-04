@@ -13,7 +13,8 @@ test('studio reports progress and returns only a same-Hub video', async () => {
   assert.deepEqual(progress, [1, 2]);
 });
 test('studio rejects failed, stalled and unsafe renders and respects cancellation', async () => {
-  for (const result of [{ status: 'error', error: 'render failed' }, { status: 'complete', videoUrl: 'https://example.com/video' }, { status: 'complete' }, { status: 'unknown' }]) {
+  for (const result of [{ status: 'error', error: 'render failed' }, { status: 'complete', videoUrl: 'https://example.com/video' },
+    { status: 'complete', videoUrl: '/api/avatar/video/previous-reply' }, { status: 'complete' }, { status: 'unknown' }]) {
     await assert.rejects(waitForAvatarVideo('http://127.0.0.1:8788', 'test', {
       signal: new AbortController().signal, onProgress: () => {}, fetcher: async () => Response.json(result),
     }));

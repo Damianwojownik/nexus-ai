@@ -72,12 +72,33 @@ On Windows, `scripts\start-nexus-windows.bat` starts or reuses the Hub, UI and i
 
 ### Own avatar presentation
 
-The default Nexus cyborg uses a 4.04-second Colab LTX image-to-video clip as a
-muted, looping avatar, with the selected Nexus TTS voice speaking replies
-separately. Its prompt requests a subtle curl of the outstretched index finger;
-generated limb motion is probabilistic and must be reviewed in the rendered
-clip. The clip's mouth motion is not synchronized to arbitrary live replies.
+The default Nexus avatar is the user-approved android face video
+`android-face-test-9ebe69ed`, recovered byte-for-byte from the preserved Colab
+preview. `public/avatars/nexus-android.mp4` is 768x768, 25 FPS and 3.2 seconds,
+SHA256 `7c3c47c550b44a574a7c0edfa49562d9048c6fd6ec86906f5943b8e2572095fd`.
+Its original first frame is the PNG poster/fallback. This is the accepted
+EchoMimicV3 Flash Pro result, not a new render or a rejected Luna hand test.
+Conversation lip sync is selected separately in voice settings. It synthesizes
+the current reply with local Microsoft Paulina as mono 16 kHz PCM, submits
+that exact WAV and the android poster to a verified zero-cost EchoMimic worker,
+then plays a new MP4 with its own audio, once. Browser TTS does not run alongside
+the film. Until a free worker is connected and cloud consent is enabled,
+the reply remains text and a visible error explains the blocker.
+The accepted stock clip is never used as simulated synchronization.
+Disabling this mode restores ordinary TTS with the stock video playing muted
+only during speech; that fallback mode is explicitly not per-reply lip sync.
 Custom photos and Studio videos retain their existing paths.
+
+The main screen contains the avatar and one text/microphone/attachment composer.
+The gear opens a modal containing existing settings, Studio, tools and company
+configuration. Image/avatar/website requests ask only for missing task inputs.
+Website generation produces a local static HTML preview/download, sandboxed
+with scripts, external requests and form submission disabled; it does not
+publish, host a shop or process payments.
+The website workflow is experimental: CPU smoke attempts at 1024 and 512
+output tokens exceeded the local provider deadline. They returned an error,
+not a successful preview. Parser/HTML-sandbox tests pass, but a real generated
+website has not yet been verified on this machine.
 
 Image generation can be started by voice or text with `Wygeneruj mi [opis]`,
 for example `Wygeneruj mi cybernetycznego Nexusa w zielonej matrycy`. Keep the
@@ -106,7 +127,7 @@ The Hub can route chat through official globally installed Codex, Copilot and Cl
 - The main screen has one composer for text, attachments and spoken commands; film controls are grouped in the collapsible Studio and advanced speech/browser controls remain in settings. `Ustaw awatara z tego zdjęcia` imports an attached image as a portrait, not a reconstructed 3D model. `Animuj awatara: text` uses the configured cloud renderer only after Studio consent and reports failures; the Colab file bridge remains available in Studio.
 - `Wygeneruj obraz: description` uses the Nexus Image Engine through the server-side Agent Hub, then shows a PNG preview with download and save-as-default-avatar actions. Studio also generates a portrait and can set it as the default avatar for that browser profile. Engine URL and token stay in the Agent Hub environment; the Colab tunnel is temporary. Saving the browser preference does not replace the shared static asset or deploy a Floot project update.
 - Microphone input requests permission, enumerates audio inputs and refreshes on device changes. Web Speech uses the system/browser default input, not a selectable stream; the final recognized utterance executes immediately and once through the same command handler as text, without waiting for recognition `onend`. Unsupported recognition, denied permission and service/network failures are displayed explicitly. Web Speech may send audio to its recognition provider. This is single-command dictation, not verified continuous live conversation.
-- Advanced settings include Polish, US/UK English, German, French, Spanish, Italian and Ukrainian for recognition, reply language and TTS. Choose any matching voice reported by the browser or use automatic selection, which prefers natural/online voices when available. Language/voice preferences persist locally. Online voices may send reply text to their provider; no paid TTS service is configured. The default speed is 1.0. Ordinary replies are requested concisely and the UI no longer performs a redundant provider health request before the model router's own check. Model startup/network latency still applies; responses are not guaranteed instant.
+- Advanced settings include Polish, US/UK English, German, French, Spanish, Italian and Ukrainian for recognition, reply language and TTS. Automatic Polish speech for the default android selects local female Microsoft Paulina, never male/online fallback. Explicit manual voice choices remain available for ordinary TTS; synchronized conversation currently requires Polish Paulina. Language/voice preferences persist locally. Online voices may send reply text to their provider; no paid TTS service is configured. The default speed is 1.0. Ordinary replies are requested concisely. Model startup/network latency still applies; responses are not guaranteed instant.
 - Speech prefers the exact regional language when available and never silently substitutes another language's voice. If no matching voice is installed, the text reply remains available with a clear notice. Each language has a native-language preview; the persistent read-aloud checkbox mutes speech. During playback, `Zatrzymaj odczyt` stops the current utterance. Sending a new message cancels old speech, and late callbacks from canceled utterances or submitted recognition sessions cannot overwrite the current conversation state.
 - Optional downloaded Polish voice: run `powershell -ExecutionPolicy Bypass -File scripts\install-nexus-voice.ps1`. This installs pinned Piper in `%LOCALAPPDATA%\NexusAI\speech\venv`, downloads `pl_PL-darkman-medium` (~63 MB, dataset CC0) and retains its model card. Piper's runtime is GPL-3.0-or-later; see the upstream package license. The Hub uses CPUExecutionProvider only and two inference threads. The local worker stays warm for five minutes, then releases memory; first-load latency is higher. Polish automatic voice selection uses Piper when installed; explicit browser voice choices are preserved. Speech text is limited to 6000 characters and WAV output to 24 MB. No local GPU, cloud text upload or paid API is involved. The Clipchamp/CapCut shortcuts are separate video editors, not downloadable voice providers for Nexus.
 - `Studio awatara` groups photo selection, a 1-300 character script, selected-voice preview, Polish Piper WAV download, cloud render status/consent, Colab JSON export and MP4 import/replay. Downloaded WAV is separate audio; it is not automatically muxed or used by the cloud renderer, whose own voice settings apply. Automatic rendering requires the existing server-only cloud configuration plus explicit photo/script consent; configured does not mean verified online. Polling has a five-minute deadline and can be stopped, but stopping the wait does not cancel a remote render. Imported/generated results can be reopened and saved; they are not a persistent video library and editing the script does not change an existing MP4. HeyGen is a workflow reference only, not an integrated backend or a guarantee of comparable animation quality. The Colab file workflow is now in Studio, not advanced settings.

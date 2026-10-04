@@ -26,12 +26,16 @@ export function matchingVoices<T extends VoiceChoice>(voices: T[], language: str
   return voices.filter(voice => voice.lang.toLowerCase().split('-')[0] === prefix);
 }
 
-export function selectSpeechVoice<T extends VoiceChoice>(voices: T[], language: string, selectedURI: string): T | undefined {
+export function selectSpeechVoice<T extends VoiceChoice>(voices: T[], language: string, selectedURI: string, options: { localFemalePolish?: boolean } = {}): T | undefined {
   const matches = matchingVoices(voices, language);
   const exact = matches.filter(voice => voice.lang.toLowerCase() === language.toLowerCase());
   const preferred = exact.length ? exact : matches;
-  return matches.find(voice => voice.voiceURI === selectedURI)
-    ?? preferred.find(voice => /natural|neural|online/i.test(voice.name))
+  const selected = matches.find(voice => voice.voiceURI === selectedURI);
+  if (selected) return selected;
+  if (options.localFemalePolish && language === 'pl-PL') {
+    return exact.find(voice => voice.localService && /\bPaulina\b/i.test(voice.name));
+  }
+  return preferred.find(voice => /natural|neural|online/i.test(voice.name))
     ?? preferred.find(voice => voice.default)
     ?? preferred[0];
 }

@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -10,6 +11,7 @@ import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
+import { assertFreeConversationWorker, conversationAudio, synthesizeConversationSpeech } from './conversationSpeech.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
 import { AIProviderRouter, AIProviderUnavailableError } from './aiProviderRouter.ts';
@@ -494,6 +496,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
           provider: 'nexus-cloud',
           localRenderingEnabled: false,
           configured: !!process.env.NEXUS_AVATAR_SERVER_URL && !!process.env.NEXUS_AVATAR_SERVER_TOKEN,
+          conversationFreeConfirmed: process.env.NEXUS_AVATAR_FREE_CONFIRMED === 'true',
         });
         return;
       }
@@ -525,6 +528,49 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         const jobId = randomUUID();
         avatarJobs.set(jobId, { videoId });
         sendJson(response, 202, { jobId, status: 'processing' });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/avatar/conversation') {
+        if (origin && !isLoopbackOrigin(origin)) throw new HttpError(403, 'Conversation rendering requires the local Nexus frontend');
+        const body = await readJson(request, 64 * 1024);
+        if (body.cloudConsent !== true) throw new HttpError(400, 'Consent to send the portrait, reply and audio to your free Colab renderer is required');
+        if (process.env.NEXUS_AVATAR_FREE_CONFIRMED !== 'true') throw new HttpError(403, 'FREE MODE: Confirm a genuinely free Colab worker; no render was started');
+        const endpoint = process.env.NEXUS_AVATAR_SERVER_URL;
+        const token = process.env.NEXUS_AVATAR_SERVER_TOKEN;
+        if (!endpoint || !token) throw new HttpError(503, 'Free Colab conversation renderer is not connected. No old video will be used as lip sync.');
+        const renderer = new URL(endpoint);
+        if (renderer.protocol !== 'https:' || renderer.username || renderer.password || renderer.search || renderer.hash) {
+          throw new HttpError(503, 'Conversation worker requires a credential-free HTTPS URL');
+        }
+        const healthResponse = await fetch(new URL('/health', renderer), {
+          headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(5000),
+        });
+        if (!healthResponse.ok) throw new HttpError(503, `Conversation worker health HTTP ${healthResponse.status}`);
+        const health: unknown = await healthResponse.json();
+        try { assertFreeConversationWorker(health); }
+        catch (error) { throw new HttpError(503, error instanceof Error ? error.message : 'Invalid conversation worker'); }
+        const text = requiredString(body, 'text');
+        if (text.length > 5000) throw new HttpError(413, 'Reply is too long for conversation audio');
+        const controller = new AbortController();
+        const cancel = () => { if (!response.writableEnded) controller.abort(); };
+        request.once('aborted', cancel);
+        response.once('close', cancel);
+        try {
+          const image = await readFile(fileURLToPath(new URL('../public/avatars/nexus-android.png', import.meta.url)));
+          const audio = await synthesizeConversationSpeech(text, controller.signal);
+          controller.signal.throwIfAborted();
+          const audioInfo = conversationAudio(audio);
+          const videoId = await new RemoteAvatar(endpoint, token).generate(image, 'image/png', text, audio, controller.signal);
+          controller.signal.throwIfAborted();
+          const jobId = randomUUID();
+          avatarJobs.set(jobId, { videoId });
+          sendJson(response, 202, { jobId, status: 'processing', voice: 'Microsoft Paulina', audioSha256: audioInfo.sha256,
+            durationSeconds: audioInfo.durationSeconds, engine: 'echomimic-v3' });
+        } finally {
+          request.off('aborted', cancel);
+          response.off('close', cancel);
+        }
         return;
       }
 

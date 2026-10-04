@@ -17,7 +17,8 @@ export class RemoteAvatar {
     const response = await this.request(new URL(path, this.base), {
       ...init,
       headers: { ...init.headers, Authorization: `Bearer ${this.token}` },
-      signal: AbortSignal.timeout(60_000),
+      redirect: 'error',
+      signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
     });
     if (!response.ok) throw new Error(`Nexus avatar server: HTTP ${response.status}`);
     const value: unknown = await response.json();
@@ -25,11 +26,13 @@ export class RemoteAvatar {
     return value as Record<string, unknown>;
   }
 
-  async generate(image: Uint8Array, mime: 'image/png' | 'image/jpeg', text: string): Promise<string> {
+  async generate(image: Uint8Array, mime: 'image/png' | 'image/jpeg', text: string, audio?: Uint8Array, signal?: AbortSignal): Promise<string> {
     const value = await this.call('jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: Buffer.from(image).toString('base64'), mime, text }),
+      signal,
+      body: JSON.stringify({ image: Buffer.from(image).toString('base64'), mime, text,
+        ...(audio ? { audio: Buffer.from(audio).toString('base64'), audioMime: 'audio/wav' } : {}) }),
     });
     if (typeof value.jobId !== 'string' || !/^[a-f0-9-]{36}$/.test(value.jobId)) throw new Error('Invalid remote avatar job ID');
     return value.jobId;
@@ -45,6 +48,7 @@ export class RemoteAvatar {
   async video(jobId: string): Promise<Response> {
     const response = await this.request(new URL(`jobs/${encodeURIComponent(jobId)}/video`, this.base), {
       headers: { Authorization: `Bearer ${this.token}` }, signal: AbortSignal.timeout(60_000),
+      redirect: 'error',
     });
     if (!response.ok || !response.headers.get('content-type')?.startsWith('video/mp4')) {
       throw new Error(`Could not download remote avatar video: HTTP ${response.status}`);

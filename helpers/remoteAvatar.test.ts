@@ -29,6 +29,19 @@ test('Remote errors never cause local rendering; insecure configuration is rejec
   assert.equal(calls, 1);
 });
 
+test('conversation render uploads the exact supplied WAV and refuses redirect following', async () => {
+  const audio = new Uint8Array([10, 20, 30]);
+  const client = new RemoteAvatar('https://avatar.example', 'test-token', async (_input, init) => {
+    const payload = JSON.parse(String(init?.body));
+    assert.equal(payload.text, 'Current reply');
+    assert.equal(payload.audio, Buffer.from(audio).toString('base64'));
+    assert.equal(payload.audioMime, 'audio/wav');
+    assert.equal(init?.redirect, 'error');
+    return Response.json({ jobId: '00000000-0000-4000-8000-000000000001' });
+  });
+  await client.generate(new Uint8Array([1]), 'image/png', 'Current reply', audio);
+});
+
 test('Avatar API disables local GPU and advertises the own cloud engine', async () => {
   const server = createAgentHubServer(new AgentHub());
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

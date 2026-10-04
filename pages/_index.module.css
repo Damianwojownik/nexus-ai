@@ -71,3 +71,12 @@
 .batchPanel textarea{box-sizing:border-box;width:100%;margin-top:6px;padding:10px;background:var(--background);color:var(--foreground);border:1px solid var(--border);border-radius:8px;font:inherit;resize:vertical}
 .batchPanel fieldset{border:0;padding:0;margin:0;min-width:0}
 .batchPanel fieldset input{box-sizing:border-box;width:100%;margin-top:6px}
+.settingsDialog{background:var(--background);color:var(--foreground);border:1px solid var(--border);border-radius:18px;width:min(780px,calc(100vw - 32px));max-height:85vh;padding:0;box-sizing:border-box;box-shadow:0 24px 80px rgba(0,0,0,.65)}
+.settingsDialog::backdrop{background:rgba(0,0,0,.7);backdrop-filter:blur(5px)}
+.settingsDialogHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border)}
+.settingsDialogHeader h2{font:600 20px var(--font-family-display);margin:0}
+.settingsDialogBody{padding:8px 20px 20px;display:grid;gap:8px}
+.settingsDialogBody .batchPanel{box-sizing:border-box;width:100%}
+.websitePreview{margin-top:14px;width:min(900px,100%);display:grid;gap:10px}
+.websitePreview iframe{width:100%;height:440px;border:1px solid var(--border);border-radius:12px;background:white}
+.websitePreview a{color:var(--primary);font-size:14px}

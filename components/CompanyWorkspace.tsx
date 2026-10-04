@@ -60,7 +60,7 @@ export function CompanyWorkspace({ profile, disabled, onChange }: {
     }
   };
 
-  return <details className={styles.batchPanel} open={!profile}>
+  return <details className={styles.batchPanel}>
     <summary>Firma i cele — {profile?.name ?? 'skonfiguruj niezaleznego Nexusa'}</summary>
     <p>Podaj firme, adres strony i cel. Kazdy zapis tworzy nowa, pusta pamiec firmy bez historii Ezostylii. Profil jest zapisany tylko w tej przegladarce, nie w chmurze.</p>
     <form onSubmit={save}>

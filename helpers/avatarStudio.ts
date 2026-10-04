@@ -1,3 +1,23 @@
+export async function requestConversationVideo(
+  baseUrl: string, text: string, cloudConsent: boolean,
+  options: { signal: AbortSignal; onProgress: (attempt: number) => void; fetcher?: typeof fetch; intervalMs?: number },
+): Promise<string> {
+  if (!cloudConsent) throw new Error('Włącz zgodę na darmowy Colab w ustawieniach głosu. Nie wysłano danych.');
+  if (!text.trim() || text.length > 5000) throw new Error('Odpowiedź wymaga od 1 do 5000 znaków.');
+  options.signal.throwIfAborted();
+  const fetcher = options.fetcher ?? fetch;
+  const response = await fetcher(`${baseUrl}/api/avatar/conversation`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, cloudConsent }), signal: options.signal,
+  });
+  const job: unknown = await response.json();
+  if (!response.ok) throw new Error(job && typeof job === 'object' && 'error' in job && typeof job.error === 'string'
+    ? job.error : `Synchronizacja rozmowy: HTTP ${response.status}`);
+  if (!job || typeof job !== 'object' || !('jobId' in job) || typeof job.jobId !== 'string'
+    || !/^[a-f0-9-]{36}$/.test(job.jobId)) throw new Error('Brak poprawnego zadania synchronizacji rozmowy.');
+  return waitForAvatarVideo(baseUrl, job.jobId, { ...options, fetcher, maxAttempts: 900 });
+}
+
 export async function waitForAvatarVideo(
   baseUrl: string,
   jobId: string,
@@ -17,7 +37,8 @@ export async function waitForAvatarVideo(
     if (result.status === 'complete') {
       if (!('videoUrl' in result) || typeof result.videoUrl !== 'string') throw new Error('Brak adresu gotowego filmu.');
       const video = new URL(result.videoUrl, baseUrl);
-      if (video.origin !== new URL(baseUrl).origin || !video.pathname.startsWith('/api/avatar/video/') || video.username || video.password) {
+      if (video.origin !== new URL(baseUrl).origin || video.pathname !== `/api/avatar/video/${encodeURIComponent(jobId)}`
+        || video.search || video.hash || video.username || video.password) {
         throw new Error('Silnik zwrócił niedozwolony adres filmu.');
       }
       return video.toString();

@@ -1,5 +1,32 @@
 # Own Nexus avatar engine
 
+## Supplied conversation audio
+
+The authenticated worker also accepts `audio` (base64 WAV) and
+`audioMime: "audio/wav"` with the existing `image`, `mime`, `text` job payload.
+It validates mono 16 kHz, 16-bit PCM lasting 0.2-30 seconds and saves the supplied
+bytes as `speech.wav`, never synthesizing a replacement voice. Set
+`NEXUS_AVATAR_ENGINE=echomimic-v3`, `NEXUS_NOSI_DIR` and
+`NEXUS_RENDER_PYTHON_ECHOMIMIC_V3` to the verified isolated environment.
+The EchoMimic worker listens on loopback, for an authenticated HTTPS reverse
+proxy on an authorized host. Existing text-only JoyVASA jobs remain unchanged.
+Selecting an incompatible engine for supplied audio fails explicitly.
+
+The local Hub requires server-only `NEXUS_AVATAR_SERVER_URL`,
+`NEXUS_AVATAR_SERVER_TOKEN`, and `NEXUS_AVATAR_FREE_CONFIRMED=true`.
+Only confirm after independently verifying no credits, subscription or paid
+compute are consumed. The worker reports zero cost only with
+`NEXUS_FREE_MODE=true`; this configuration assertion is not a billing audit.
+The Hub rejects unknown/nonzero cost or missing supplied-audio capability.
+Tokens never enter browser bundles, notebooks committed to Git, or logs.
+
+Do not expose a free Colab runtime as a persistent remote service or bypass its
+notebook UI restrictions. Use an authorized zero-cost host for automatic jobs;
+ordinary Colab file-based rendering remains a manual notebook workflow.
+The currently shared Colab Pro L4 session reports compute-unit usage and is
+not a verified free rendering backend. No new conversation render has been
+validated there under FREE constraints.
+
 ## Experimental EchoMimicV3 / nosi adapter
 
 `nexus_render_engine.py` accepts `echomimic-v3` in its existing sequential

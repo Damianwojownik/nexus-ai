@@ -1,5 +1,7 @@
 import base64
 import json
+import io
+import wave
 from pathlib import Path
 import tempfile
 import threading
@@ -7,7 +9,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
-from worker import Jobs, make_server, validate_job
+from worker import Jobs, make_server, validate_job, validate_job_audio
 
 
 class WorkerTests(unittest.TestCase):
@@ -19,6 +21,28 @@ class WorkerTests(unittest.TestCase):
         for change in ({"text": ""}, {"text": "a" * 5001}, {"image": "!!!"}, {"mime": "image/jpeg"}):
             with self.assertRaises(ValueError):
                 validate_job({**self.payload(), **change})
+
+    def test_conversation_preserves_exact_wav_and_rejects_invalid_audio(self):
+        stream = io.BytesIO()
+        with wave.open(stream, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x01\x00" * 16000)
+        original = stream.getvalue()
+        payload = {**self.payload(), "audio": base64.b64encode(original).decode(), "audioMime": "audio/wav"}
+        self.assertEqual(validate_job_audio(payload), original)
+        with tempfile.TemporaryDirectory() as root:
+            def renderer(directory):
+                self.assertEqual((directory / "speech.wav").read_bytes(), original)
+                (directory / "video.mp4").write_bytes(b"TEST_VIDEO")
+            jobs = Jobs(root, renderer)
+            job_id = jobs.submit(payload)
+            jobs.pending.join()
+            self.assertEqual(jobs.get(job_id)["status"], "complete")
+        for change in ({"audio": "!!!"}, {"audioMime": "audio/mp3"}, {"audio": base64.b64encode(original[:100]).decode()}):
+            with self.assertRaises(ValueError):
+                validate_job_audio({**payload, **change})
 
     def test_server_auth_job_and_video_without_inference(self):
         with tempfile.TemporaryDirectory() as root:

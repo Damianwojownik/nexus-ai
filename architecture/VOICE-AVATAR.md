@@ -30,15 +30,43 @@ Browser SpeechSynthesis and Web Speech can remain the zero-cost MVP where suppor
 
 Local FasterLivePortrait rendering is disabled in the Agent Hub: the avatar API never starts Python, CUDA or a local inference process. This prevents avatar rendering from competing for GPU memory on the desktop. Browser portrait display, lightweight CSS motion and speech synthesis remain available; they are not generative lip sync.
 
-The built-in Nexus image is `public/avatars/nexus-boy.png`; its default
-presentation is `public/avatars/nexus-speaking.mp4`, a 4.04-second Colab LTX
-image-to-video clip. Its motion prompt requests a subtle curl of the
-outstretched index finger while preserving the character and framing. Generated
-limb motion is probabilistic and must be reviewed in the rendered clip. The MP4
-loops muted so its prerecorded speech does not repeat over live Nexus TTS; its
-mouth is not synchronized to arbitrary live replies. Browser-local default-
+The default Nexus avatar is `public/avatars/nexus-android.mp4`, the accepted
+`android-face-test-9ebe69ed` EchoMimicV3 Flash Pro result (768x768, 25 FPS,
+3.2 seconds). The exact video was recovered from its embedded Colab preview
+and checked against the saved SHA256; no new render was performed.
+`public/avatars/nexus-android.png` is its original first-frame poster and
+fallback if video decoding fails. Older working assets remain for rollback. The MP4
+plays muted only during ordinary TTS when conversation-render mode is disabled.
+Its mouth is not synchronized to arbitrary live replies. Browser-local default-
 avatar preferences can override the built-in image; custom photos and Studio-
 rendered videos retain their existing paths.
+
+## Per-reply conversation rendering
+
+The default android's voice settings enable a separate batch lip-sync mode.
+`POST /api/avatar/conversation` accepts the actual current reply and explicit
+cloud consent. The Hub checks `NEXUS_AVATAR_FREE_CONFIRMED=true` and a healthy
+zero-cost EchoMimic worker with supplied-audio support before starting synthesis.
+Windows SAPI Microsoft Paulina generates mono 16 kHz, 16-bit PCM locally.
+The exact WAV is hashed and uploaded with the approved android poster; the
+worker preserves it byte-for-byte and invokes the existing EchoMimic adapter.
+Its MP4 muxes that same audio. Playback is unmuted, non-looping and exclusive:
+no second browser utterance or prerecorded stock animation runs alongside it.
+The player has controls for browsers that block delayed audible autoplay.
+
+This is batch rendering, not real-time streaming. Audio must last 0.2-30 seconds;
+long replies fail visibly rather than being truncated or silently reworded.
+Stop/replacement aborts local synthesis and polling, pauses video and prevents
+late results taking over; a job already submitted to the cloud may still finish.
+Missing consent, voice, free configuration, renderer or playback leaves the
+reply readable as text with an error, not a simulated lip-sync success.
+Older voice/video behavior is available by disabling this setting.
+
+Current validation proves actual local Paulina WAV synthesis, audio preservation,
+FREE blocking, polling and build. It does NOT prove a new rendered conversation
+or visual lip-sync accuracy. The shared Colab L4 session reports compute-unit
+consumption, so no new inference was started there. Do not set the free-confirmed
+flag merely to bypass this restriction.
 
 The avatar studio exports the notebook-compatible
 `nexus-ai-avatar-job.json`, links to the existing Colab notebook, and imports

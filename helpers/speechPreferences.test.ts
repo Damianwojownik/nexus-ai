@@ -29,3 +29,15 @@ test('final transcript submits immediately and only once without waiting for one
   assert.equal(submit('later onend'), false);
   assert.deepEqual(submitted, ['hello']);
 });
+
+test('android automatic voice is local female Paulina, not male Piper/Adam or online TTS', () => {
+  const localVoices = [
+    { ...voices[0], voiceURI: 'adam', name: 'Microsoft Adam - Polish (Poland)', default: true },
+    { ...voices[0], voiceURI: 'paulina', name: 'Microsoft Paulina - Polish (Poland)', default: false },
+    voices[1],
+  ];
+  assert.equal(selectSpeechVoice(localVoices, 'pl-PL', '', { localFemalePolish: true })?.voiceURI, 'paulina');
+  assert.equal(selectSpeechVoice(localVoices, 'pl-PL', 'adam', { localFemalePolish: true })?.voiceURI, 'adam');
+  assert.equal(selectSpeechVoice([localVoices[0], voices[1]], 'pl-PL', '', { localFemalePolish: true }), undefined);
+  assert.equal(selectSpeechVoice([{ ...localVoices[1], localService: false }], 'pl-PL', '', { localFemalePolish: true }), undefined);
+});

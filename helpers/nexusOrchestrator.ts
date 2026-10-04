@@ -43,6 +43,7 @@ export interface NexusWorkflowInput {
   attachments?: File[];
   onToken?: (chunk: string) => void;
   compressContext?: boolean;
+  maxOutputTokens?: number;
 }
 
 export interface NexusGeneratedImage {
@@ -474,6 +475,7 @@ export class NexusOrchestrator {
           projectContext,
           history: input.history,
           onToken: input.onToken,
+          maxOutputTokens: input.maxOutputTokens,
         })).text;
       if (!responseText.trim()) throw new Error('Nexus nie otrzymał odpowiedzi od dostępnego modelu');
 

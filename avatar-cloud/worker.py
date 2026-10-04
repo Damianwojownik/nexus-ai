@@ -13,10 +13,35 @@ import sys
 import threading
 import time
 import uuid
+import io
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_BODY = 8 * 1024 * 1024
 TTL = 3600
+
+
+def validate_job_audio(value):
+    if "audio" not in value:
+        return None
+    if value.get("audioMime") != "audio/wav":
+        raise ValueError("Conversation audio must be WAV")
+    try:
+        audio = base64.b64decode(value["audio"], validate=True)
+        if len(audio) > 1024 * 1024:
+            raise ValueError("Audio exceeds 1 MB")
+        with wave.open(io.BytesIO(audio), "rb") as source:
+            if (source.getnchannels(), source.getframerate(), source.getsampwidth(), source.getcomptype()) != (1, 16000, 2, "NONE"):
+                raise ValueError("Conversation audio requires mono 16000 Hz 16-bit PCM")
+            duration = source.getnframes() / 16000
+            if not 0.2 <= duration <= 30:
+                raise ValueError("Speech must be 0.2-30 seconds; it is never truncated")
+            samples = source.readframes(source.getnframes())
+            if len(samples) != source.getnframes() * 2 or not any(samples):
+                raise ValueError("Speech is truncated or silent")
+    except (binascii.Error, TypeError, wave.Error, EOFError) as error:
+        raise ValueError("Invalid conversation WAV") from error
+    return audio
 
 
 def validate_job(value):
@@ -52,6 +77,7 @@ class Jobs:
 
     def submit(self, value):
         image, extension, text = validate_job(value)
+        audio = validate_job_audio(value)
         with self.lock:
             self.cleanup()
             if self.pending.full():
@@ -62,6 +88,8 @@ class Jobs:
             portrait = directory / ("portrait" + extension)
             portrait.write_bytes(image)
             (directory / "script.txt").write_text(text, encoding="utf-8")
+            if audio is not None:
+                (directory / "speech.wav").write_bytes(audio)
             self.jobs[job_id] = {"status": "processing", "created": time.time()}
             self.pending.put_nowait(job_id)
         return job_id
@@ -97,9 +125,19 @@ class Jobs:
 
 
 def render(directory):
+    engine = os.environ.get("NEXUS_AVATAR_ENGINE", "liveportrait-joyvasa")
+    adapter = "render.py"
+    python = sys.executable
+    if engine == "echomimic-v3":
+        if not (directory / "speech.wav").is_file():
+            raise ValueError("EchoMimic conversation requires supplied speech.wav; no replacement TTS")
+        adapter = "render_echomimic.py"
+        python = os.environ.get("NEXUS_RENDER_PYTHON_ECHOMIMIC_V3", sys.executable)
+    elif (directory / "speech.wav").is_file():
+        raise ValueError("Selected renderer does not preserve supplied conversation audio")
     with (directory / "render.log").open("w", encoding="utf-8") as log:
         subprocess.run(
-            [sys.executable, str(Path(__file__).with_name("render.py")), str(directory)],
+            [python, str(Path(__file__).with_name(adapter)), str(directory)],
             stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1800,
         )
 
@@ -146,7 +184,8 @@ def make_server(host, port, token, jobs, engine="liveportrait-joyvasa"):
             if not self.authorized():
                 return
             if self.path == "/health":
-                self.json(200, {"ok": True, "engine": engine, "mode": "batch"})
+                self.json(200, {"ok": True, "engine": engine, "mode": "batch",
+                    **({"suppliedAudio": True, "cost": 0} if engine == "echomimic-v3" and os.environ.get("NEXUS_FREE_MODE") == "true" else {})})
                 return
             parts = self.path.strip("/").split("/")
             if len(parts) not in (2, 3) or parts[0] != "jobs":
@@ -190,4 +229,6 @@ if __name__ == "__main__":
         raise SystemExit("Configure a random NEXUS_AVATAR_SERVER_TOKEN of at least 32 characters")
     logging.basicConfig(level=logging.INFO)
     jobs = Jobs(os.environ.get("NEXUS_JOB_DIR", "/data/jobs"), render)
-    make_server("0.0.0.0", 8000, token, jobs).serve_forever()
+    engine = os.environ.get("NEXUS_AVATAR_ENGINE", "liveportrait-joyvasa")
+    make_server("127.0.0.1" if engine == "echomimic-v3" else "0.0.0.0",
+                8000, token, jobs, engine=engine).serve_forever()

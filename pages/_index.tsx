@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mic, Sparkles, Code2, Brain, Send, Volume2, MessageCircle, ListChecks, Wrench, FolderKanban, Plus } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Mic, Sparkles, Code2, Brain, Send, Volume2, MessageCircle, ListChecks, Wrench, FolderKanban, Plus, Settings, X } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import styles from './_index.module.css';
@@ -30,7 +31,11 @@ import { createAvatarBatchRequest, validateAvatarVideoFile } from '../helpers/av
 import { parseCreationCommand } from '../helpers/creationCommand';
 import { generateNexusImage } from '../helpers/nexusImageGenerator';
 import { SPEECH_LANGUAGES, speechLanguage, matchingVoices, selectSpeechVoice, speechReplyContext, speechPreview, createFinalSpeechSubmission } from '../helpers/speechPreferences';
-import { waitForAvatarVideo, requestPolishAudio } from '../helpers/avatarStudio';
+import { waitForAvatarVideo, requestPolishAudio, requestConversationVideo } from '../helpers/avatarStudio';
+import { NEXUS_DEFAULT_AVATAR } from '../helpers/nexusDefaultAvatar';
+import { AvatarSpeechVideo } from '../components/AvatarSpeechVideo';
+import { advanceCreation, creationQuestion, websiteDocument, websitePrompt } from '../helpers/creationFlow';
+import type { CreationFlow } from '../helpers/creationFlow';
 
 const ollamaClient = new OllamaClient();
 const memoryStore = new MemoryStore();
@@ -73,7 +78,7 @@ async function uploadAvatarPortrait(portraitData: string, signal?:AbortSignal): 
 }
 
 export default function Home() {
-  const nexusAvatarSrc='/avatars/nexus-boy.png';
+  const nexusAvatarSrc=NEXUS_DEFAULT_AVATAR.portrait;
   const [prompt,setPrompt]=useState('');
   const [status,setStatus]=useState('Gotowa do rozmowy');
   const [listening,setListening]=useState(false);
@@ -88,6 +93,11 @@ export default function Home() {
   const [avatarAnimationError,setAvatarAnimationError]=useState('');
   const [avatarRendering,setAvatarRendering]=useState(false);
   const [avatarImageFailed,setAvatarImageFailed]=useState(false);
+  const [avatarVideoFailed,setAvatarVideoFailed]=useState(false);
+  const settingsDialogRef=useRef<HTMLDialogElement>(null);
+  const [settingsContainer,setSettingsContainer]=useState<HTMLDivElement|null>(null);
+  const [creationFlow,setCreationFlow]=useState<CreationFlow|null>(null);
+  const [websiteHtml,setWebsiteHtml]=useState('');
   const [avatarImagePrompt,setAvatarImagePrompt]=useState('Photorealistic cinematic portrait of a friendly adult male cybernetic AI assistant, visible head and upper body, luminous green cybernetic eyes, dark futuristic armor with subtle neon green circuitry, inside a high-tech command center filled with green digital screens and matrix code, approachable expression, facing the camera, realistic face and skin, no text, no watermark.');
   const [avatarImageBusy,setAvatarImageBusy]=useState(false);
   const [avatarImageError,setAvatarImageError]=useState('');
@@ -161,6 +171,11 @@ export default function Home() {
   const [voiceURI,setVoiceURI]=useState(()=>localStorage.getItem('nexus-speech-voice')||'');
   const [voices,setVoices]=useState<SpeechSynthesisVoice[]>([]);
   const [voiceEnabled,setVoiceEnabled]=useState(()=>localStorage.getItem('nexus-voice-enabled')!=='false');
+  const [conversationLipSync,setConversationLipSync]=useState(()=>localStorage.getItem('nexus-conversation-lipsync')!=='false');
+  const [conversationConsent,setConversationConsent]=useState(()=>localStorage.getItem('nexus-conversation-cloud-consent')==='true');
+  const [conversationVideo,setConversationVideo]=useState<string|null>(null);
+  const conversationControllerRef=useRef<AbortController|null>(null);
+  const conversationVideoRef=useRef<HTMLVideoElement|null>(null);
   const [piperAvailable,setPiperAvailable]=useState(false);
   const [speechPreparing,setSpeechPreparing]=useState(false);
   const [speechConfigError,setSpeechConfigError]=useState('');
@@ -169,6 +184,10 @@ export default function Home() {
   const cancelSpeech=()=>{
     speechSequenceRef.current++;
     window.speechSynthesis?.cancel();
+    conversationControllerRef.current?.abort();
+    conversationControllerRef.current=null;
+    conversationVideoRef.current?.pause();
+    setConversationVideo(null);
     const current=localSpeechRef.current;
     localSpeechRef.current=null;
     if(current){current.controller.abort();if(current.audio){current.audio.onended=null;current.audio.onerror=null;current.audio.pause();current.audio.removeAttribute('src');current.audio.load();}if(current.url)URL.revokeObjectURL(current.url);}
@@ -376,6 +395,23 @@ export default function Home() {
   const runNexusConversation = async (spokenText?: string) => {
     const messageText = (spokenText??prompt).trim() || (attachments.length ? 'Przeanalizuj załączone pliki i zdjęcia.' : '');
     if (!messageText||operationBusyRef.current) return;
+    if(creationFlow&&/^(?:anuluj|stop|cancel)$/iu.test(messageText)){setCreationFlow(null);setPrompt('');setResponse('Zadanie anulowane.');return;}
+    let creation=parseCreationCommand(messageText);
+    const askCreation=(flow:CreationFlow)=>{
+      cancelSpeech();setSpeaking(false);setSpeechPreparing(false);
+      recognitionRef.current?.abort();setListening(false);
+      setCreationFlow(flow);setPrompt('');setResponse(creationQuestion(flow).text);setStatus('Czekam na Twoją odpowiedź');
+      void speak(creationQuestion(flow).text);
+    };
+    if(!creation&&creationFlow){
+      const next=advanceCreation(creationFlow,messageText,attachments.some(file=>file.type.startsWith('image/')));
+      if('step' in next){askCreation(next);return;}
+      creation=next;
+    }
+    if(creation?.kind==='website'&&!creationFlow){askCreation({step:'website-type',description:creation.description});return;}
+    if(creation?.kind==='image'&&!creation.description){askCreation({step:'image-description'});return;}
+    if(creation?.kind==='avatar'&&!attachments.some(file=>file.type.startsWith('image/'))){askCreation({step:'avatar-photo'});return;}
+    setCreationFlow(null);
     operationBusyRef.current=true;
     cancelSpeech();
     setSpeechPreparing(false);
@@ -384,6 +420,7 @@ export default function Home() {
     setListening(false);
     setIsThinking(true);
     setCreationUrl('');
+    setWebsiteHtml('');
     setApprovalRequest(null);
     setResponse('');
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
@@ -391,7 +428,6 @@ export default function Home() {
     setGeneratedImageUrl('');
     const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-12);
     try {
-      const creation=parseCreationCommand(messageText);
       if(creation){
         if(creation.kind==='image'){
           if(attachments.length)throw new Error('Generator obrazów przyjmuje opis tekstowy. Usuń załączniki lub użyj polecenia „Ustaw awatara z tego zdjęcia”.');
@@ -407,6 +443,18 @@ export default function Home() {
           await loadPortrait(image);
           setResponse('Ustawiłem Twoje zdjęcie jako portret awatara. To portret, nie wygenerowany model 3D. Aby zamówić film, powiedz „Animuj awatara: …”.');
           setStatus('Awatar ustawiony');
+        }else if(creation.kind==='website'){
+          setStatus('Tworzę lokalny podgląd strony…');
+          const result=await nexusOrchestrator.start({
+            text:websitePrompt(creation.description),maxOutputTokens:512,
+            projectContext:companyProfile?companyProjectContext(companyProfile):undefined,
+            attachments,
+          },publishWorkflowProgress);
+          if(result.status!=='DONE')throw new Error('Strona nie została ukończona. Niczego nie opublikowano.');
+          setWebsiteHtml(websiteDocument(result.text));
+          setResponse('Gotowy lokalny podgląd strony. Możesz obejrzeć i pobrać HTML. Formularze i sklep są makietą; nie wysyłają danych ani płatności. Niczego nie opublikowano.');
+          setStatus('Podgląd strony gotowy');
+          void speak('Podgląd strony jest gotowy. Możesz pobrać plik HTML.');
         }else{
           if(!creation.text)throw new Error('Podaj tekst do animacji, np. „Animuj awatara: Cześć, jestem Nexus”.');
           const image=attachments.find(file=>file.type.startsWith('image/'));
@@ -661,7 +709,35 @@ export default function Home() {
     setSpeaking(false);
     setSpeechPreparing(false);
     const sequence=speechSequenceRef.current;
-    if(language==='pl-PL'&&piperAvailable&&(voiceURI===''||voiceURI==='piper:pl-darkman')){
+    if(isNexus&&conversationLipSync){
+      setAnimationVideoUrl(null);
+      setAvatarAnimationError('');
+      if(language!=='pl-PL'||(voiceURI!==''&&!/Paulina/i.test(voiceURI))){
+        setStatus('Synchronizacja androidki wymaga polskiego lokalnego głosu Paulina. Wybierz go albo wyłącz tryb Colab.');
+        return;
+      }
+      const controller=new AbortController();
+      conversationControllerRef.current=controller;
+      setSpeechPreparing(true);
+      setStatus('Przygotowuję głos i nowy film aktualnej odpowiedzi w darmowym Colabie…');
+      try{
+        const video=await requestConversationVideo(agentHubClient.baseUrl,text,conversationConsent,{
+          signal:AbortSignal.any([controller.signal,AbortSignal.timeout(30*60*1000)]),
+          onProgress:attempt=>setStatus(`Colab generuje ruch ust do tej odpowiedzi — sprawdzenie ${attempt}. Możesz zatrzymać oczekiwanie.`),
+        });
+        if(sequence!==speechSequenceRef.current)return;
+        setConversationVideo(video);setSpeechPreparing(false);
+        setStatus('Film odpowiedzi gotowy. Odtwórz go, jeśli przeglądarka blokuje automatyczny dźwięk.');
+      }catch(error){
+        if(sequence!==speechSequenceRef.current)return;
+        console.error('Conversation lip sync failed:',error);
+        setSpeechPreparing(false);setSpeaking(false);
+        const message=error instanceof Error?error.message:'Nie udało się zsynchronizować rozmowy.';
+        setStatus(message);setAvatarAnimationError(message);emitVoiceEvent('ERROR',message);
+      }
+      return;
+    }
+    if(language==='pl-PL'&&piperAvailable&&((voiceURI===''&&!isNexus)||voiceURI==='piper:pl-darkman')){
       const current:{controller:AbortController;audio?:HTMLAudioElement;url?:string}={controller:new AbortController()};
       localSpeechRef.current=current;
       setSpeechPreparing(true);
@@ -691,8 +767,8 @@ export default function Home() {
     if(!('speechSynthesis' in window)){setStatus('Ta przeglądarka nie obsługuje odczytywania odpowiedzi.');return;}
     const u=new SpeechSynthesisUtterance(text);
     u.lang=language; u.rate=1;
-    const selectedVoice=selectSpeechVoice(window.speechSynthesis.getVoices(),language,voiceURI);
-    if(!selectedVoice){setStatus('Brak głosu dla wybranego języka. Odpowiedź jest dostępna jako tekst; wybierz inny język lub zainstaluj głos w systemie.');return;}
+    const selectedVoice=selectSpeechVoice(window.speechSynthesis.getVoices(),language,voiceURI,{localFemalePolish:isNexus});
+    if(!selectedVoice){setStatus(isNexus&&language==='pl-PL'?'Brak lokalnego kobiecego głosu Paulina. Wybierz głos w ustawieniach lub zainstaluj polski głos Windows. Odpowiedź pozostaje dostępna jako tekst.':'Brak głosu dla wybranego języka. Odpowiedź jest dostępna jako tekst; wybierz inny język lub zainstaluj głos w systemie.');return;}
     u.voice=selectedVoice;
     speechVisemePlanRef.current=estimateVisemePlan(text,{charactersPerSecond:14/u.rate});
     u.onstart=()=>{if(sequence!==speechSequenceRef.current)return;speechStartedAtRef.current=performance.now();setSpeaking(true);setStatus('Nexus mówi…');emitVoiceEvent('SPEAKING','Nexus mówi…')};
@@ -927,9 +1003,11 @@ export default function Home() {
   const run = runNexusConversation;
   const lastReadyVideo=generatedVideo??importedVideo?.url;
   return <main className={styles.shell}>
-    <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
+    <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div><Button variant="secondary" aria-label="Ustawienia" onClick={()=>settingsDialogRef.current?.showModal()}><Settings size={20}/></Button></header>
+      {settingsContainer&&createPortal(<>
       <CompanyWorkspace profile={companyProfile} disabled={isThinking||approvalBusy||!!approvalRequest||listening||speaking||speechPreparing} onChange={changeCompany}/>
-      <section className={styles.batchPanel} aria-label="Silniki rozmowy">
+      <details className={styles.batchPanel}>
+        <summary>Silnik AI i narzędzia lokalne</summary>
         <label htmlFor="nexus-provider-choice">Silnik AI</label>
         <select id="nexus-provider-choice" value={providerChoice} disabled={isThinking||approvalBusy||!!approvalRequest} onChange={event=>{
           const value=event.target.value;
@@ -951,16 +1029,27 @@ export default function Home() {
         <p>FREE MODE: bez kredytów, zakupów i subskrypcji. Odpowiedzi są przesyłane strumieniowo.</p>
         <label><input type="checkbox" checked={compressContext} disabled={isThinking} onChange={event=>setCompressContext(event.target.checked)}/> Headroom — kompresuj kopię dużego kontekstu, zachowując oryginał</label>
         <p>{localToolStatus||'Narzędzia lokalne: nie sprawdzono'}</p>
-      </section>
+      </details>
+      </>,settingsContainer)}
       <div ref={avatarStageRef} className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
         <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(isNexus?styles.nexusPortrait:'')+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')+' '+(cameraView==='face'?styles.cameraFace:styles.cameraFull)}>
           <div className={styles.scan}/>
-          {animationVideoUrl
+          {conversationVideo
+            ? <video ref={conversationVideoRef} autoPlay controls playsInline className={styles.person} src={conversationVideo}
+                onPlay={()=>{setSpeaking(true);setStatus('Nexus mówi — audio i ruch ust z tego samego renderu');emitVoiceEvent('SPEAKING','Nexus mówi');}}
+                onPause={()=>setSpeaking(false)}
+                onEnded={()=>{cancelSpeech();setSpeaking(false);setStatus('Gotowa do rozmowy');emitVoiceEvent('IDLE','Nexus ready');}}
+                onError={()=>{cancelSpeech();setSpeaking(false);setAvatarAnimationError('Nie można odtworzyć zsynchronizowanej odpowiedzi. Nie uruchomiono starej animacji ani zastępczego głosu.');}}/>
+            : animationVideoUrl
             ? <video autoPlay controls={!isNexus&&!importedVideo} loop={isNexus||!!importedVideo} muted={isNexus||!!importedVideo} playsInline className={styles.person} src={animationVideoUrl} onEnded={()=>setAnimationVideoUrl(null)} onError={()=>{setAnimationVideoUrl(null);setAvatarAnimationError('Nie udało się odtworzyć filmu postaci.');}}/>
             : avatarImageFailed
               ? <div className={styles.portraitFallback}>Dodaj zdjęcie postaci<br/><small>Użyj fotografii, którą chcesz ustawić jako awatara.</small></div>
               : isNexus
-                ? <video autoPlay loop muted playsInline className={styles.person} src="/avatars/nexus-speaking.mp4" poster={nexusAvatarSrc} aria-label="Nexus — animowana postać; głos odpowiedzi generuje Nexus" onError={()=>setAvatarImageFailed(true)}/>
+                ? avatarVideoFailed
+                  ? <img className={styles.person} src={nexusAvatarSrc} alt="Nexus — zapisany portret androidki" onError={()=>setAvatarImageFailed(true)}/>
+                  : conversationLipSync
+                    ? <img className={styles.person} src={nexusAvatarSrc} alt="Nexus — androidka oczekująca na zsynchronizowaną odpowiedź" onError={()=>setAvatarImageFailed(true)}/>
+                    : <AvatarSpeechVideo speaking={speaking} className={styles.person} src={NEXUS_DEFAULT_AVATAR.video} poster={nexusAvatarSrc} onError={()=>{setAvatarVideoFailed(true);setAvatarAnimationError('Nie udało się odtworzyć filmu androidki; pokazuję jej zapisany portret.');}}/>
               : <img key={portraitSource} className={styles.person} src={portraitSource} alt={isNexus?'Nexus — mówiący, poruszający się i mrugający cyborg':customPortrait||defaultAvatarPortrait?'Nexus — zapisany portret postaci':'Nexus — cyborg'} onError={()=>setAvatarImageFailed(true)}/>}
           {!isNexus&&(!customPortrait||cameraView==='face')&&!avatarImageFailed&&!animationVideoUrl&&(
             <div className={styles.faceRig} aria-hidden="true">
@@ -971,13 +1060,16 @@ export default function Home() {
           )}
           <div className={styles.wave}><i/><i/><i/><i/><i/></div>
         </div></div>
-        <div className={styles.speech}><Sparkles size={16}/> Dodaj zdjęcie. Napisz lub powiedz, co mam zrobić.</div>
-        <p className={styles.status}>„Nexus, powiedz mi…” · „Wygeneruj obraz…” · „Animuj awatara: Cześć!”</p>
         {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
+        {creationFlow&&<div className={styles.portraitActions} role="group" aria-label="Opcje bieżącego zadania">
+          {creationQuestion(creationFlow).choices.map(choice=><Button key={choice} disabled={isThinking} onClick={()=>void runNexusConversation(choice)}>{choice}</Button>)}
+          <Button variant="secondary" onClick={()=>{cancelSpeech();setSpeaking(false);setSpeechPreparing(false);setCreationFlow(null);setResponse('Zadanie anulowane.');setStatus('Gotowa do rozmowy');}}>Anuluj</Button>
+        </div>}
+        {websiteHtml&&<div className={styles.websitePreview}><iframe title="Podgląd stworzonej strony" sandbox="" referrerPolicy="no-referrer" srcDoc={websiteHtml}/><a href={`data:text/html;charset=utf-8,${encodeURIComponent(websiteHtml)}`} download="nexus-strona.html">Pobierz stronę HTML</a></div>}
         {generatedImageUrl&&<img className={styles.generatedImage} src={generatedImageUrl} alt="Obraz wygenerowany przez Nexus Image Engine"/>}
         {(speaking||speechPreparing)&&<Button variant="secondary" onClick={()=>{cancelSpeech();setSpeechPreparing(false);setSpeaking(false);emitVoiceEvent('IDLE','Odczyt zatrzymany');setStatus('Odczyt zatrzymany');}}>Zatrzymaj odczyt</Button>}
         {creationUrl&&<div className={styles.response}><img src={creationUrl} alt="Obraz wygenerowany przez Nexus Image Engine" style={{display:'block',maxWidth:'100%',maxHeight:520,objectFit:'contain'}}/><div className={styles.portraitActions}><a href={creationUrl} download="nexus-generated-image.png">Pobierz wygenerowany obraz</a><Button variant="secondary" onClick={()=>void saveImageAsDefaultAvatar(creationUrl)}>Zapisz jako domyślnego avatara w tej przeglądarce</Button></div></div>}
-        <div className={styles.status}>{status}</div>
+        {settingsContainer&&createPortal(<>
         <details className={styles.batchPanel}>
           <summary>Studio awatara — zdjęcie → tekst → film</summary>
           <h3>1. Postać</h3>
@@ -1029,15 +1121,17 @@ export default function Home() {
             {SPEECH_LANGUAGES.map(item=><option key={item.code} value={item.code}>{item.label}</option>)}
           </select>
           <label htmlFor="nexus-speech-voice">Głos Nexusa</label>
+          <label><input type="checkbox" checked={conversationLipSync} disabled={speaking||speechPreparing} onChange={event=>{setConversationLipSync(event.target.checked);localStorage.setItem('nexus-conversation-lipsync',String(event.target.checked));cancelSpeech();setSpeaking(false);setSpeechPreparing(false);}}/> Ruch ust do aktualnej odpowiedzi — nowy film EchoMimic w darmowym Colabie</label>
+          {conversationLipSync&&<><label><input type="checkbox" checked={conversationConsent} onChange={event=>{setConversationConsent(event.target.checked);localStorage.setItem('nexus-conversation-cloud-consent',String(event.target.checked));if(!event.target.checked){cancelSpeech();setSpeaking(false);setSpeechPreparing(false);}}}/> Zgadzam się wysłać portret androidki, treść odpowiedzi i jej audio do mojego darmowego renderera Colab</label><p className={styles.status}>Ten tryb używa lokalnej Pauliny i jednego filmu z dźwiękiem. Oczekiwanie może trwać kilka minut. Maksymalnie 30 sekund mowy, bez obcinania. Bez kredytów i płatnego fallbacku. Brak renderera pozostawia odpowiedź jako tekst. Wyłączenie tej opcji przywraca zwykły odczyt i starą animację, która nie jest synchronizacją ust.</p></>}
           {speechConfigError&&<p role="alert" className={styles.status}>{speechConfigError}</p>}
           <select id="nexus-speech-voice" disabled={speaking||isThinking||speechPreparing} value={(language==='pl-PL'&&piperAvailable&&voiceURI==='piper:pl-darkman')||matchingVoices(voices,language).some(voice=>voice.voiceURI===voiceURI)?voiceURI:''} onChange={event=>{setVoiceURI(event.target.value);localStorage.setItem('nexus-speech-voice',event.target.value);}}>
-            <option value="">Automatyczny — naturalny, jeśli dostępny</option>
+            <option value="">{isNexus&&language==='pl-PL'?'Automatyczny — Paulina, kobiecy i lokalny':'Automatyczny — naturalny, jeśli dostępny'}</option>
             {language==='pl-PL'&&piperAvailable&&<option value="piper:pl-darkman">Piper Darkman · polski · lokalny CPU</option>}
             {matchingVoices(voices,language).map(voice=><option key={voice.voiceURI} value={voice.voiceURI}>{voice.name}{voice.localService?' · lokalny':' · online'}</option>)}
           </select>
           <label><input type="checkbox" checked={voiceEnabled} onChange={event=>{setVoiceEnabled(event.target.checked);localStorage.setItem('nexus-voice-enabled',String(event.target.checked));if(!event.target.checked){cancelSpeech();setSpeechPreparing(false);setSpeaking(false);emitVoiceEvent('IDLE','Odczyt wyłączony');setStatus('Odczyt odpowiedzi wyłączony');}}}/> Czytaj odpowiedzi na głos</label>
           <Button variant="secondary" disabled={!voiceEnabled||speaking||isThinking||speechPreparing||!(matchingVoices(voices,language).length||(language==='pl-PL'&&piperAvailable))} onClick={()=>void speak(speechPreview(language))}><Volume2 size={16}/>Sprawdź głos</Button>
-          <p className={styles.status}>{language==='pl-PL'&&piperAvailable?'Automatyczny głos polski: Piper Darkman, pobrany, CPU, bez przesyłania tekstu do internetu. Możesz wybrać inny głos z listy.':matchingVoices(voices,language).length?'Lista zawiera głosy dostępne w tej przeglądarce. Głos online może przesyłać tekst do dostawcy.':'Brak głosu dla tego języka na liście przeglądarki. Rozmowa tekstowa nadal działa; zainstaluj głos w systemie lub wybierz inny język.'} Polecenie wysyłam od razu po końcowym rozpoznaniu, bez czekania na zamknięcie mikrofonu. Czas odpowiedzi zależy też od modelu i sieci.</p>
+          <p className={styles.status}>{isNexus&&language==='pl-PL'?'Automatyczny głos androidki: lokalna Microsoft Paulina, bez płatnego TTS. Jeśli jej brakuje, nie zastępuję jej automatycznie męskim lektorem. Ręczny wybór głosu ma pierwszeństwo.':language==='pl-PL'&&piperAvailable?'Automatyczny głos polski: Piper Darkman, pobrany, CPU, bez przesyłania tekstu do internetu. Możesz wybrać inny głos z listy.':matchingVoices(voices,language).length?'Lista zawiera głosy dostępne w tej przeglądarce. Głos online może przesyłać tekst do dostawcy.':'Brak głosu dla tego języka na liście przeglądarki. Rozmowa tekstowa nadal działa; zainstaluj głos w systemie lub wybierz inny język.'} Polecenie wysyłam od razu po końcowym rozpoznaniu, bez czekania na zamknięcie mikrofonu. Czas odpowiedzi zależy też od modelu i sieci.</p>
           <p className={styles.status}>Lektor do gotowych filmów: <a href="https://app.clipchamp.com/" target="_blank" rel="noopener noreferrer">Clipchamp</a> · <a href="https://www.capcut.com/" target="_blank" rel="noopener noreferrer">CapCut</a>. To osobne edytory; dostępność głosów i limity ustala ich dostawca. Nexus nie wysyła tam automatycznie tekstu ani zdjęć.</p>
           <div className={styles.cameraControls} role="group" aria-label="Ustawienie kadru awatara">
             <span>Widok</span>
@@ -1056,7 +1150,7 @@ export default function Home() {
           {!customPortrait&&defaultAvatarPortrait&&<Button variant="secondary" disabled={avatarRendering||batchBusy} onClick={restoreNexusAvatar}>Przywróć fabrycznego Nexusa</Button>}
           <Button variant="secondary" disabled={avatarRendering||!response.trim()||!cloudRenderReady||!cloudConsent} onClick={()=>void animateAvatar(response)}>{avatarRendering?'Silnik Nexusa renderuje…':'Animuj odpowiedź — silnik Nexusa'}</Button>
         </div>
-        {isNexus&&<p className={styles.status}>Nexus porusza się w zapętlonym filmie z Colab, a odpowiedzi czyta wybrany głos. Dźwięk filmu jest wyciszony, żeby nie powtarzać nagranej kwestii. Ruch ust w klipie nie synchronizuje się z każdą nową odpowiedzią.</p>}
+        {isNexus&&<p className={styles.status}>{conversationLipSync?'Tryb rozmowy wymaga nowego filmu z głosem aktualnej odpowiedzi. Stary film nie zastępuje synchronizacji ust.':'Androidka animuje się tylko podczas odczytu odpowiedzi. Po zakończeniu lub zatrzymaniu głosu wraca do nieruchomej pierwszej klatki. Film jest wyciszony. To odtwarzanie w czasie mowy, nie synchronizacja ust z poszczególnymi głoskami.'}</p>}
         <p className={styles.status}>Lokalny render GPU wyłączony. Animacja wymaga własnego serwera Nexusa w chmurze; przycisk wysyła tam zdjęcie i odpowiedź. Bez HeyGen.</p>
         <details className={styles.batchPanel}>
           <summary>Generator obrazów Nexus</summary>
@@ -1064,6 +1158,7 @@ export default function Home() {
         </details>
         <input ref={videoInputRef} type="file" hidden accept="video/mp4,.mp4" onChange={event=>{void importColabVideo(event.currentTarget.files?.[0]);event.currentTarget.value=''}}/>
         </details>
+        </>,settingsContainer)}
         {(portraitError||avatarAnimationError)&&<p role="alert" className={styles.capabilityError}>{portraitError||avatarAnimationError}</p>}
         {microphoneError&&<p role="alert" className={styles.capabilityError}>{microphoneError}</p>}
         <input ref={attachmentInputRef} type="file" multiple hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.xlsx,.pptx" onChange={event=>{addAttachments(event.target.files);event.currentTarget.value=''}}/>
@@ -1076,7 +1171,7 @@ export default function Home() {
         </div>
         {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
       </div>
-      <details className={styles.nexusDetails}>
+      {settingsContainer&&createPortal(<details className={styles.nexusDetails}>
         <summary>Co robi Nexus</summary>
         <div className={styles.workflowSummary}>
           <p>{workflowProgress?.message??'Brak aktywnego zadania.'}</p>
@@ -1101,7 +1196,11 @@ export default function Home() {
           </section>
           {hubError&&<p role="alert" className={styles.capabilityError}>{hubError}</p>}
         </div>
-      </details>
+      </details>,settingsContainer)}
+      <dialog ref={settingsDialogRef} className={styles.settingsDialog} aria-labelledby="nexus-settings-title" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.currentTarget.close();}}}>
+        <div className={styles.settingsDialogHeader}><h2 id="nexus-settings-title">Ustawienia</h2><Button variant="secondary" aria-label="Zamknij ustawienia" onClick={()=>settingsDialogRef.current?.close()}><X size={20}/></Button></div>
+        <div ref={setSettingsContainer} className={styles.settingsDialogBody}/>
+      </dialog>
     </section>
   </main>
 }
