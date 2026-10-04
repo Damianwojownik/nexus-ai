@@ -9,6 +9,7 @@ import { selectMisRenderer } from './rendererRegistry.ts';
 import { composeMisFrame } from './runtime.ts';
 import { validateTimeline } from './benchmark.ts';
 import { MisRenderCoordinator } from './renderCoordinator.ts';
+import { normaliseAlignedPhone } from './phoneNormalization.ts';
 
 test('Polish estimated timeline keeps MBP closure and vowel opening separate', () => {
   const timeline=buildEstimatedPhonemeTimeline('mama','pl');
@@ -130,4 +131,13 @@ test('quality render falls back to animal FasterLivePortrait when media engine i
   assert.equal(result.renderer,'faster-liveportrait');
   assert.equal(result.fallbackUsed,true);
   assert.equal(receivedMode,'animal');
+});
+
+
+test('MFA phone variants normalize into Miś articulation inventory', () => {
+  assert.equal(normaliseAlignedPhone('s̪'),'s');
+  assert.equal(normaliseAlignedPhone('pʰ'),'p');
+  assert.equal(normaliseAlignedPhone('ɡ'),'g');
+  assert.equal(normaliseAlignedPhone('aw'),'aʊ');
+  assert.equal(normaliseAlignedPhone('sp'),'sil');
 });
