@@ -1,0 +1,37 @@
+name: Miś Engine test
+
+on:
+  push:
+    branches:
+      - test/mis-engine-v1
+      - chatgpt/mis-engine-v1
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Miś Engine tests
+        run: npm run test:mis
+      - name: Compile Python services
+        run: >-
+          python -m py_compile
+          services/avatar_server/nexus_avatar_server.py
+          services/avatar_server/mis_articulation_injector.py
+          services/phoneme_aligner/mis_phoneme_aligner.py
+          services/media_engine/flp_worker.py
+          services/media_engine/nexus_media_engine.py
+      - name: TypeScript and Vite build
+        run: npm run build

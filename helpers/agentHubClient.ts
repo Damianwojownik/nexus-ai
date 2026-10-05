@@ -1,5 +1,6 @@
 import type { AgentRegistration } from './agentHub.ts';
 import type { AgentEvent, AgentPresence, AgentResult, AgentTask, AgentTaskStatus } from './agentProtocol.ts';
+import type { MisLanguage, PhonemeCue } from './misEngine/types.ts';
 
 export type AgentHubConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
 export type NewAgentHubTask = Pick<AgentTask, 'goal' | 'createdBy' | 'assignedTo' | 'scope'> & { contextRefs?: string[] };
@@ -67,6 +68,86 @@ export class AgentHubClient {
     return this.request('/api/avatar/health');
   }
 
+  async getMisAlignerHealth(): Promise<{ configured: boolean; ok: boolean; provider?: string; message?: string }> {
+    return this.request('/api/mis/aligner/health');
+  }
+
+
+  async getMisHealth(): Promise<{
+    ok: boolean;
+    experimental: true;
+    aligner: { configured: boolean; ok: boolean; provider?: string; message?: string };
+    renderer: {
+      experimental: true;
+      live: { status?: string; ok: boolean; message?: string; provider?: string; mode?: string };
+      quality: { configured: boolean; ok: boolean; provider?: string; version?: string; message?: string; gpu?: unknown };
+    };
+  }> {
+    return this.request('/api/mis/health');
+  }
+
+  async renderMis(input: {
+    mode?: 'live' | 'quality';
+    sourceImageBase64: string;
+    sourceImageMime?: string;
+    audioBase64: string;
+    audioMime?: string;
+    bodyPrompt?: string;
+    negativePrompt?: string;
+    width?: number;
+    height?: number;
+    fps?: number;
+    numFrames?: number;
+    seed?: number;
+    articulationControls?: Array<{
+      atMs: number;
+      jawOpen: number;
+      lipWide: number;
+      lipRound: number;
+      lipProtrusion: number;
+      lipPress: number;
+    }>;
+    articulationStrength?: number;
+  }): Promise<{ blob: Blob; renderer?: string; fallbackUsed: boolean; engine?: string }> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/api/mis/render`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(90 * 60 * 1000),
+      });
+    } catch (error) {
+      throw new AgentHubClientError(error instanceof Error ? error.message : 'Miś render endpoint is unreachable');
+    }
+    if (!response.ok) {
+      let detail = `Miś render returned HTTP ${response.status}`;
+      try {
+        const body = await response.json() as { error?: string };
+        if (body.error) detail = body.error;
+      } catch {}
+      throw new AgentHubClientError(detail, response.status);
+    }
+    return {
+      blob: await response.blob(),
+      renderer: response.headers.get('x-mis-renderer') || undefined,
+      fallbackUsed: response.headers.get('x-mis-fallback') === 'true',
+      engine: response.headers.get('x-mis-engine') || undefined,
+    };
+  }
+
+  async alignMisSpeech(input: {
+    language: MisLanguage;
+    transcript: string;
+    audioBase64: string;
+    audioMime?: string;
+  }): Promise<{ experimental: boolean; source: 'aligned-audio'; language: MisLanguage; phones: PhonemeCue[] }> {
+    return this.request('/api/mis/align', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
   async getImageHealth(): Promise<{ status: string; ok: boolean; message?: string; provider?: string; model?: string; mode?: string; device?: string; loaded?: boolean }> {
     return this.request('/api/image/health');
   }
@@ -117,6 +198,7 @@ export class AgentHubClient {
     audioMime?: string;
     drivingVideoBase64?: string;
     drivingVideoMime?: string;
+    subjectMode?: 'auto' | 'human' | 'animal';
   }): Promise<Blob> {
     let response: Response;
     try {

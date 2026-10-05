@@ -20,6 +20,8 @@ import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarM
 import { estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
 import type { VoiceEventType } from '../helpers/agentProtocol';
+import { runMisSession } from '../helpers/misEngine/sessionClient';
+import type { MisLanguage } from '../helpers/misEngine/types';
 
 const ollamaClient = new OllamaClient();
 const memoryStore = new MemoryStore();
@@ -61,6 +63,16 @@ export default function Home() {
   const [isThinking,setIsThinking]=useState(false);
   const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>([]);
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
+  const [misHealth,setMisHealth]=useState<Awaited<ReturnType<AgentHubClient['getMisHealth']>>|null>(null);
+  const [misSourceFile,setMisSourceFile]=useState<File|null>(null);
+  const [misAudioFile,setMisAudioFile]=useState<File|null>(null);
+  const [misTranscript,setMisTranscript]=useState('Mama ma misia.');
+  const [misLanguage,setMisLanguage]=useState<MisLanguage>('pl');
+  const [misRenderMode,setMisRenderMode]=useState<'live'|'quality'>('live');
+  const [misBusy,setMisBusy]=useState(false);
+  const [misError,setMisError]=useState('');
+  const [misVideoUrl,setMisVideoUrl]=useState('');
+  const [misMeta,setMisMeta]=useState<{renderer?:string;engine?:string;alignment?:string;frames?:number}|null>(null);
   const recognitionRef=useRef<any>(null);
   const attachmentInputRef=useRef<HTMLInputElement|null>(null);
   const hubSseConnectedRef=useRef(false);
@@ -71,9 +83,29 @@ export default function Home() {
   const speechVisemePlanRef=useRef<VisemeCue[]>([]);
   const pointerRef=useRef({x:0,y:0});
   const generatedImageUrlRef=useRef('');
+  const misVideoUrlRef=useRef('');
 
   useEffect(() => () => {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
+    if (misVideoUrlRef.current) URL.revokeObjectURL(misVideoUrlRef.current);
+  }, []);
+
+  useEffect(() => {
+    let disposed=false;
+    const refresh=async()=>{
+      try{
+        const health=await agentHubClient.getMisHealth();
+        if(!disposed){setMisHealth(health);setMisError('');}
+      }catch(error){
+        if(!disposed){
+          setMisHealth(null);
+          setMisError(error instanceof Error?error.message:'Miś Engine health check failed');
+        }
+      }
+    };
+    void refresh();
+    const timer=window.setInterval(()=>void refresh(),15000);
+    return()=>{disposed=true;window.clearInterval(timer);};
   }, []);
 
   useEffect(()=>{
@@ -322,6 +354,68 @@ export default function Home() {
     return () => { unsubscribe(); cancelAnimationFrame(frameId); };
   }, []);
 
+  const fileToBase64=async(file:File):Promise<string>=>{
+    const dataUrl=await new Promise<string>((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onerror=()=>reject(reader.error??new Error('Nie udało się odczytać pliku'));
+      reader.onload=()=>resolve(String(reader.result??''));
+      reader.readAsDataURL(file);
+    });
+    const comma=dataUrl.indexOf(',');
+    return comma>=0?dataUrl.slice(comma+1):dataUrl;
+  };
+
+  const runMisEngine=async()=>{
+    if(!misSourceFile||!misAudioFile||!misTranscript.trim()) return;
+    setMisBusy(true);
+    setMisError('');
+    setMisMeta(null);
+    try{
+      const health=await agentHubClient.getMisHealth();
+      setMisHealth(health);
+      if(!health.aligner.ok){
+        throw new Error(health.aligner.message||'Phoneme aligner nie jest gotowy');
+      }
+      if(!health.renderer.live.ok && !health.renderer.quality.ok){
+        throw new Error('Żaden renderer Miś Engine nie jest gotowy');
+      }
+      if(misRenderMode==='quality'&&!health.renderer.quality.ok&&!health.renderer.live.ok){
+        throw new Error(health.renderer.quality.message||'Renderer quality nie jest gotowy');
+      }
+
+      const [sourceImageBase64,audioBase64]=await Promise.all([
+        fileToBase64(misSourceFile),
+        fileToBase64(misAudioFile),
+      ]);
+      const result=await runMisSession(agentHubClient,{
+        language:misLanguage,
+        transcript:misTranscript.trim(),
+        sourceImageBase64,
+        sourceImageMime:misSourceFile.type||'image/png',
+        audioBase64,
+        audioMime:misAudioFile.type||'audio/wav',
+        renderMode:misRenderMode,
+        controlFps:50,
+        articulationStrength:.35,
+        allowEstimatedFallback:false,
+      });
+      if(misVideoUrlRef.current) URL.revokeObjectURL(misVideoUrlRef.current);
+      const nextUrl=URL.createObjectURL(result.video);
+      misVideoUrlRef.current=nextUrl;
+      setMisVideoUrl(nextUrl);
+      setMisMeta({
+        renderer:result.renderer,
+        engine:result.engine,
+        alignment:result.alignment,
+        frames:result.frames.length,
+      });
+    }catch(error){
+      setMisError(error instanceof Error?error.message:'Miś Engine render failed');
+    }finally{
+      setMisBusy(false);
+    }
+  };
+
   const emitVoiceEvent = (type: VoiceEventType, message: string) => {
     voiceEventBus.emit(type, 'nexus', message, undefined, { source: 'ui' });
   };
@@ -369,6 +463,32 @@ export default function Home() {
         {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button></div>
       </div>
+      <section className={styles.misPanel} aria-labelledby="mis-engine-title">
+        <div className={styles.misHeader}>
+          <div><h3 id="mis-engine-title">Miś Engine — TEST</h3><p>Zdjęcie + audio + tekst → aligned phonemes → artykulacja → ruch → render MP4.</p></div>
+          <span className={styles.misBadge}>{misHealth?.ok?'READY':'NOT READY'}</span>
+        </div>
+        <div className={styles.misHealthGrid}>
+          <span>Aligner <b data-ok={misHealth?.aligner.ok?'true':'false'}>{misHealth?.aligner.ok?'OK':'OFF'}</b></span>
+          <span>LIVE <b data-ok={misHealth?.renderer.live.ok?'true':'false'}>{misHealth?.renderer.live.ok?'OK':'OFF'}</b></span>
+          <span>QUALITY <b data-ok={misHealth?.renderer.quality.ok?'true':'false'}>{misHealth?.renderer.quality.ok?'OK':'OFF'}</b></span>
+        </div>
+        <div className={styles.misGrid}>
+          <label>Zdjęcie misia<input type="file" accept="image/*" onChange={e=>setMisSourceFile(e.target.files?.[0]??null)}/></label>
+          <label>Audio<input type="file" accept="audio/*,.wav,.mp3,.ogg,.m4a" onChange={e=>setMisAudioFile(e.target.files?.[0]??null)}/></label>
+          <label>Język<select value={misLanguage} onChange={e=>setMisLanguage(e.target.value as MisLanguage)}><option value="pl">Polski</option><option value="en">English</option><option value="de">Deutsch</option></select></label>
+          <label>Renderer<select value={misRenderMode} onChange={e=>setMisRenderMode(e.target.value as 'live'|'quality')}><option value="live">LIVE — FasterLivePortrait animal</option><option value="quality">QUALITY — FLP + LTX</option></select></label>
+        </div>
+        <label className={styles.misTranscript}>Dokładny tekst audio<textarea value={misTranscript} onChange={e=>setMisTranscript(e.target.value)} rows={3}/></label>
+        <div className={styles.misActions}>
+          <Button onClick={()=>void runMisEngine()} disabled={misBusy||!misSourceFile||!misAudioFile||!misTranscript.trim()}>{misBusy?'Renderuję…':'Renderuj misia'}</Button>
+          <small>Direct articulation: jaw / lips. Tongue pozostaje kanałem logicznym TEST.</small>
+        </div>
+        {misError&&<p className={styles.capabilityError} role="alert">{misError}</p>}
+        {misVideoUrl&&<video className={styles.misVideo} src={misVideoUrl} controls playsInline/>}
+        {misMeta&&<p className={styles.misMeta}>renderer: {misMeta.renderer??'unknown'} · engine: {misMeta.engine??'live FLP'} · alignment: {misMeta.alignment} · control frames: {misMeta.frames}</p>}
+      </section>
+
       <details className={styles.nexusDetails}>
         <summary>Co robi Nexus</summary>
         <div className={styles.workflowSummary}>
