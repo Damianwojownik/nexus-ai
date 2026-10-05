@@ -95,10 +95,12 @@ test('timeline validator accepts ordered aligned phones', () => {
 test('quality render uses Codex media engine when configured', async () => {
   const live={
     configured:()=>true,
+    health:async()=>({status:'CONNECTED' as const,ok:true}),
     render:async()=>({contentType:'video/mp4',data:Buffer.from('live')}),
   };
   const quality={
     configured:()=>true,
+    health:async()=>({configured:true,ok:true}),
     render:async()=>({contentType:'video/mp4',data:Buffer.from('quality'),engine:'flp+ltx+composite'}),
   };
   const coordinator=new MisRenderCoordinator(live,quality);
@@ -115,6 +117,7 @@ test('quality render falls back to animal FasterLivePortrait when media engine i
   let receivedMode:string|undefined;
   const live={
     configured:()=>true,
+    health:async()=>({status:'CONNECTED' as const,ok:true}),
     render:async(input:{subjectMode?:string})=>{
       receivedMode=input.subjectMode;
       return {contentType:'video/mp4',data:Buffer.from('live')};
@@ -122,6 +125,7 @@ test('quality render falls back to animal FasterLivePortrait when media engine i
   };
   const quality={
     configured:()=>false,
+    health:async()=>({configured:false,ok:false}),
     render:async()=>{ throw new Error('must not be called'); },
   };
   const coordinator=new MisRenderCoordinator(live,quality);
@@ -145,6 +149,7 @@ test('MFA phone variants normalize into Miś articulation inventory', () => {
 
 
 test('session client connects aligned phones, runtime controls and renderer result', async () => {
+  let renderInput: unknown;
   const fakeHub = {
     async alignMisSpeech() {
       return {
@@ -157,7 +162,8 @@ test('session client connects aligned phones, runtime controls and renderer resu
         ],
       };
     },
-    async renderMis() {
+    async renderMis(input: unknown) {
+      renderInput=input;
       return {
         blob:new Blob(['video'],{type:'video/mp4'}),
         renderer:'faster-liveportrait',
@@ -180,4 +186,9 @@ test('session client connects aligned phones, runtime controls and renderer resu
   assert.equal(result.phones[0].phoneme,'m');
   assert.ok(result.frames.some(frame=>frame.phoneme.phoneme==='a'));
   assert.ok(result.frames.some(frame=>frame.haptic.kind==='vowel'));
+  assert.ok(renderInput && typeof renderInput === 'object');
+  const controls=(renderInput as {articulationControls?:Array<{jawOpen:number;lipPress:number}>}).articulationControls;
+  assert.ok(controls?.length);
+  assert.ok(controls!.some(point=>point.jawOpen>.7));
+  assert.ok(controls!.some(point=>point.lipPress>.8));
 });
