@@ -134,3 +134,30 @@ Latest validated workflow:
 - npm run build (TypeScript + Vite): PASS
 
 GPU inference itself is still not claimed as validated by CI because GitHub Actions does not run the FasterLivePortrait/LTX GPU models.
+
+
+## Uruchomienie Windows
+
+Na gałęzi `chatgpt/mis-engine-v1`:
+
+```powershell
+npm run mis:start
+```
+
+Starter:
+1. uruchamia/konfiguruje FasterLivePortrait,
+2. uruchamia Miś Phoneme Aligner PL/EN/DE,
+3. ustawia Agent Hub i dozwolone originy dla lokalnego UI,
+4. sprawdza `/api/mis/health`,
+5. uruchamia Vite UI i otwiera panel Miś Engine.
+
+Jeżeli Miniforge nie jest zainstalowany, setup alignera pyta przed instalacją przez winget. Sekrety są generowane lokalnie i nie są wypisywane.
+
+W UI panel `Miś Engine — TEST` przyjmuje:
+- zdjęcie misia,
+- audio WAV/MP3/OGG/M4A,
+- dokładny tekst audio,
+- język PL/EN/DE,
+- renderer LIVE albo QUALITY.
+
+LIVE wymaga lokalnego FasterLivePortrait. QUALITY pozostaje opcjonalny i wymaga Nexus Media Engine/LTX. Panel nie udaje gotowości: pokazuje osobno stan alignera, LIVE i QUALITY.
