@@ -35,10 +35,10 @@ TOKEN = os.environ.get("NEXUS_MEDIA_ENGINE_TOKEN", "").strip()
 
 DEFAULT_BODY_PROMPT = (
     "A single uninterrupted, realistic 3.6-second medium portrait shot of the "
-    "same person from the reference, preserving exact identity, clothing, "
-    "proportions and framing. Natural direct eye contact, subtle breathing, "
-    "a small natural nod, relaxed shoulders, gentle human body motion, stable "
-    "camera and lighting, crisp details."
+    "same plush teddy bear from the reference, preserving exact identity, fur, "
+    "face, scarf, proportions and framing. Natural direct eye contact, subtle "
+    "breathing, a small gentle nod, relaxed plush body motion, stable camera "
+    "and lighting, crisp details, no identity drift."
 )
 DEFAULT_NEGATIVE = (
     "blurry, smeared, soft face, identity change, exaggerated expression, "
