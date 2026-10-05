@@ -1,6 +1,7 @@
 import { CopilotCliProvider } from './copilotCliProvider.ts';
 import { CodexCliProvider, ClaudeCliProvider } from './cliModelProviders.ts';
 import { ChatGptPlanProvider } from './chatgptPlanProvider.ts';
+import { nexusFreeMode } from './freeMode.ts';
 
 export type CloudProviderHealth = {
   id: 'chatgpt-plan' | 'copilot' | 'codex' | 'gemini' | 'claude-cli' | 'openai' | 'claude';
@@ -158,6 +159,7 @@ class ClaudeProvider {
 }
 
 export class NexusCloudRouter {
+  private readonly freeMode = nexusFreeMode();
   private readonly chatgptPlan=new ChatGptPlanProvider();
   private readonly copilot=new CopilotCliProvider();
   private readonly codex=new CodexCliProvider();
@@ -166,7 +168,7 @@ export class NexusCloudRouter {
   private readonly openai=new OpenAIProvider();
   private readonly claude=new ClaudeProvider();
 
-  private order(){
+  private order(): CloudProviderHealth['id'][] {
     const configured=(env('NEXUS_AI_PROVIDER_ORDER') || 'chatgpt-plan,codex,copilot,gemini,claude-cli,openai,claude')
       .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
     const valid=configured.filter((x):x is 'chatgpt-plan'|'copilot'|'codex'|'gemini'|'claude-cli'|'openai'|'claude'=>
@@ -175,6 +177,9 @@ export class NexusCloudRouter {
   }
 
   async health():Promise<{status:'CONNECTED'|'OFFLINE'|'NOT_CONFIGURED'|'ERROR';providers:CloudProviderHealth[]}>{
+    if (this.freeMode) return { status: 'NOT_CONFIGURED', providers: this.order().map(id => ({
+      id, name: id, status: 'NOT_CONFIGURED', error: 'FREE MODE: paid, subscription and credit providers blocked',
+    })) };
     const [chatgptPlan,copilot,codex,gemini,claudeCli,openai,claude]=await Promise.all([
       this.chatgptPlan.health(),
       this.copilot.checkHealth().then(h=>({
@@ -208,11 +213,18 @@ export class NexusCloudRouter {
   }
 
   async chatGptPlanStatus(){ return this.chatgptPlan.status(); }
-  async startChatGptPlanSignIn(){ return this.chatgptPlan.startAuthorization(); }
-  async handleChatGptPlanCallback(url:URL){ return this.chatgptPlan.handleCallback(url); }
+  async startChatGptPlanSignIn(){
+    if (this.freeMode) throw new Error('FREE MODE: subscription sign-in disabled');
+    return this.chatgptPlan.startAuthorization();
+  }
+  async handleChatGptPlanCallback(url:URL){
+    if (this.freeMode) throw new Error('FREE MODE: subscription authorization disabled');
+    return this.chatgptPlan.handleCallback(url);
+  }
   async signOutChatGptPlan(){ return this.chatgptPlan.signOut(); }
 
   async generate(prompt:string, options:Record<string,any>={}):Promise<CloudGenerateResult>{
+    if (this.freeMode) throw new Error('FREE MODE: cloud provider execution blocked before any health or inference request');
     const errors:string[]=[];
     for(const id of this.order()){
       try{

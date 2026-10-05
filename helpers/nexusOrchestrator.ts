@@ -41,6 +41,9 @@ export interface NexusWorkflowInput {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   projectContext?: string;
   attachments?: File[];
+  onToken?: (chunk: string) => void;
+  compressContext?: boolean;
+  maxOutputTokens?: number;
 }
 
 export interface NexusGeneratedImage {
@@ -272,7 +275,7 @@ export class NexusOrchestrator {
         const verifyIndex = plan.findIndex((step) => step.id === 'verify');
         if (verifyIndex >= 0) plan[verifyIndex].state = 'ACTIVE';
 
-        const responseText = 'Wygenerowałem obraz ' + dimensions.width + '×' + dimensions.height
+        const responseText = 'Wygenerowałam obraz ' + dimensions.width + '×' + dimensions.height
           + (generated.model ? ' modelem ' + generated.model : '')
           + (generated.seed !== undefined ? ' · seed ' + generated.seed : '') + '.';
         emit('TESTING', 'Weryfikuję wynik i zapisuję parametry renderu');
@@ -410,7 +413,7 @@ export class NexusOrchestrator {
           if (!task) throw new Error('Agent Hub nie utworzył zadania instalacyjnego');
           const approval: NexusApprovalRequest = catalog.available
             ? { kind: 'INSTALL_APP', taskId: task.id, app, message: `Czy mam zainstalować ${app.name}?` }
-            : { kind: 'INSTALLER_SETUP', taskId: task.id, app, message: `Nie wykryłem winget ani bezpiecznego instalatora. Czy mam otworzyć Microsoft Store dla App Installer? Po jego skonfigurowaniu Nexus zapyta osobno o instalację ${app.name}.` };
+            : { kind: 'INSTALLER_SETUP', taskId: task.id, app, message: `Nie wykryłam winget ani bezpiecznego instalatora. Czy mam otworzyć Microsoft Store dla App Installer? Po jego skonfigurowaniu Luna zapyta osobno o instalację ${app.name}.` };
           await this.hub.leaseTask(task.id, 'nexus-ui', 60 * 60 * 1000);
           plan[plan.findIndex((step) => step.id === 'approval')].state = 'ACTIVE';
           this.pendingWorkflows.set(task.id, { input, task, plan, approval, searchResults, contextNotes });
@@ -451,13 +454,28 @@ export class NexusOrchestrator {
 
       plan[plan.findIndex((step) => step.id === 'execute')].state = 'ACTIVE';
       emit('WORKING', 'Pracuję nad Twoim zadaniem');
+      let projectContext = [input.projectContext, ...contextNotes].filter(Boolean).join('\n\n');
+      if (input.compressContext && projectContext.length >= 8000) {
+        try {
+          const result = await this.capabilities.executeCapability<{ compressed: string; originalVerified: boolean }>(
+            'context.compress', { content: projectContext },
+          );
+          if (!result.result.originalVerified || typeof result.result.compressed !== 'string') throw new Error('Headroom source verification failed');
+          projectContext = result.result.compressed;
+        } catch (error) {
+          console.warn('[nexus:headroom] Context compression unavailable; original retained.', error);
+          emit('WORKING', 'Headroom niedostępny — zachowuję pełny oryginalny kontekst');
+        }
+      }
       const responseText = repairSummary && repairedPath
-        ? `${repairSummary}\n\nZaktualizowałem ${repairedPath} i potwierdziłem zapis przez ponowny odczyt. Nie uruchamiałem testów projektu.`
+        ? `${repairSummary}\n\nZaktualizowałam ${repairedPath} i potwierdziłam zapis przez ponowny odczyt. Nie uruchamiałam testów projektu.`
         : (await this.agent.send({
           text: input.text,
           mode: 'AUTO',
-          projectContext: [input.projectContext, ...contextNotes].filter(Boolean).join('\n\n'),
+          projectContext,
           history: input.history,
+          onToken: input.onToken,
+          maxOutputTokens: input.maxOutputTokens,
         })).text;
       if (!responseText.trim()) throw new Error('Nexus nie otrzymał odpowiedzi od dostępnego modelu');
 
@@ -506,7 +524,7 @@ export class NexusOrchestrator {
 
     if (pending.approval.kind === 'INSTALLER_SETUP') {
       await this.capabilities.openInstallerSetup(true);
-      const message = 'Otworzyłem Microsoft Store. Zainstaluj App Installer; Nexus sprawdzi dostępność winget i będzie kontynuował.';
+      const message = 'Otworzyłam Microsoft Store. Zainstaluj App Installer; Luna sprawdzi dostępność winget i będzie kontynuowała.';
       onProgress({ state: 'WAITING_FOR_APPROVAL', message, taskId, plan: [...pending.plan] });
       return { status: 'WAITING_FOR_APPROVAL', taskId, text: message, plan: [...pending.plan], approval: pending.approval, searchResults: [] };
     }
@@ -528,7 +546,7 @@ export class NexusOrchestrator {
     const response = await this.agent.send({
       text: `Użytkownik poprosił o instalację ${pending.approval.app.name}. Instalator zakończył się poprawnie. Potwierdź rezultat i podaj następny krok.`,
       mode: 'AUTO',
-      projectContext: pending.contextNotes.join('\n\n'),
+      projectContext: [pending.input.projectContext, ...pending.contextNotes].filter(Boolean).join('\n\n'),
       history: pending.input.history,
     });
     await this.saveTaskMemory(pending.input.text, response.text, []);

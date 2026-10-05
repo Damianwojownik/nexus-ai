@@ -29,9 +29,10 @@ The user interacts with one primary Nexus persona. The orchestrator delegates wo
    - future research/review/specialist agents
 
 4. Model Router
-   - LOCAL: Ollama
-   - AUTO: prefer local, escalate only when needed and allowed
-   - CLOUD: explicit cloud provider
+   - configured cloud provider first in AUTO/CLOUD
+   - immediate local Ollama fallback on quota, points/credits exhaustion, rate limit or provider outage
+   - cooldowns prevent repeatedly retrying exhausted providers
+   - LOCAL: Ollama only
    - provider outages must not destroy task state
 
 5. Nexus Memory
@@ -46,7 +47,7 @@ The user interacts with one primary Nexus persona. The orchestrator delegates wo
 
 ## Cost rule
 
-Prefer already-available/local capacity. Ollama has no per-token cloud charge. Paid API providers are optional fallbacks and must not silently become the default.
+Ollama has no per-token cloud charge and is the automatic fallback. Paid API providers are optional and credentials stay in the local Hub process. A real Copilot adapter is not currently present; do not infer Copilot quota status without a provider response.
 
 ## Voice/avatar contract
 

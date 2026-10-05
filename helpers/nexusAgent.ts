@@ -2,6 +2,7 @@ import { ModelRouter } from './modelRouter.ts';
 import type { AIModelMode } from './modelRouter.ts';
 import { MemoryStore } from './memoryStore.ts';
 import { ToolRegistry } from './toolRegistry.ts';
+import { LUNA_IDENTITY, LUNA_EMOTION_CONTEXT, LUNA_IDENTITY_REMINDER } from './assistantPersona.ts';
 
 export type NexusMessageInput = {
   text: string;
@@ -9,6 +10,7 @@ export type NexusMessageInput = {
   projectContext?: string;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   maxOutputTokens?: number;
+  onToken?: (chunk: string) => void;
 };
 
 export type NexusAgentResult = {
@@ -52,18 +54,22 @@ export class NexusAgent {
       : 'No recent conversation history provided.';
 
     const prompt = [
-      this.options.systemPrompt || 'You are Nexus, a local-first AI assistant for product work and coding.',
-      `Project context: ${input.projectContext || 'No project context provided.'}`,
+      this.options.systemPrompt || 'You are a local-first AI assistant for product work and coding.',
+      LUNA_IDENTITY,
+      LUNA_EMOTION_CONTEXT,
       `Current AI mode: ${mode}`,
       `Available tools: ${toolHints || 'none'}`,
-      memoryContext,
+      `Project context: ${input.projectContext || 'No project context provided.'}`,
+      `Memory context:\n${memoryContext}`,
       historyContext,
+      LUNA_IDENTITY_REMINDER,
       `User message: ${input.text}`,
     ].join('\n\n');
 
     const responseText = await this.router.route(prompt, {
       temperature: 0.2,
       numPredict: input.maxOutputTokens,
+      onToken: input.onToken,
     });
 
     await this.memoryStore.saveMemory({

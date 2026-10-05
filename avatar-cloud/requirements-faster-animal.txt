@@ -1,0 +1,29 @@
+# Isolated offline animal-renderer experiment; never install in EchoMimic/TTS envs.
+# TensorRT 8.6 needs cuDNN 8; Torch 2.4 wheels require cuDNN 9.
+torch==2.3.1
+torchvision==0.18.1
+torchaudio==2.3.1
+onnxruntime-gpu==1.20.0
+onnx==1.17.0
+tensorrt==8.6.1
+numpy==1.26.4
+opencv-python==4.10.0.84
+opencv-contrib-python==4.10.0.84
+opencv-python-headless==4.10.0.84
+mediapipe==0.10.21
+insightface==0.7.3
+albumentations==1.4.10
+albucore==0.0.12
+timm==0.9.16
+transformers==4.46.2
+huggingface-hub==0.36.0
+omegaconf==2.3.0
+torchgeometry==0.1.2
+ffmpeg-python==0.2.0
+scikit-image==0.24.0
+soundfile==0.12.1
+Pillow==10.4.0
+einops==0.8.0
+ninja==1.11.1.1
+addict==2.4.0
+yapf==0.40.2

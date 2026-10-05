@@ -46,14 +46,25 @@ export class InMemoryMemoryBackend implements MemoryBackend {
 }
 
 export class BrowserMemoryBackend implements MemoryBackend {
-  readonly key = 'nexus-memory-v1';
+  readonly key: string;
+  private readonly strict: boolean;
+
+  constructor(key = 'nexus-memory-v1', strict = false) {
+    this.key = key;
+    this.strict = strict;
+  }
 
   async load(): Promise<MemoryEntry[]> {
     if (typeof localStorage === 'undefined') return [];
     try {
       const raw = localStorage.getItem(this.key);
-      return raw ? JSON.parse(raw) as MemoryEntry[] : [];
-    } catch {
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      if (this.strict && (!Array.isArray(parsed) || !parsed.every(isMemoryEntry))) {
+        throw new Error('Zapisana pamiec firmy ma nieprawidlowy format.');
+      }
+      return parsed as MemoryEntry[];
+    } catch (error) {
+      if (this.strict) throw error;
       return [];
     }
   }
@@ -62,6 +73,18 @@ export class BrowserMemoryBackend implements MemoryBackend {
     if (typeof localStorage === 'undefined') return;
     localStorage.setItem(this.key, JSON.stringify(entries));
   }
+}
+
+function isMemoryEntry(value: unknown): value is MemoryEntry {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<MemoryEntry>;
+  return typeof item.id === 'string' && typeof item.text === 'string'
+    && (item.kind === 'conversation' || item.kind === 'durable')
+    && typeof item.category === 'string' && Array.isArray(item.tags)
+    && item.tags.every(tag => typeof tag === 'string')
+    && typeof item.createdAt === 'number' && typeof item.updatedAt === 'number'
+    && typeof item.relevance === 'number' && typeof item.hash === 'string'
+    && (item.sensitive === undefined || typeof item.sensitive === 'boolean');
 }
 
 export class FileSystemMemoryBackend implements MemoryBackend {
@@ -111,6 +134,7 @@ export class MemoryStore implements MemoryStoreContract {
   private entries: MemoryEntry[] = [];
   private readonly backend: MemoryBackend;
   private ready: Promise<void>;
+  private loadError: Error | undefined;
 
   constructor(backend: MemoryBackend = createDefaultMemoryBackend()) {
     this.backend = backend;
@@ -118,12 +142,16 @@ export class MemoryStore implements MemoryStoreContract {
   }
 
   private async loadFromBackend(): Promise<void> {
-    const loaded = await this.backend.load();
-    this.entries = loaded;
+    try {
+      this.entries = await this.backend.load();
+    } catch (error) {
+      this.loadError = error instanceof Error ? error : new Error('Nie mozna wczytac pamieci.');
+    }
   }
 
   private async ensureReady(): Promise<void> {
     await this.ready;
+    if (this.loadError) throw this.loadError;
   }
 
   private computeHash(text: string, category: string, owner?: string, scope?: string): string {

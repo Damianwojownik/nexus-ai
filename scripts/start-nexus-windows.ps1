@@ -1,171 +1,63 @@
-param(
-  [switch]$NoBrowser,
-  [switch]$Repair
-)
-
-$ErrorActionPreference = "Stop"
+param([switch]$NoBrowser, [switch]$Repair, [switch]$OllamaVulkan, [ValidateRange(0,256)][int]$OllamaThreads = 0)
+$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-
-function Step([string]$m) { Write-Host ""; Write-Host ("=== " + $m + " ===") -ForegroundColor Cyan }
-function Have([string]$cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
-function PortOpen([int]$port) {
-  try {
-    $c = New-Object System.Net.Sockets.TcpClient
-    $task = $c.ConnectAsync("127.0.0.1", $port)
-    if (-not $task.Wait(700)) { $c.Dispose(); return $false }
-    $ok = $c.Connected
-    $c.Dispose()
-    return $ok
-  } catch { return $false }
-}
-function WaitHttp([string]$url,[int]$seconds=20) {
-  $deadline=(Get-Date).AddSeconds($seconds)
-  do {
-    try { Invoke-RestMethod -Uri $url -TimeoutSec 2 | Out-Null; return $true } catch {}
-    Start-Sleep -Milliseconds 500
-  } while((Get-Date) -lt $deadline)
-  return $false
-}
-function StopNexusNodeOnPort([int]$port) {
-  try {
-    $rows=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-    foreach($row in @($rows)) {
-      $pidValue=$row.OwningProcess
-      if(-not $pidValue){ continue }
-      $proc=Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction SilentlyContinue
-      $cmd=[string]$proc.CommandLine
-      if($proc.Name -match '^node(\.exe)?$' -and ($cmd -match 'nexus-ai|agentHubRuntime|vite')) {
-        Write-Host ("Restartuje stary proces Nexusa na porcie " + $port + " (PID " + $pidValue + ")") -ForegroundColor Yellow
-        Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
-      }
-    }
-  } catch {}
-}
-
 $root = Split-Path -Parent $PSScriptRoot
-Set-Location $root
+Set-Location -LiteralPath $root
+$env:NEXUS_FREE_MODE = 'true'
+$env:OLLAMA_NO_CLOUD = '1'
+$env:NEXUS_OLLAMA_GPU = if ($OllamaVulkan) { 'true' } else { 'false' }
+if ($OllamaThreads -gt 0) { $env:OLLAMA_NUM_THREADS = [string]$OllamaThreads }
 
-Step "Nexus startup"
-Write-Host ("Repo: " + $root)
-
-if (-not (Have "npm")) {
-  throw "Brak npm/Node.js. Zainstaluj Node.js LTS."
+function Test-Http([string]$Url) {
+  try { return (Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200 }
+  catch [System.Net.WebException] { return $false }
 }
 
-$nodeModules=Join-Path $root "node_modules"
-$joseModule=Join-Path $nodeModules "jose"
-if ((-not (Test-Path $nodeModules)) -or (-not (Test-Path $joseModule))) {
-  Step "Instalacja/aktualizacja zaleznosci projektu"
-  npm install
-}
-
-Step "Provider setup"
-$allowedOrigins="https://155877bd-a916-4527-8a1f-63d8e09ecf79.sandbox.floot.app,https://floot.com"
-[Environment]::SetEnvironmentVariable("NEXUS_AGENT_HUB_ALLOWED_ORIGINS",$allowedOrigins,"User")
-$env:NEXUS_AGENT_HUB_ALLOWED_ORIGINS=$allowedOrigins
-& (Join-Path $PSScriptRoot "connect-ai-stack-windows.ps1") -InstallMissing
-
-$ollamaUrl=$env:OLLAMA_BASE_URL
-if(-not $ollamaUrl){$ollamaUrl=[Environment]::GetEnvironmentVariable("OLLAMA_BASE_URL","User")}
-if(-not $ollamaUrl){$ollamaUrl="http://127.0.0.1:11434"}
-$model=$env:OLLAMA_MODEL
-if(-not $model){$model=[Environment]::GetEnvironmentVariable("OLLAMA_MODEL","User")}
-if(-not $model){$model="qwen2.5:1.5b"}
-
-# Browser config contains only local URLs/model names, never API keys.
-$envFile=Join-Path $root ".env.local"
-@(
-  "VITE_NEXUS_AGENT_HUB_URL=http://127.0.0.1:8788",
-  "VITE_OLLAMA_BASE_URL=$ollamaUrl",
-  "VITE_OLLAMA_MODEL=$model"
-) | Set-Content -Path $envFile -Encoding UTF8
-
-if($Repair){
-  StopNexusNodeOnPort 8788
-  StopNexusNodeOnPort 5173
-  Start-Sleep -Milliseconds 500
-}
-
-Step "Ollama fallback"
-if (Have "ollama") {
-  if (-not (PortOpen 11434)) {
-    Write-Host "Uruchamiam Ollama serve..." -ForegroundColor Yellow
-    $env:OLLAMA_ORIGINS="http://127.0.0.1:5173,http://localhost:5173"
-    Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Minimized | Out-Null
-    for ($i=0; $i -lt 20 -and -not (PortOpen 11434); $i++) { Start-Sleep -Milliseconds 500 }
+function Start-NexusService([int]$Port, [string]$Url, [string[]]$NodeArguments) {
+  if (Test-Http $Url) { Write-Host "Service responding: $Url"; return }
+  $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+  if ($listener) { throw "Port $Port is occupied but $Url is not responding. No existing process was stopped." }
+  $node = (Get-Command node.exe -ErrorAction Stop).Source
+  $process = Start-Process -FilePath $node -ArgumentList $NodeArguments -WorkingDirectory $root -PassThru
+  for ($attempt = 0; $attempt -lt 40; $attempt++) {
+    if (Test-Http $Url) { Write-Host "Started service PID $($process.Id): $Url"; return }
+    $process.Refresh()
+    if ($process.HasExited) { throw "Service exited with code $($process.ExitCode): $Url" }
+    Start-Sleep -Milliseconds 500
   }
-  if (PortOpen 11434) {
-    try {
-      $tags = Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 8
-      $names = @($tags.models | ForEach-Object { $_.name })
-      if ($names.Count -eq 0) {
-        Write-Host "Brak modelu — pobieram qwen2.5:1.5b..." -ForegroundColor Yellow
-        & ollama pull qwen2.5:1.5b
-        $tags = Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 8
-        $names = @($tags.models | ForEach-Object { $_.name })
-      }
-      if ($names.Count -gt 0) {
-        $preferred = @("llama3.2:3b","qwen2.5:1.5b","llama3.1:8b") | Where-Object { $names -contains $_ } | Select-Object -First 1
-        if (-not $preferred) { $preferred = $names[0] }
-        [Environment]::SetEnvironmentVariable("OLLAMA_MODEL", $preferred, "User")
-        $env:OLLAMA_MODEL = $preferred
-        Write-Host ("Ollama READY: " + $preferred) -ForegroundColor Green
-      }
-    } catch {
-      Write-Host ("Ollama test: " + $_.Exception.Message) -ForegroundColor Red
-    }
+  throw "Service PID $($process.Id) did not become responsive: $Url"
+}
+
+Write-Host "Nexus FREE / LOCAL FIRST startup: $root"
+Write-Host 'No purchases, subscriptions, provider credentials or automatic model downloads.'
+if ($Repair) { Write-Warning 'Automatic process repair is disabled. Stop only your own stale process before restarting.' }
+if (-not (Test-Path -LiteralPath (Join-Path $root 'node_modules\vite\bin\vite.js'))) {
+  throw 'Project dependencies are missing. Restore dependencies with npm install before startup.'
+}
+$ollama = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
+if ((Test-Path -LiteralPath $ollama) -and -not (Test-Http 'http://127.0.0.1:11434/')) {
+  $env:CUDA_VISIBLE_DEVICES = '-1'
+  $env:GGML_VK_VISIBLE_DEVICES = '-1'
+  $env:OLLAMA_VULKAN = 'false'
+  if ($OllamaVulkan) {
+    Remove-Item Env:\OLLAMA_LLM_LIBRARY -ErrorAction SilentlyContinue
+    Remove-Item Env:\GGML_VK_VISIBLE_DEVICES -ErrorAction SilentlyContinue
+    $env:OLLAMA_VULKAN = 'true'
   }
-} else {
-  Write-Host "Ollama nadal nie jest zainstalowana." -ForegroundColor Red
-}
-
-Step "Agent Hub"
-if (-not (PortOpen 8788)) {
-  Start-Process powershell -ArgumentList @("-NoExit","-ExecutionPolicy","Bypass","-Command","Set-Location '$root'; npm run hub") | Out-Null
-}
-if (WaitHttp "http://127.0.0.1:8788/api/health" 25) {
-  Write-Host "Agent Hub READY: http://127.0.0.1:8788" -ForegroundColor Green
-  try {
-    $plan=Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/chatgpt/status" -TimeoutSec 8
-    if($plan.connected -and $plan.planUsageEnabled){
-      Write-Host ("ChatGPT plan READY: " + $plan.model) -ForegroundColor Green
-    } else {
-      Write-Host "ChatGPT plan: jeszcze niepolaczony. W Nexusie wybierz Continue with ChatGPT." -ForegroundColor Yellow
-    }
-  } catch {
-    Write-Host ("ChatGPT plan status: " + $_.Exception.Message) -ForegroundColor Yellow
+  $env:OLLAMA_HOST = '127.0.0.1:11434'
+  $process = Start-Process -FilePath $ollama -ArgumentList 'serve' -PassThru
+  for ($attempt = 0; $attempt -lt 40; $attempt++) {
+    if (Test-Http 'http://127.0.0.1:11434/') { break }
+    $process.Refresh()
+    if ($process.HasExited) { throw "Ollama exited with code $($process.ExitCode)." }
+    Start-Sleep -Milliseconds 500
   }
-} else {
-  Write-Host "Agent Hub ERROR — backend nie wystartowal." -ForegroundColor Red
+  if (-not (Test-Http 'http://127.0.0.1:11434/')) { throw 'Local Ollama did not become responsive.' }
 }
-
-Step "Frontend"
-if (-not (PortOpen 5173)) {
-  Start-Process powershell -ArgumentList @("-NoExit","-ExecutionPolicy","Bypass","-Command","Set-Location '$root'; npm run dev") | Out-Null
-}
-if (PortOpen 5173) { Write-Host "Nexus READY: http://127.0.0.1:5173" -ForegroundColor Green }
-else { Write-Host "Frontend nie wystartowal." -ForegroundColor Red }
-
-Step "Kontrola AI + internetu"
-try {
-  $ai=Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/ai/health" -TimeoutSec 15
-  $ai | ConvertTo-Json -Depth 8
-} catch {
-  Write-Host ("AI HUB ERROR: " + $_.Exception.Message) -ForegroundColor Red
-}
-try {
-  $oll=Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 8
-  Write-Host ("OLLAMA MODELS: " + (@($oll.models).Count)) -ForegroundColor Green
-} catch {
-  Write-Host ("OLLAMA OFFLINE: " + $_.Exception.Message) -ForegroundColor Red
-}
-try {
-  $weather=Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/weather?q=Kolonia" -TimeoutSec 20
-  Write-Host ("INTERNET/WEATHER OK: " + $weather.location.name) -ForegroundColor Green
-} catch {
-  Write-Host ("INTERNET/WEATHER ERROR: " + $_.Exception.Message) -ForegroundColor Yellow
-}
-
-if (-not $NoBrowser -and (PortOpen 5173)) {
-  Start-Process "http://127.0.0.1:5173/"
-}
+Start-NexusService 8788 'http://127.0.0.1:8788/api/health' @('--experimental-strip-types', 'helpers\agentHubRuntime.ts')
+Start-NexusService 5173 'http://127.0.0.1:5173/' @('node_modules\vite\bin\vite.js', '--host', '127.0.0.1', '--port', '5173', '--strictPort')
+$health = Invoke-RestMethod 'http://127.0.0.1:8788/api/ai/health' -TimeoutSec 30
+if (-not $health.freeOnly) { throw 'Existing Hub is not running FREE MODE. Stop your old Hub explicitly and restart.' }
+$health | ConvertTo-Json -Depth 6
+if (-not $NoBrowser) { Start-Process 'http://127.0.0.1:5173/' }
+Write-Host 'Nexus is responding in FREE MODE. Optional offline tools do not block startup.'
