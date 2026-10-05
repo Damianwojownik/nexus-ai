@@ -102,4 +102,35 @@ Connected on the ChatGPT branch:
 - `POST /api/mis/render` — `live` routes to animal FasterLivePortrait; `quality` routes to Nexus Media Engine (FLP + LTX + compositor) with live fallback.
 - `helpers/misEngine/sessionClient.ts` — one application-level call starts render and alignment from the same audio, then creates articulation, Nexus motion and haptic frames from the aligned timeline.
 
-Current boundary: the neural visual renderer is still audio-driven. Miś articulatory targets already drive deterministic control/haptic data, but are not yet injected as direct neural mouth controls into FasterLivePortrait/LTX. Do not describe this as direct articulatory control of the neural renderer until that adapter exists.
+## Direct articulation injection v1
+
+Implemented and CI-validated on this branch:
+
+- aligned phonemes are converted into deterministic articulation control points before render,
+- the same source audio still generates natural JoyVASA motion,
+- Miś Engine applies conservative corrections to FasterLivePortrait expression motion before rendering,
+- corrections are limited to the upstream lip expression region and currently control:
+  - jawOpen,
+  - lipWide,
+  - lipRound,
+  - lipProtrusion,
+  - lipPress,
+- the controlled FLP face is preserved through the FLP + LTX quality compositor,
+- live and quality render paths receive the same articulation controls.
+
+Important boundary:
+- tongueX, tongueY, tongueTip, teethGap, voicing, airflow and nasal remain deterministic Miś control/teaching/haptic channels but are NOT yet directly rendered by FasterLivePortrait.
+- upstream FasterLivePortrait's learned face-retargeting UI is human-only for retargeting; Miś v1 therefore injects into the audio-generated motion/expression trajectory instead of claiming animal retarget-network support.
+- the expression projection is experimental and requires visual calibration on the canonical teddy before therapeutic validation.
+
+## CI validation
+
+Draft PR #11 is TEST-only and must not be merged automatically.
+
+Latest validated workflow:
+- npm ci: PASS
+- npm run test:mis: PASS
+- Python syntax compilation for avatar server, articulation injector, phoneme aligner, media worker and media engine: PASS
+- npm run build (TypeScript + Vite): PASS
+
+GPU inference itself is still not claimed as validated by CI because GitHub Actions does not run the FasterLivePortrait/LTX GPU models.
