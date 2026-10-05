@@ -15,7 +15,11 @@ const REQUIRED_VIEWS: IdentityReference['view'][] = [
 ];
 
 export class IdentityLock {
-  constructor(private readonly profile: IdentityProfile) {}
+  private readonly profile: IdentityProfile;
+
+  constructor(profile: IdentityProfile) {
+    this.profile = profile;
+  }
 
   getProfile(): IdentityProfile {
     return {
