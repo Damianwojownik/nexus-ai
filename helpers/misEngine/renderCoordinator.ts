@@ -37,10 +37,16 @@ type QualityRenderer = Pick<MisMediaRendererClient,'configured'|'render'|'health
  * visual renderer. It never changes phoneme/articulation/haptic timing.
  */
 export class MisRenderCoordinator {
+  private readonly live: LiveRenderer;
+  private readonly quality: QualityRenderer;
+
   constructor(
-    private readonly live:LiveRenderer=new SelfHostedAvatarServerClient(),
-    private readonly quality:QualityRenderer=new MisMediaRendererClient(),
-  ){}
+    live:LiveRenderer=new SelfHostedAvatarServerClient(),
+    quality:QualityRenderer=new MisMediaRendererClient(),
+  ){
+    this.live = live;
+    this.quality = quality;
+  }
 
   async health():Promise<{
     experimental:true;
