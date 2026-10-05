@@ -29,6 +29,136 @@ validated there under FREE constraints.
 
 ## Experimental EchoMimicV3 / nosi adapter
 
+### Explicit three-minute offline experiment
+
+`render_echomimic_long.py` uses the same pinned service, 25 FPS, eight-step
+generation, 81-frame windows and eight-frame overlap as the original adapter.
+Supply a new job containing the unchanged portrait and a complete mono
+16 kHz `speech.wav`, then pass `--reference-sha256`, `--prompt` and
+`--negative-prompt`. It explicitly enables at most 180 seconds; the ordinary
+adapter and authenticated worker retain their 30-second default/limit.
+This is new generation for the supplied narration, not repetition of a short MP4.
+Each upstream window uses the original portrait and increments the seed;
+overlap blending does not prove long-term identity or seamless continuity.
+Keep the approved compute-unit budget and a bounded process timeout.
+Review transitions and the entire result before claiming the short film's
+quality is preserved. Neither this CLI nor its metadata certifies live
+conversation readiness, zero-cost compute or clinical articulation.
+
+### Optional animal-renderer benchmark
+
+`restore_faster_animal.sh` prepares a third, isolated Python 3.11 environment
+at `/content/nexus-faster-animal/venv`. It requires authorized Linux/Colab GPU
+compute and CUDA compilation tools for X-Pose. Normalize Windows CRLF to LF
+before running `bash -n`, then invoke with `NEXUS_CLOUD_WORKER=1` and a bounded
+timeout. Upload `requirements-faster-animal.txt` alongside it. Existing
+EchoMimic and character-voice environments are not modified.
+The script installs a pinned CUDA 12.1.1/GCC 12 toolchain under its own directory
+using Micromamba 2.3.2. Colab's CUDA 13 compiler cannot compile an extension for
+the isolated CUDA 12.1 PyTorch build. No system CUDA symlink is changed.
+Animal v1.1's `GridSample3D` is a TensorRT plugin, not a standard ONNX Runtime
+operator. The script downloads the pinned plugin and builds GPU-specific
+TensorRT 8.6.1 engines using the upstream precision choices (motion FP32,
+appearance/warping/stitching FP16). TensorRT is a proprietary NVIDIA SDK, not
+MIT code; its terms remain separate from the MIT model cards. An incompatible
+plugin/engine fails explicitly rather than silently running a CPU renderer.
+TensorRT 8.6's legacy build invokes `python -m pip` itself; build isolation is
+disabled for that package only so it can use the seeded private environment.
+The renderer environment pins Torch 2.3.1/CUDA 12.1 with cuDNN 8, matching
+TensorRT 8.6. Torch 2.4's cuDNN 9 is not ABI-compatible with this SDK.
+The installer scopes NVIDIA library lookup to this environment and force-rebuilds
+X-Pose against its Torch version; the EchoMimic and voice environments are untouched.
+
+Source, animal ONNX v1.1 weights, JoyVASA and Chinese HuBERT revisions are pinned.
+Downloads exclude InsightFace detection/recognition weights. Importing its MIT
+Python package is not authorization to download its non-commercial weights.
+The animal detector and animal models remain separate from a human rig.
+Model cards report MIT; this is not a clinical or complete training-data
+licensing certification.
+
+`benchmark_faster_animal.py` accepts the checkout, a new output directory, an
+original PNG/JPEG, supplied mono 16/24 kHz PCM WAV and required
+`--reference-sha256`. It refuses CPU fallback, altered references, incompatible
+source revisions and existing outputs. It generates a reviewed-later MP4 and
+contact sheet, validates decoding/duration/frame count, and records model
+startup, learned audio-to-motion time and warmed drawing throughput separately.
+`--absolute-motion` compares absolute against default relative motion.
+25 FPS drawing alone does not establish conversational latency: TTS, motion
+generation, streaming and playback are separate stages. The benchmark does not
+start a service, change Luna, publish to Floot, establish hour-long stability,
+or implement phoneme/tongue/teeth control. `liveConversationReady` and
+`freeBackendVerified` remain false. Published RTX 3090 frame rates must not be
+represented as measured L4 or desktop performance.
+
+The first successful L4 animal benchmark, `faster-bear-e189788d`, used the
+unchanged original bear and the user-accepted 2.76-second voice sample:
+
+| Stage | Measured result |
+| --- | --- |
+| Model/source startup | 9.118 seconds |
+| Supplied audio to motion | 0.546 seconds |
+| Warm drawing, 69 frames | 2.573 seconds / 26.813 FPS |
+| First warm drawing frame | 0.0343 seconds |
+| Saved video | 768x960, 25 FPS, 2.76 seconds, H.264/AAC |
+
+Cloud and local full decoding passed; the downloaded video matches SHA-256
+`9bd5a8eb22608460e04896b9ab4ffdb333878f24bf59129496d4a673b19c0137`.
+The pinned pipeline expects the whole per-image face list, not its first
+face record; the helper preserves and tests that nesting. Six sampled frames
+show blinking and varying muzzle shapes with the original costume/paws retained.
+This short offline test meets the 25-FPS drawing target, not instant answers,
+long-term identity stability, verified lipsync or user visual approval.
+
+### Optional authorized character voice test
+
+`clone_character_voice.py` is a separate, consent-gated offline experiment
+using Chatterbox Multilingual V3 (PL/EN/DE). It is not a new default Luna voice
+or an automatic FREE rendering/TTS backend. Prepare a clean single-speaker
+6-30 second mono 24 kHz, 16-bit WAV with no other voices or background music.
+The user must have rights/consent for new speech in that voice, not just for
+the character image. Keep the embedded generation watermark intact.
+
+Use a separate Python 3.11 environment:
+
+```bash
+uv venv --python 3.11 --seed /content/nexus-character-voice/venv
+uv pip install --python /content/nexus-character-voice/venv/bin/python \
+  -r /content/nexus-avatar/requirements-character-voice.txt
+NEXUS_CLOUD_WORKER=1 timeout 900 /content/nexus-character-voice/venv/bin/python \
+  /content/nexus-avatar/clone_character_voice.py reference.wav new-voice-job \
+  --text "A short approved sentence." --language en --voice-consent
+```
+
+Source and main model revisions are pinned. The upstream package resolves
+additional dependencies; record its `pip freeze` with the job for reproducibility.
+The helper validates inputs and generated audio, refuses existing output
+directories and records hashes, generation time and pending listening review.
+`CharacterVoiceSession` loads and conditions the model once and serializes
+subsequent synthesis calls. It checks the reference hash and speaker-conditioning
+fingerprint so a cached voice cannot silently be reused for another character.
+Repeat `--text` for a multi-utterance batch; each result is saved in a separate
+`turn-NNN` directory. This prepares reusable voice state, not a network service
+or streaming conversation. The fingerprint check does not prove audible identity.
+Voice similarity, single-speaker isolation, correct pronunciation and live
+response latency must be checked separately; successful WAV generation does
+not verify those properties. Do not upgrade the EchoMimic environment to
+Chatterbox's different Torch/Transformers dependencies.
+
+If an authorized Colab GPU runtime has expired, upload `restore_echomimic.sh`
+and the five adapter files listed in it to `/content/nexus-avatar`. For a shell
+file uploaded from Windows, first run
+`sed -i 's/\r$//' /content/nexus-avatar/restore_echomimic.sh`, then run
+`NEXUS_CLOUD_WORKER=1 timeout 3600 bash /content/nexus-avatar/restore_echomimic.sh`.
+This restores an isolated Python 3.11 environment, checks the nosi revision,
+applies the low-VRAM patch, and downloads only the required EchoMimic components
+at pinned Hugging Face revisions. It preserves incompatible existing checkouts
+by failing rather than resetting them. Downloads need approximately 25 GB;
+runtime disk storage is ephemeral. It does not restore old rendered jobs, train
+weights, start a service, or attest that paid compute is free.
+Check the user's remaining compute allowance before starting and stop when the
+approved job is finished. Model-card licensing does not replace a full review
+of separate model and training-data terms before commercial deployment.
+
 `nexus_render_engine.py` accepts `echomimic-v3` in its existing sequential
 queue. This is an experimental batch adapter, not a production-quality
 live stream, trained Nexus model, or VRM/Anima integration.

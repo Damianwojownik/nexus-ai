@@ -2,7 +2,7 @@ import { ModelRouter } from './modelRouter.ts';
 import type { AIModelMode } from './modelRouter.ts';
 import { MemoryStore } from './memoryStore.ts';
 import { ToolRegistry } from './toolRegistry.ts';
-import { LUNA_IDENTITY, LUNA_EMOTION_CONTEXT } from './assistantPersona.ts';
+import { LUNA_IDENTITY, LUNA_EMOTION_CONTEXT, LUNA_IDENTITY_REMINDER } from './assistantPersona.ts';
 
 export type NexusMessageInput = {
   text: string;
@@ -55,13 +55,14 @@ export class NexusAgent {
 
     const prompt = [
       this.options.systemPrompt || 'You are a local-first AI assistant for product work and coding.',
-      `Project context: ${input.projectContext || 'No project context provided.'}`,
-      `Current AI mode: ${mode}`,
-      `Available tools: ${toolHints || 'none'}`,
-      memoryContext,
-      historyContext,
       LUNA_IDENTITY,
       LUNA_EMOTION_CONTEXT,
+      `Current AI mode: ${mode}`,
+      `Available tools: ${toolHints || 'none'}`,
+      `Project context: ${input.projectContext || 'No project context provided.'}`,
+      `Memory context:\n${memoryContext}`,
+      historyContext,
+      LUNA_IDENTITY_REMINDER,
       `User message: ${input.text}`,
     ].join('\n\n');
 

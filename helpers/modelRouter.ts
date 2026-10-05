@@ -107,7 +107,7 @@ export class ModelRouter {
         ...localProviders,
       ];
     const candidates = [...new Set(orderedCandidates)];
-    const attempts: Array<{ provider: ModelProvider; status?: ModelProviderStatus; failed: boolean }> = [];
+    const attempts: Array<{ provider: ModelProvider; status?: ProviderFailureReason; error?: string; failed: boolean }> = [];
 
     for (const provider of candidates) {
       if (signal?.aborted) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
@@ -124,7 +124,7 @@ export class ModelRouter {
       } catch {
         health = { status: 'ERROR', error: 'Health check failed' };
       }
-      attempts.push({ provider, status: health.status, failed: false });
+      attempts.push({ provider, status: health.status, error: health.error, failed: false });
       this.onProviderEvent({ type: 'provider_attempt', providerId, reason: health.status });
       if (health.status !== 'CONNECTED') {
         attempts[attempts.length - 1].failed = true;
@@ -146,14 +146,16 @@ export class ModelRouter {
         if (signal?.aborted) throw signal.reason ?? error;
         const reason = classifyProviderFailure(error);
         attempts[attempts.length - 1].failed = true;
+        attempts[attempts.length - 1].status = reason;
+        attempts[attempts.length - 1].error = error instanceof Error ? error.message : 'Generation failed';
         this.recordProviderFailure(providerId, reason);
         this.onProviderEvent({ type: 'provider_failed', providerId, reason });
       }
     }
 
-    const attemptedProviders = attempts.map(({ provider, status }) => {
+    const attemptedProviders = attempts.map(({ provider, status, error }) => {
       const label = provider.id ?? provider.name;
-      return `${label}: ${status ?? 'generation_failed'}`;
+      return `${label}: ${status ?? 'generation_failed'}${error ? ` — ${error}` : ''}`;
     });
     throw new Error(attemptedProviders.length
       ? `No AI provider is available (${attemptedProviders.join('; ')}).`

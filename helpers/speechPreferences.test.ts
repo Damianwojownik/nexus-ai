@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFinalSpeechSubmission, matchingVoices, selectSpeechVoice, speechLanguage, speechReplyContext, speechPreview, SPEECH_LANGUAGES } from './speechPreferences.ts';
+import { createFinalSpeechSubmission, matchingVoices, selectSpeechVoice, speechLanguage, speechReplyContext, speechPreview, SPEECH_LANGUAGES, prepareSpeechText } from './speechPreferences.ts';
 
 test('voice previews introduce Luna and Polish uses feminine self-reference', () => {
   for (const language of SPEECH_LANGUAGES) {
@@ -8,6 +8,35 @@ test('voice previews introduce Luna and Polish uses feminine self-reference', ()
     assert.doesNotMatch(speechPreview(language.code), /jestem Nexus|I am Nexus/);
   }
   assert.match(speechPreview('pl-PL'), /asystentka Nexus AI.*Jestem gotowa/);
+});
+
+test('Polish conversation guidance uses natural feminine speech and concise greetings', () => {
+  const context = speechReplyContext('pl-PL');
+  assert.match(context, /naturalnie po polsku/);
+  assert.match(context, /rodzaju żeńskim/);
+  assert.match(context, /Cześć! W czym mogę ci pomóc/);
+  assert.match(context, /Nie przedstawiaj się przy każdej odpowiedzi/);
+  assert.match(context, /złożonym zadaniu zachowaj potrzebne szczegóły/);
+  assert.match(context, /Nie dodawaj niepotwierdzonych informacji/);
+});
+
+test('speech strips formatting without changing facts, inline code or the displayed source', () => {
+  const original = '# Wynik\n- **Cena:** 12,50 zł.\n- Zapisz `nexus_config.ts`.\n> [Dokumentacja](https://example.test/a_(b)) jest dostępna.\n*Jestem gotowa.*';
+  const spoken = prepareSpeechText(original, 'pl-PL');
+  assert.equal(spoken, 'Wynik\nCena: 12,50 zł.\nZapisz nexus_config.ts.\nDokumentacja jest dostępna.\nJestem gotowa.');
+  assert.ok(original.startsWith('# Wynik'));
+  assert.equal(prepareSpeechText(spoken, 'pl-PL'), spoken);
+  for (const value of ['Cześć! W czym mogę ci pomóc?', 'Nie zmieniaj a_b ani 2 * 3.', 'https://example.test', '1. Zapisz plik.\n2. Uruchom testy.']) {
+    assert.equal(prepareSpeechText(value, 'pl-PL'), value);
+  }
+});
+
+test('code blocks are explicitly referenced instead of read as conversation', () => {
+  for (const fence of ['```', '~~~']) {
+    const source = `Gotowe.\n${fence}js\nconst x = 1;\n${fence}\nSprawdziłam wynik.`;
+    assert.equal(prepareSpeechText(source, 'pl-PL'), 'Gotowe.\nKod znajduje się w odpowiedzi tekstowej.\nSprawdziłam wynik.');
+    assert.match(prepareSpeechText(source, 'en-US'), /The code is in the written response/);
+  }
 });
 
 const voices = [

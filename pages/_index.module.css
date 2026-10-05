@@ -27,6 +27,7 @@
 .eye{position:absolute;top:35%;width:9%;height:3.4%;border-radius:50%;background:rgba(4,10,18,.74);overflow:hidden;transform:translate(var(--nexus-gaze-x,0),var(--nexus-gaze-y,0)) scaleY(calc(1 - var(--nexus-blink,0) * .96));transform-origin:center}
 .eyeLeft{left:32%}.eyeRight{right:32%}.eye i{position:absolute;width:31%;aspect-ratio:1;border-radius:50%;left:34%;top:8%;background:rgba(145,238,255,.9);box-shadow:0 0 9px rgba(124,231,255,.85);transform:translate(calc(var(--nexus-gaze-x,0) * .55),calc(var(--nexus-gaze-y,0) * .55))}
 .mouthRig{position:absolute;left:43%;top:54%;width:14%;height:calc(1.4% + var(--nexus-mouth,0) * 6.8%);border-radius:calc(45% + var(--nexus-mouth-round,0) * 28%) calc(45% + var(--nexus-mouth-round,0) * 28%) 52% 52%;background:rgba(10,4,9,.72);border:1px solid rgba(255,175,190,.32);transform:scaleX(calc(.68 + var(--nexus-mouth-wide,.15) * .44 - var(--nexus-mouth-round,.05) * .16)) scaleY(calc(1 - var(--nexus-mouth-press,.1) * .38));transform-origin:center top;box-shadow:inset 0 -4px 8px rgba(210,90,120,.18);will-change:height,transform,border-radius}
+.mouthRig{transition:height 38ms ease,transform 38ms ease,border-radius 38ms ease}
 .avatar[data-motion-state="listening"] .eye{height:3.8%}.avatar[data-motion-state="thinking"] .eyeLeft{transform:translate(var(--nexus-gaze-x,0),var(--nexus-gaze-y,0)) rotate(-3deg) scaleY(calc(1 - var(--nexus-blink,0) * .96))}.avatar[data-motion-state="thinking"] .eyeRight{transform:translate(var(--nexus-gaze-x,0),var(--nexus-gaze-y,0)) rotate(3deg) scaleY(calc(1 - var(--nexus-blink,0) * .96))}
 .avatar[data-motion-state="idle"] .faceRig{opacity:.58}.avatar[data-motion-state="speaking"] .faceRig{opacity:.82}
 @media(max-width:760px){.faceRig{opacity:.68}}
@@ -62,8 +63,14 @@
 .avatar.cameraFace .faceRig::before,.avatar.cameraFace .faceRig::after{top:8%;width:8%}
 .avatar.cameraFace .faceRig::before{left:44%}
 .avatar.cameraFace .faceRig::after{right:24%}
-.avatar.photoPortrait .person{object-fit:contain;object-position:center;transform:none;will-change:auto}
-.avatar.photoPortrait.cameraFace .person{object-fit:cover;object-position:center;transform:none}
+.avatar.photoPortrait .person{object-fit:contain;object-position:center;will-change:transform}
+.avatar.photoPortrait.cameraFace .person{object-fit:contain;object-position:center;transform:scale(1.6) translateY(calc(var(--nexus-breath,0) * -.25px));transform-origin:54% 5%}
+.avatar.photoPortrait .eye,.avatar.photoPortrait .faceRig::before,.avatar.photoPortrait .faceRig::after{display:none}
+.avatar.photoPortrait .wave{display:none}
+.avatar.photoPortrait .faceRig{opacity:0;transition:opacity .12s linear}
+.avatar.photoPortrait.speaking .faceRig{opacity:.9}
+.avatar.photoPortrait .mouthRig{height:calc(1% + var(--nexus-mouth,0) * 8%);left:47.5%;top:36%;width:8%}
+.avatar.photoPortrait.cameraFace .mouthRig{height:calc(1% + var(--nexus-mouth,0) * 9%);left:45%;top:55%;width:10%}
 .nexusPortrait .person{object-fit:cover;object-position:center;transform:none;will-change:auto}
 .nexusPortrait.cameraFace .person{object-fit:cover;object-position:center;transform:none}
 .batchPanel{width:min(720px,100%);margin-top:12px;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--card)}

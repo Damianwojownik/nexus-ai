@@ -19,6 +19,7 @@ import type { AIRoutingMode } from './aiProviderRouter.ts';
 import { GeminiAIProvider } from './geminiAIProvider.ts';
 import { CloudCliProvider } from './cloudCliProvider.ts';
 import { LocalSpeech, validateSpeechText } from './localSpeech.ts';
+import { PaulinaSpeechStream } from './paulinaSpeechStream.ts';
 import { OllamaHttpProvider } from './ollamaHttpProvider.ts';
 import { CapabilityRegistry, GitHubConnector } from './capabilityRegistry.ts';
 import type { ToolConnector } from './capabilityRegistry.ts';
@@ -283,15 +284,20 @@ h1{font-size:1.25rem;color:#7de4ff}p{line-height:1.5}.ok{color:#7dffc2}
 
 export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptions = {}): Server {
   const localSpeech = new LocalSpeech();
+  const paulinaStream = new PaulinaSpeechStream();
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
   const avatarServer = new SelfHostedAvatarServerClient();
   const imageServer = new SelfHostedImageServerClient(options.imageServerUrl, options.imageServerToken);
   const cloudRouter = new NexusCloudRouter();
   const configuredFreeMode = nexusFreeMode();
   const freeOnly = process.env.NEXUS_FREE_MODE === 'true' || (options.freeOnly ?? configuredFreeMode);
+  const ollamaCpuOnly = process.env.NEXUS_OLLAMA_GPU !== 'true';
+  if (process.env.NEXUS_OLLAMA_GPU !== undefined && !['true', 'false'].includes(process.env.NEXUS_OLLAMA_GPU)) {
+    throw new Error('NEXUS_OLLAMA_GPU must be true or false');
+  }
   const aiRouter = options.aiRouter ?? new AIProviderRouter([
     new CloudCliProvider('codex'), new CloudCliProvider('copilot'), new CloudCliProvider('claude'),
-    new GeminiAIProvider(), new OllamaHttpProvider({ cpuOnly: true }), new LlamaCppProvider(),
+    new GeminiAIProvider(), new OllamaHttpProvider({ cpuOnly: ollamaCpuOnly }), new LlamaCppProvider(),
   ], undefined, { freeOnly });
   if (freeOnly) aiRouter.enableFreeMode();
   const capabilityRegistry = options.capabilityRegistry ?? createDefaultCapabilityRegistry(localCapabilities, options.connectors, hub);
@@ -337,6 +343,61 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       }
       if (method === 'GET' && url.pathname === '/api/speech/health') {
         sendJson(response, 200, await localSpeech.health());
+        return;
+      }
+      if (method === 'GET' && url.pathname === '/api/speech/stream/health') {
+        sendJson(response, 200, await paulinaStream.health());
+        return;
+      }
+      if (method === 'POST' && url.pathname === '/api/speech/stream') {
+        const body = await readJson(request, 32 * 1024);
+        let text: string;
+        try { text = validateSpeechText(body.text); }
+        catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Invalid speech text.'); }
+        const health = await paulinaStream.health();
+        if (!health.available) throw new HttpError(503, health.reason ?? 'Local Paulina streaming is unavailable.');
+        const controller = new AbortController();
+        const abort = () => { if (!response.writableEnded) controller.abort(); };
+        request.once('aborted', abort);
+        response.once('close', abort);
+        response.writeHead(200, {
+          'Content-Type': 'application/x-ndjson; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        try {
+          await paulinaStream.stream(text, controller.signal, async event => {
+            controller.signal.throwIfAborted();
+            if (!response.write(JSON.stringify(event) + '\n')) {
+              await new Promise<void>((resolve, reject) => {
+                const cleanup = () => {
+                  response.off('drain', drained);
+                  response.off('error', failed);
+                  controller.signal.removeEventListener('abort', cancelled);
+                };
+                const drained = () => { cleanup(); resolve(); };
+                const failed = (error: Error) => { cleanup(); reject(error); };
+                const cancelled = () => { cleanup(); reject(new Error('Paulina stream client disconnected.')); };
+                response.once('drain', drained);
+                response.once('error', failed);
+                controller.signal.addEventListener('abort', cancelled, { once: true });
+                if (controller.signal.aborted) cancelled();
+              });
+            }
+          });
+          response.end();
+        } catch (error) {
+          console.error('Native Paulina HTTP stream failed:', error instanceof Error ? error.name : 'Error');
+          if (!controller.signal.aborted && !response.destroyed && !response.writableEnded) {
+            response.end(JSON.stringify({
+              type: 'error', requestId: null, code: 'SYNTHESIS_FAILED',
+              message: error instanceof Error ? error.message.slice(0, 240) : 'Paulina stream failed.',
+            }) + '\n');
+          }
+        } finally {
+          request.off('aborted', abort);
+          response.off('close', abort);
+        }
         return;
       }
       if (method === 'POST' && url.pathname === '/api/speech/synthesize') {
@@ -464,7 +525,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
           providers,
           freeOnly,
           inventory: aiRouter.inventory(),
-          ollamaCpuOnly: options.aiRouter === undefined,
+          ollamaCpuOnly: options.aiRouter === undefined && ollamaCpuOnly,
           cloud: aiRouter.inventory().some(item => !item.local && providers[item.id]?.status === 'healthy')
             ? { status: 'healthy' } : { status: 'not_configured', message: 'No cloud CLI/API is ready.' },
         });
@@ -925,6 +986,6 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       sendJson(response, statusCode, { error: message });
     }
   });
-  server.once('close', () => localSpeech.close());
+  server.once('close', () => { localSpeech.close(); paulinaStream.close(); });
   return server;
 }

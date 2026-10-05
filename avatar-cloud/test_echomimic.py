@@ -8,6 +8,8 @@ import subprocess
 import render_echomimic as adapter
 import nexus_render_engine as engine
 import configure_echomimic as setup
+import render_echomimic_long as long_adapter
+import hashlib
 
 
 class EchoMimicAdapterTests(unittest.TestCase):
@@ -137,6 +139,42 @@ class EchoMimicAdapterTests(unittest.TestCase):
         np.max.return_value = 0
         with self.assertRaisesRegex(ValueError, "silent"):
             adapter.validate_audio(audio, 16000, np)
+
+    def test_long_audio_requires_explicit_limit_and_remains_bounded(self):
+        np = Mock()
+        np.isfinite.return_value.all.return_value = True
+        np.max.return_value = 0.5
+        audio = Mock(ndim=1)
+        audio.__len__ = Mock(return_value=180 * 16000)
+        with self.assertRaisesRegex(ValueError, "0.2-30"):
+            adapter.validate_audio(audio, 16000, np)
+        adapter.validate_audio(audio, 16000, np, max_seconds=180)
+        audio.__len__.return_value += 1
+        with self.assertRaisesRegex(ValueError, "0.2-180"):
+            adapter.validate_audio(audio, 16000, np, max_seconds=180)
+        with self.assertRaisesRegex(ValueError, "Supported audio limits"):
+            adapter.validate_audio(audio, 16000, np, max_seconds=3600)
+
+    def test_existing_notebook_validation_patch_remains_unambiguous(self):
+        source = Path(adapter.__file__).read_text(encoding="utf-8")
+        self.assertEqual(source.count("validate_audio(audio, rate, np)"), 1)
+
+    def test_long_reference_rejects_changed_missing_or_multiple_portraits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            job = Path(directory)
+            portrait = b"original portrait"
+            digest = hashlib.sha256(portrait).hexdigest()
+            with self.assertRaisesRegex(ValueError, "exactly one"):
+                long_adapter.verify_reference(job, digest)
+            (job / "portrait.png").write_bytes(portrait)
+            long_adapter.verify_reference(job, digest)
+            with self.assertRaisesRegex(ValueError, "mismatch"):
+                long_adapter.verify_reference(job, "0" * 64)
+            with self.assertRaisesRegex(ValueError, "lowercase"):
+                long_adapter.verify_reference(job, "invalid")
+            (job / "portrait.jpg").write_bytes(portrait)
+            with self.assertRaisesRegex(ValueError, "exactly one"):
+                long_adapter.verify_reference(job, digest)
 
 
 if __name__ == "__main__":

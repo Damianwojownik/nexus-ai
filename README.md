@@ -6,7 +6,7 @@ Floot project ID: `155877bd-a916-4527-8a1f-63d8e09ecf79`
 
 ## Current state
 
-The Vite frontend routes prompts through `NexusAgent` and `ModelRouter` to the local Agent Hub. `NEXUS_FREE_MODE=true` is the default: CPU-only Ollama is first, optional loopback llama.cpp second, then verified zero-cost providers if configured. Existing GPT/Codex, Copilot, Claude, Gemini and ChatGPT adapters remain in the source but are blocked in FREE mode. Voice input, browser TTS and avatar selection remain in place.
+The Vite frontend routes prompts through `NexusAgent` and `ModelRouter` to the local Agent Hub. `NEXUS_FREE_MODE=true` is the default: CPU-only Ollama is first, optional loopback llama.cpp second, then verified zero-cost providers if configured. Existing GPT/Codex, Copilot, Claude and ChatGPT adapters remain in the source but are blocked in FREE mode. Gemini is also blocked unless its pinned model and no-billing Free Tier project are explicitly verified; see [optional Gemini and local Cline setup](docs/GEMINI-LOCAL-FIRST.md). Voice input, browser TTS and avatar selection remain in place.
 
 The browser requires the Hub to explicitly report `freeOnly=true` before inference. Older/non-FREE Hubs are not silently trusted. Responses stream through the Hub to the existing avatar conversation pipeline; the animated video itself is not re-rendered or changed by this integration.
 

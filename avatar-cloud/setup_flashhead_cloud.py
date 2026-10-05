@@ -56,18 +56,29 @@ def main():
         run([uv, "pip", "install", "--python", python, "-r", requirements,
              "ninja", "packaging", "setuptools", "wheel", "huggingface_hub"])
         run([python, "-c", "import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"])
-        env = dict(os.environ, MAX_JOBS="2")
-        subprocess.run([uv, "pip", "install", "--python", str(python),
-                        "flash_attn==2.8.0.post2", "--no-build-isolation"],
-                       env=env, check=True, timeout=1200, stdout=log, stderr=subprocess.STDOUT)
+        run([python, "-c",
+             "import sys,torch; "
+             "assert sys.version_info[:2]==(3,10); "
+             "assert torch.__version__.split('+')[0]=='2.7.1'; "
+             "assert torch.version.cuda=='12.8'; "
+             "assert torch._C._GLIBCXX_USE_CXX11_ABI, 'FlashAttention wheel ABI mismatch'"])
+        run([uv, "pip", "install", "--python", python,
+             "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.0.post2/"
+             "flash_attn-2.8.0.post2%2Bcu12torch2.7cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"])
         run(["apt-get", "update"])
         run(["apt-get", "install", "-y", "espeak-ng", "ffmpeg"])
         run([python, "-c",
-             "from huggingface_hub import snapshot_download; "
+             "from huggingface_hub import snapshot_download; import json; from pathlib import Path; "
              "snapshot_download('Soul-AILab/SoulX-FlashHead-1_3B', "
+             "revision='59119b6c681230c3eeee157e224ae1941746711e', "
              "allow_patterns=['Model_Lite/**','VAE_LTX/**','README.md','LICENSE*'], "
              "local_dir='models/SoulX-FlashHead-1_3B'); "
-             "snapshot_download('facebook/wav2vec2-base-960h',local_dir='models/wav2vec2-base-960h')"],
+             "snapshot_download('facebook/wav2vec2-base-960h', "
+             "revision='22aad52d435eb6dbaf354bdad9b0da84ce7d6156', "
+             "local_dir='models/wav2vec2-base-960h'); "
+             "Path('models/nexus-model-pins.json').write_text(json.dumps({"
+             "'flashhead':'59119b6c681230c3eeee157e224ae1941746711e',"
+             "'wav2vec2':'22aad52d435eb6dbaf354bdad9b0da84ce7d6156'}))"],
             cwd=repo)
         run([python, "-c", "from flash_head.inference import get_pipeline; print('FlashHead imports OK')"],
             cwd=repo)

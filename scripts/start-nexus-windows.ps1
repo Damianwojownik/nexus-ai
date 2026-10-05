@@ -1,10 +1,12 @@
-param([switch]$NoBrowser, [switch]$Repair)
+param([switch]$NoBrowser, [switch]$Repair, [switch]$OllamaVulkan, [ValidateRange(0,256)][int]$OllamaThreads = 0)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
 $env:NEXUS_FREE_MODE = 'true'
 $env:OLLAMA_NO_CLOUD = '1'
+$env:NEXUS_OLLAMA_GPU = if ($OllamaVulkan) { 'true' } else { 'false' }
+if ($OllamaThreads -gt 0) { $env:OLLAMA_NUM_THREADS = [string]$OllamaThreads }
 
 function Test-Http([string]$Url) {
   try { return (Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200 }
@@ -37,6 +39,11 @@ if ((Test-Path -LiteralPath $ollama) -and -not (Test-Http 'http://127.0.0.1:1143
   $env:CUDA_VISIBLE_DEVICES = '-1'
   $env:GGML_VK_VISIBLE_DEVICES = '-1'
   $env:OLLAMA_VULKAN = 'false'
+  if ($OllamaVulkan) {
+    Remove-Item Env:\OLLAMA_LLM_LIBRARY -ErrorAction SilentlyContinue
+    Remove-Item Env:\GGML_VK_VISIBLE_DEVICES -ErrorAction SilentlyContinue
+    $env:OLLAMA_VULKAN = 'true'
+  }
   $env:OLLAMA_HOST = '127.0.0.1:11434'
   $process = Start-Process -FilePath $ollama -ArgumentList 'serve' -PassThru
   for ($attempt = 0; $attempt -lt 40; $attempt++) {
@@ -45,7 +52,7 @@ if ((Test-Path -LiteralPath $ollama) -and -not (Test-Http 'http://127.0.0.1:1143
     if ($process.HasExited) { throw "Ollama exited with code $($process.ExitCode)." }
     Start-Sleep -Milliseconds 500
   }
-  if (-not (Test-Http 'http://127.0.0.1:11434/')) { throw 'CPU-only Ollama did not become responsive.' }
+  if (-not (Test-Http 'http://127.0.0.1:11434/')) { throw 'Local Ollama did not become responsive.' }
 }
 Start-NexusService 8788 'http://127.0.0.1:8788/api/health' @('--experimental-strip-types', 'helpers\agentHubRuntime.ts')
 Start-NexusService 5173 'http://127.0.0.1:5173/' @('node_modules\vite\bin\vite.js', '--host', '127.0.0.1', '--port', '5173', '--strictPort')

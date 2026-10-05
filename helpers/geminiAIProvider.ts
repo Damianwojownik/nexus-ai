@@ -4,7 +4,7 @@ import type {
   AIProviderHealth,
 } from './aiProviderRouter.ts';
 import { AIProviderRequestError } from './aiProviderRouter.ts';
-import { nexusFreeMode } from './freeMode.ts';
+import { nexusFreeMode, freeProviderBlock } from './freeMode.ts';
 
 interface GeminiTextPart {
   text?: string;
@@ -39,7 +39,9 @@ export class GeminiAIProvider implements AIProvider {
   readonly name = 'Google Gemini';
   readonly capabilities = ['ai.chat', 'ai.code', 'ai.analyze', 'ai.stream'];
   readonly priority = 100;
-  readonly costClass = 'paid' as const;
+  readonly costClass: 'free' | 'paid';
+  readonly cost: number | undefined;
+  readonly routingTier: number;
   readonly isLocal = false;
 
   private readonly apiKey: string;
@@ -52,20 +54,27 @@ export class GeminiAIProvider implements AIProvider {
     model?: string;
     fetcher?: typeof fetch;
     timeoutMs?: number;
+    freeTierConfirmed?: boolean;
+    primary?: boolean;
   } = {}) {
     this.apiKey = options.apiKey ?? process.env.GEMINI_API_KEY ?? '';
     this.model = options.model ?? process.env.GEMINI_MODEL ?? 'gemini-2.5-flash';
+    const confirmed = options.freeTierConfirmed ?? nexusFreeMode(process.env.NEXUS_GEMINI_FREE_CONFIRMED ?? 'false');
+    const verifiedFree = confirmed && this.model === 'gemini-2.5-flash';
+    this.costClass = verifiedFree ? 'free' : 'paid';
+    this.cost = verifiedFree ? 0 : undefined;
+    this.routingTier = verifiedFree && (options.primary ?? process.env.NEXUS_PRIMARY_PROVIDER === 'google-gemini') ? 0 : 4;
     this.fetcher = options.fetcher ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 30000;
   }
 
   async healthCheck(): Promise<AIProviderHealth> {
-    if (nexusFreeMode()) return { status: 'not_configured', message: 'FREE MODE: paid API blocked' };
+    if (nexusFreeMode() && freeProviderBlock(this)) return { status: 'not_configured', message: 'FREE MODE: Gemini requires a verified Free Tier project without billing and the pinned model.' };
     if (!this.apiKey) return { status: 'not_configured', model: this.model, message: 'GEMINI_API_KEY is not configured.' };
     try {
       const response = await this.fetcher(
         `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}`,
-        { headers: { 'x-goog-api-key': this.apiKey }, signal: AbortSignal.timeout(this.timeoutMs) },
+        { headers: { 'x-goog-api-key': this.apiKey }, signal: AbortSignal.timeout(this.timeoutMs), redirect: 'error' },
       );
       if (response.ok) return { status: 'healthy', model: this.model };
       return { status: healthStatus(response.status), model: this.model, message: errorMessage(response.status) };
@@ -75,11 +84,12 @@ export class GeminiAIProvider implements AIProvider {
   }
 
   async generate(prompt: string, options: AIProviderGenerationOptions = {}): Promise<string> {
-    if (nexusFreeMode()) throw new AIProviderRequestError('FREE MODE: paid API blocked', 'not_configured');
+    this.requireFreePolicy();
     this.requireKey();
     const response = await this.fetcher(this.generateUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.apiKey },
+      redirect: 'error',
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
@@ -102,11 +112,12 @@ export class GeminiAIProvider implements AIProvider {
     onChunk: (chunk: string) => void,
     options: AIProviderGenerationOptions = {},
   ): Promise<void> {
-    if (nexusFreeMode()) throw new AIProviderRequestError('FREE MODE: paid API blocked', 'not_configured');
+    this.requireFreePolicy();
     this.requireKey();
-    const response = await this.fetcher(`${this.generateUrl()}:streamGenerateContent?alt=sse`, {
+    const response = await this.fetcher(this.generateUrl(true), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.apiKey },
+      redirect: 'error',
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
@@ -133,8 +144,14 @@ export class GeminiAIProvider implements AIProvider {
     if (buffer.trim()) this.consumeSseLine(buffer, onChunk);
   }
 
-  private generateUrl(): string {
-    return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
+  private generateUrl(stream = false): string {
+    return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`;
+  }
+
+  private requireFreePolicy(): void {
+    if (nexusFreeMode() && freeProviderBlock(this)) {
+      throw new AIProviderRequestError('FREE MODE: unverified or paid Gemini project/model blocked', 'not_configured');
+    }
   }
 
   private requireKey(): void {

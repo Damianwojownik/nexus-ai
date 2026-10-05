@@ -47,6 +47,35 @@ The hub persists its task, agent and recent-event snapshot through its configure
 
 The server-side AI provider registry uses `GEMINI_API_KEY` only in the Agent Hub process. `GEMINI_MODEL` defaults to `gemini-2.5-flash`. The local Ollama adapter uses `OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`) and automatically selects an installed lightweight model, preferring Qwen, Gemma and Mistral before larger Llama models. Set `OLLAMA_MODEL` to force an installed model. No model is downloaded automatically.
 
+Gemini remains blocked in FREE mode unless `NEXUS_GEMINI_FREE_CONFIRMED=true`
+attests that this key's project is verified Free Tier with no billing account
+and the model is pinned to `gemini-2.5-flash`. Only this confirmed configuration
+gets zero-cost classification; moving aliases remain blocked. With
+`NEXUS_PRIMARY_PROVIDER=google-gemini`, it precedes Ollama and llama.cpp; without
+that override, local tiers remain first. See [secure setup and limitations](GEMINI-LOCAL-FIRST.md).
+Gemini uses server-only key headers and refuses redirects. Streaming uses
+`:streamGenerateContent?alt=sse`, not a double method suffix.
+
+Ollama generation and streaming use `OLLAMA_KEEP_ALIVE=15m` by default to
+avoid reloading the model between short conversations. Configure a duration
+such as `30m` if needed. `OLLAMA_NUM_THREADS` optionally sets an explicit
+1-256 CPU thread count; otherwise Ollama retains its own thread selection.
+Benchmark before setting it, because more threads are not always faster.
+On Windows the normal launcher accepts `-OllamaThreads 8`; this only configures
+a newly started Hub and never replaces an already running process.
+Stable persona instructions precede changing memory/history in the agent
+prompt so the local runtime can reuse its prompt prefix. No memory is deleted.
+These changes reduce warm latency, but do not guarantee a several-second
+complete answer on old CPUs, on a cold model or for long questions/replies.
+
+Local LLM GPU use is a separate explicit opt-in: `NEXUS_OLLAMA_GPU=true`
+removes the Hub's zero-GPU-layer override, without changing FREE guards or
+enabling local avatar rendering. On the tested GTX 970, CUDA failed with an
+unsupported PTX toolchain; Vulkan loaded the 1.5B model into about 1.16 GB VRAM.
+Use `scripts\start-nexus-windows.ps1 -OllamaVulkan` to start new processes in
+this mode. Already running services are not reconfigured or killed; stop only
+your own services before changing backend. The first model load remains slower.
+
 Official global Windows CLIs `@openai/codex`, `@github/copilot` and `@anthropic-ai/claude-code` provide cloud chat through their own terminal logins. Run `codex login`, `copilot login` or `claude auth login` outside the UI. Each generation uses a temporary empty directory removed afterwards; Codex is read-only and ephemeral, Claude/Copilot disable tools. No API tokens are returned to the browser.
 
 The old quota fallback remains only for explicitly non-FREE usage. FREE mode never attempts paid inference to discover quota. Events contain provider IDs/status, not prompts or credentials.

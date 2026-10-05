@@ -41,6 +41,8 @@ export class OllamaHttpProvider implements AIProvider {
   private verifiedModel?: string;
   private readonly fetcher: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly numThreads?: number;
+  private readonly keepAlive: string;
   readonly cpuOnly: boolean;
 
   get model(): string {
@@ -53,6 +55,8 @@ export class OllamaHttpProvider implements AIProvider {
     fetcher?: typeof fetch;
     timeoutMs?: number;
     cpuOnly?: boolean;
+    numThreads?: number;
+    keepAlive?: string;
   } = {}) {
     this.baseUrl = localBaseUrl(options.baseUrl ?? process.env.NEXUS_OLLAMA_BASE_URL ?? process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434');
     this.configuredModel = options.model ?? process.env.OLLAMA_MODEL;
@@ -61,6 +65,12 @@ export class OllamaHttpProvider implements AIProvider {
     }
     this.fetcher = options.fetcher ?? fetch;
     this.cpuOnly = options.cpuOnly ?? false;
+    this.numThreads = options.numThreads ?? (process.env.OLLAMA_NUM_THREADS === undefined ? undefined : Number(process.env.OLLAMA_NUM_THREADS));
+    if (this.numThreads !== undefined && (!Number.isInteger(this.numThreads) || this.numThreads < 1 || this.numThreads > 256)) {
+      throw new Error('OLLAMA_NUM_THREADS must be an integer between 1 and 256.');
+    }
+    this.keepAlive = options.keepAlive ?? process.env.OLLAMA_KEEP_ALIVE ?? '15m';
+    if (!/^\d+(?:s|m|h)$/.test(this.keepAlive)) throw new Error('OLLAMA_KEEP_ALIVE must be a duration such as 15m.');
     const configuredTimeout = options.timeoutMs ?? Number(process.env.OLLAMA_TIMEOUT_MS ?? 60000);
     this.timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 60000;
   }
@@ -98,8 +108,10 @@ export class OllamaHttpProvider implements AIProvider {
         model: this.model,
         prompt,
         stream: false,
+        keep_alive: this.keepAlive,
         options: {
           ...(this.cpuOnly ? { num_gpu: 0 } : {}),
+          ...(this.numThreads !== undefined ? { num_thread: this.numThreads } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.maxOutputTokens !== undefined ? { num_predict: options.maxOutputTokens } : {}),
         },
@@ -125,8 +137,9 @@ export class OllamaHttpProvider implements AIProvider {
     const response = await this.fetcher(`${this.baseUrl}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.model, prompt, stream: true,
+      body: JSON.stringify({ model: this.model, prompt, stream: true, keep_alive: this.keepAlive,
         options: { ...(this.cpuOnly ? { num_gpu: 0 } : {}),
+          ...(this.numThreads !== undefined ? { num_thread: this.numThreads } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.maxOutputTokens !== undefined ? { num_predict: options.maxOutputTokens } : {}) },
       }),

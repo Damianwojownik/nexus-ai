@@ -47,11 +47,13 @@ def prepare_job(job, engine):
     return portraits[0], models
 
 
-def validate_audio(audio, sample_rate, np):
+def validate_audio(audio, sample_rate, np, max_seconds=30):
+    if max_seconds not in (30, 180):
+        raise ValueError("Supported audio limits are 30 or 180 seconds")
     if audio.ndim != 1 or sample_rate != 16000:
         raise ValueError("speech.wav must be mono 16000 Hz audio")
-    if not np.isfinite(audio).all() or not 0.2 <= len(audio) / sample_rate <= 30:
-        raise ValueError("Speech must contain 0.2-30 seconds of finite audio")
+    if not np.isfinite(audio).all() or not 0.2 <= len(audio) / sample_rate <= max_seconds:
+        raise ValueError(f"Speech must contain 0.2-{max_seconds} seconds of finite audio")
     if float(np.max(np.abs(audio))) < 0.0001:
         raise ValueError("Speech is silent")
 
@@ -68,7 +70,7 @@ def validate_frames(frames, expected_count, np):
             raise RuntimeError("EchoMimic produced invalid or blank BGR frames")
 
 
-async def render_job(job):
+async def render_job(job, *, max_audio_seconds=30, prompt=None, negative_prompt=None):
     if sys.platform != "linux" or os.environ.get("NEXUS_CLOUD_WORKER") != "1":
         raise RuntimeError("EchoMimic inference requires a Linux cloud worker")
     job = Path(job).resolve()
@@ -86,7 +88,10 @@ async def render_job(job):
     if not torch.cuda.is_available():
         raise RuntimeError("Cloud CUDA GPU required; no CPU fallback")
     audio, rate = sf.read(str(job / "speech.wav"), dtype="float32")
-    validate_audio(audio, rate, np)
+    if max_audio_seconds == 30:
+        validate_audio(audio, rate, np)
+    else:
+        validate_audio(audio, rate, np, max_seconds=max_audio_seconds)
     image = cv2.imread(str(portrait))
     if image is None:
         raise ValueError("Portrait could not be decoded")
@@ -97,8 +102,14 @@ async def render_job(job):
     await service.load_models()
     if not service.neural_available:
         raise RuntimeError("EchoMimic neural model did not load")
+    generation_options = {}
+    if prompt is not None:
+        generation_options["prompt"] = prompt
+    if negative_prompt is not None:
+        generation_options["negative_prompt"] = negative_prompt
     frames = await service.generate_frames(
         image, str(job / "speech.wav"), audio, sample_rate=rate, fps=25,
+        **generation_options,
     )
     validate_frames(frames, int(len(audio) / rate * 25), np)
     silent = job / "echo-silent.mp4"
@@ -118,6 +129,8 @@ async def render_job(job):
         "engine": "echomimic-v3", "adapter": "nosi", "upstreamCommit": NOSI_COMMIT,
         "mode": "batch", "liveStream": False, "fps": 25,
         "memoryStrategy": "stage-wise-cpu-offload",
+        "durationSeconds": len(audio) / rate, "maxAudioSeconds": max_audio_seconds,
+        "prompt": prompt, "negativePrompt": negative_prompt,
         "frames": len(frames), "width": frames[0].shape[1], "height": frames[0].shape[0],
         "visualApproval": False, "requiresVisualReview": True,
     }, indent=2), encoding="utf-8")

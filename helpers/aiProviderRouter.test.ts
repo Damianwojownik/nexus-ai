@@ -221,6 +221,45 @@ test('CPU-only Ollama forces zero GPU layers for generation and streaming', asyn
       return body.stream ? new Response('{"response":"CPU","done":true}\n') : Response.json({ response: 'CPU' });
     },
   });
+
+  test('Ollama keeps its model warm and applies explicit CPU tuning to generate and stream', async () => {
+    const requests: Record<string, unknown>[] = [];
+    const ollama = new OllamaHttpProvider({
+      cpuOnly: true, numThreads: 8, keepAlive: '15m',
+      fetcher: async (input, init) => {
+        if (String(input).endsWith('/api/tags')) return Response.json({ models: [{ name: 'qwen2.5:1.5b' }] });
+        const body = JSON.parse(String(init?.body));
+        requests.push(body);
+        return body.stream ? new Response('{"response":"Cześć","done":true}\n') : Response.json({ response: 'Cześć' });
+      },
+    });
+
+    test('browser router reports actual generation failure rather than a CONNECTED error', async () => {
+      const primary = {
+        id: 'nexus-hub', name: 'Nexus Hub', mode: 'CLOUD' as const, role: 'PRIMARY_ORCHESTRATOR' as const,
+        async checkHealth() { return { status: 'CONNECTED' as const }; },
+        async listModels() { return []; },
+        async generate() { throw new Error('Local inference timed out'); },
+      };
+      const router = new ModelRouter('AUTO', [], primary, () => {});
+      await assert.rejects(router.route('hello'), error => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /UNAVAILABLE.*Local inference timed out/);
+        assert.doesNotMatch(error.message, /CONNECTED/);
+        return true;
+      });
+    });
+    await ollama.generate('hello');
+    await ollama.stream('hello', () => {});
+    assert.equal(requests.length, 2);
+    for (const request of requests) {
+      assert.equal(request.keep_alive, '15m');
+      assert.deepEqual(request.options, { num_gpu: 0, num_thread: 8 });
+    }
+    assert.throws(() => new OllamaHttpProvider({ numThreads: 0 }), /OLLAMA_NUM_THREADS/);
+    assert.throws(() => new OllamaHttpProvider({ numThreads: 1.5 }), /OLLAMA_NUM_THREADS/);
+    assert.throws(() => new OllamaHttpProvider({ keepAlive: 'invalid' }), /OLLAMA_KEEP_ALIVE/);
+  });
   assert.equal(await ollama.generate('hello', { maxOutputTokens: 30 }), 'CPU');
   const chunks: string[] = [];
   await ollama.stream('hello', chunk => chunks.push(chunk), { maxOutputTokens: 30 });

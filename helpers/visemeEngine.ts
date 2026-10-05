@@ -20,6 +20,42 @@ export type VisemeCue = {
   intensity: number;
 };
 
+const SAPI_VISEMES: readonly NexusViseme[] = [
+  'REST', 'A', 'A', 'O', 'E', 'R', 'I', 'U', 'O', 'A', 'O',
+  'A', 'A', 'R', 'L', 'SZ', 'SZ', 'TD', 'FV', 'TD', 'KG', 'MBP',
+];
+
+export function appendSapiVisemeCue(
+  cues: VisemeCue[],
+  visemeId: number,
+  startMs: number,
+  durationMs: number,
+  emphasis = 0,
+): void {
+  if (!Number.isSafeInteger(visemeId) || visemeId < 0 || visemeId >= SAPI_VISEMES.length) {
+    throw new Error('SAPI viseme ID must be an integer from 0 to 21');
+  }
+  if (!Number.isFinite(startMs) || startMs < 0) throw new Error('SAPI viseme start must be finite and nonnegative');
+  if (!Number.isFinite(durationMs) || durationMs < 0) throw new Error('SAPI viseme duration must be finite and nonnegative');
+  if (emphasis !== 0 && emphasis !== 1 && emphasis !== 2) throw new Error('Unknown SAPI viseme emphasis');
+
+  const previous = cues[cues.length - 1];
+  if (previous && startMs < previous.startMs) throw new Error('SAPI viseme positions must be monotonic');
+  const viseme = SAPI_VISEMES[visemeId];
+  const cue: VisemeCue = {
+    viseme,
+    startMs,
+    endMs: startMs + Math.max(1, durationMs),
+    intensity: viseme === 'REST' ? 0 : emphasis === 2 ? 1 : emphasis === 1 ? 0.88 : 0.72,
+  };
+  if (previous && startMs === previous.startMs) {
+    cues[cues.length - 1] = cue;
+    return;
+  }
+  if (previous && previous.endMs > startMs) previous.endMs = startMs;
+  cues.push(cue);
+}
+
 const LETTER_TO_VISEME: Record<string, NexusViseme> = {
   a: 'A', ą: 'O',
   e: 'E', ę: 'E',
@@ -142,7 +178,7 @@ export function sampleVisemeAt(cues: VisemeCue[], elapsedMs: number): VisemeCue 
   if (!cues.length) return { viseme: 'REST', startMs: 0, endMs: 1, intensity: 0 };
   const t = Math.max(0, elapsedMs);
   const active = cues.find(cue => t >= cue.startMs && t < cue.endMs);
-  return active ?? cues[cues.length - 1];
+  return active ?? { viseme: 'REST', startMs: t, endMs: t + 1, intensity: 0 };
 }
 
 export type VisemeMouthShape = {

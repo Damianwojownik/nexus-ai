@@ -6,6 +6,8 @@ import { createAgentHubServer } from './agentHubServer.ts';
 
 test('local speech validates text size and WAV format', () => {
   assert.equal(validateSpeechText('  Cześć! '), 'Cześć!');
+  assert.equal(validateSpeechText('**Cześć!**'), 'Cześć!');
+  assert.throws(() => validateSpeechText('# '), /speakable characters/);
   for (const invalid of ['', ' ', 42, 'a'.repeat(6001)]) assert.throws(() => validateSpeechText(invalid));
   assert.throws(() => validateSpeechWave(Buffer.from('not audio')));
   const audio = Buffer.alloc(44);

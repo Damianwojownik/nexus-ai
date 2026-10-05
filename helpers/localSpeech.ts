@@ -5,12 +5,15 @@ import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { prepareSpeechText } from './speechPreferences.ts';
 
 export function validateSpeechText(text: unknown): string {
   if (typeof text !== 'string' || !text.trim() || text.length > 6000) {
     throw new Error('Speech text must contain 1 to 6000 characters.');
   }
-  return text.trim();
+  const spokenText = prepareSpeechText(text, 'pl-PL');
+  if (!spokenText || spokenText.length > 6000) throw new Error('Speech text must contain 1 to 6000 speakable characters.');
+  return spokenText;
 }
 
 export function validateSpeechWave(audio: Buffer): Buffer {
