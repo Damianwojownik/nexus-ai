@@ -26,6 +26,12 @@ jobs:
       - name: Miś Engine tests
         run: npm run test:mis
       - name: Compile Python services
-        run: python -m py_compile services/avatar_server/nexus_avatar_server.py services/phoneme_aligner/mis_phoneme_aligner.py
+        run: >-
+          python -m py_compile
+          services/avatar_server/nexus_avatar_server.py
+          services/avatar_server/mis_articulation_injector.py
+          services/phoneme_aligner/mis_phoneme_aligner.py
+          services/media_engine/flp_worker.py
+          services/media_engine/nexus_media_engine.py
       - name: TypeScript and Vite build
         run: npm run build
