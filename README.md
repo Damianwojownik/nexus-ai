@@ -85,7 +85,11 @@ a persistent warm renderer returns and the browser decodes its first frame.
 Until then, the portrait stays unchanged and the UI reports "Live avatar
 unavailable". No neural renderer is currently configured, so live visual
 generation and its FPS/latency/audio-video synchronization have not been
-verified.
+verified. The repo now includes an authenticated gateway and local/hosted
+setup path, but no compatible neural worker or model is bundled. Follow
+[live avatar gateway setup](services/avatar_live/README.md); FasterLivePortrait's
+current `run_audio_driving -> MP4` service is batch-only and cannot activate
+the live UI.
 
 The existing opt-in "Nexus Live" Paulina stack streams verified local PCM16
 chunks and native viseme timing; when a real neural session exists, the same

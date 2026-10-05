@@ -59,22 +59,29 @@ The browser talks only to loopback Agent Hub routes:
 `POST /api/avatar/live/sessions/:id/offer`, and
 `DELETE /api/avatar/live/sessions/:id`. Agent Hub forwards them to the
 server-only `NEXUS_LIVE_AVATAR_SERVER_URL` and
-`NEXUS_LIVE_AVATAR_SERVER_TOKEN` contract. The upstream must report
-`available: true`, `warm: true` and `mode: "persistent-neural-stream"` before
-a session can be created. Each session returns a video-capable WebRTC answer,
-ICE configuration and a WSS control URL; ordered DataChannel messages carry
-length-prefixed JSON metadata followed by PCM16LE bytes. Control messages carry
-state, emotion, PTS and native viseme intervals. The adapter verifies the
-character ID and pinned face hash; batch renderers and Colab URLs are not valid
-live providers.
+`NEXUS_LIVE_AVATAR_SERVER_TOKEN` contract. `services/avatar_live/` now provides
+an authenticated gateway to a separate persistent renderer worker: it proxies
+the worker's health, session creation, actual SDP answer, session cleanup and
+control WebSocket, while WebRTC media flows directly between browser and worker.
+The worker must report `available: true`, `warm: true` and
+`mode: "persistent-neural-stream"` before a session can be created. Ordered
+DataChannel messages carry length-prefixed JSON metadata followed by PCM16LE
+bytes. Control messages carry state, emotion, PTS and native viseme intervals.
+The adapter verifies the character ID and pinned face hash; batch renderers and
+Colab URLs are not valid live providers.
 
-There is currently no implementation of that neural renderer service in this
-checkout, and no server URL/token are configured. Therefore the UI deliberately
+No compatible neural worker is bundled or configured in this checkout. The
+gateway returns `NOT_CONFIGURED`/`DISCONNECTED` and rejects session creation
+without a real warm worker; it does not fake an SDP answer or claim that the
+existing FasterLivePortrait batch API is live. The UI therefore deliberately
 fails closed instead of displaying a fake speaking loop. Clicking the
 microphone during native Paulina playback aborts the PCM player first, sends
 `INTERRUPT` at the playback clock position and changes the session to
 `LISTENING` when recognition starts. Automatic always-on VAD, a renderer-side
-GPU/model and real five-turn/latency/FPS measurements remain unverified.
+GPU/model and real five-turn/latency/FPS measurements remain unverified. Local
+Windows and hosted gateway setup is documented in
+`services/avatar_live/README.md`; GTX 970 compatibility with a persistent
+photorealistic renderer has not been demonstrated.
 
 The user explicitly cancelled the three-minute EchoMimic experiment to focus
 on realtime. Its owned process was terminated; no completed long film is

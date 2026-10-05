@@ -1,34 +1,85 @@
-# Nexus live avatar backend
+# Nexus live avatar gateway
 
-This service is the server-side contract for a warm persistent neural renderer.
+This service is an authenticated gateway between the local Agent Hub and a **separate,
+already-running persistent neural renderer worker**. It proxies the worker's real health,
+session, SDP-answer, and WebSocket control operations. WebRTC media travels between the
+browser and worker directly; PCM audio is sent over the provider's ordered DataChannel.
 
-It is intentionally fail-closed: if no configured renderer is available, the service
-returns a structured `NOT_CONFIGURED` health status instead of pretending the avatar is
-live. This keeps the browser UI honest and preserves the existing Paulina PCM + viseme
-pipeline without generating a fake talking-head loop.
+The gateway is not itself an avatar renderer. Health only reports available when the
+configured worker explicitly reports `available: true`, `warm: true`, and
+`mode: "persistent-neural-stream"`. It never turns the existing FasterLivePortrait
+`run_audio_driving(...) -> MP4` batch API into a live service.
 
-## Environment
+## Worker contract
 
-Set these variables before starting the service:
+The worker must provide authenticated endpoints:
 
-```bash
-NEXUS_LIVE_AVATAR_SERVER_URL=http://127.0.0.1:9873
-NEXUS_LIVE_AVATAR_SERVER_TOKEN=replace-me
+- `GET /v1/live/health` returning `available`, `warm`, and
+  `mode: "persistent-neural-stream"`
+- `POST /v1/live/sessions` accepting the pinned identity and returning a worker session ID,
+  an authenticated control WebSocket URL, and ICE servers
+- `POST /v1/live/sessions/{id}/offer` doing actual WebRTC SDP negotiation and returning a
+  valid SDP answer with a continuously produced neural video track
+- `WS /v1/live/sessions/{id}/control` consuming state, viseme, and interrupt events
+- `DELETE /v1/live/sessions/{id}` releasing the session
+
+The worker loads its model and the fixed identity before reporting warm. It must consume
+PCM16LE audio and `ptsMs` from the Nexus DataChannel, preserve the supplied identity, and
+produce frames incrementally. The DataChannel is named `nexus-live-audio`; each binary
+message begins with a 4-byte big-endian JSON-header length, then a JSON header with
+`type: "AUDIO"`, `streamId`, `sequence`, `ptsMs`, `encoding: "PCM16LE"`, `sampleRate`,
+`channels`, and `byteLength`, followed by the PCM bytes. Control WebSocket messages use
+`STATE`, `VISEME`, `INTERRUPT`, and `CLOSE` with audio-clock `ptsMs`. The browser does not
+send the gateway or worker credentials. The gateway keeps a short-lived per-session
+capability for its local control WebSocket.
+
+## Local Windows gateway
+
+Install Python 3.11. In the Agent Hub process set `NEXUS_LIVE_AVATAR_SERVER_URL` and
+`NEXUS_LIVE_AVATAR_SERVER_TOKEN`. In the gateway process, set the same token plus its worker
+URL/token and run from the repository root:
+
+```powershell
+$env:NEXUS_LIVE_AVATAR_SERVER_URL = "http://127.0.0.1:9873"
+$env:NEXUS_LIVE_AVATAR_SERVER_TOKEN = "<same-long-random-token-for-Agent-Hub-and-gateway>"
+$env:NEXUS_LIVE_AVATAR_WORKER_URL = "https://<your-real-worker-host>"
+$env:NEXUS_LIVE_AVATAR_WORKER_TOKEN = "<worker-token>"
+# Only needed if the worker returns a control WebSocket on another host.
+$env:NEXUS_LIVE_AVATAR_WORKER_CONTROL_HOSTS = "<worker-control-host>"
+$env:NEXUS_LIVE_AVATAR_CONTROL_URL_BASE = "ws://127.0.0.1:9873"
+scripts\start-live-avatar-gateway-windows.ps1
 ```
 
-The backend answers the same contract expected by the local Agent Hub:
+The launcher creates `services/avatar_live/.venv` and installs only this gateway's
+dependencies. Without a reachable warm worker it will report `NOT_CONFIGURED` or
+`DISCONNECTED` and reject session creation; Nexus will continue to display its verified
+static portrait rather than a fake animation.
 
-- `GET /health` and `GET /v1/health`
-- `GET /v1/live/health`
-- `POST /v1/live/sessions`
-- `POST /v1/live/sessions/{id}/offer`
-- `DELETE /v1/live/sessions/{id}`
-- `WS /v1/live/sessions/{id}/control`
+## GPU and hosted deployment
 
-## Current status
+The gateway Docker image is built from the repository root:
 
-This repository is still missing a real neural renderer. The service therefore exposes the
-contract and blocks all session creation until a warm renderer is actually configured.
+```bash
+docker build -f services/avatar_live/Dockerfile -t nexus-live-avatar-gateway .
+docker run --rm -p 9873:9873 \
+  -e NEXUS_LIVE_AVATAR_SERVER_TOKEN \
+  -e NEXUS_LIVE_AVATAR_WORKER_URL \
+  -e NEXUS_LIVE_AVATAR_WORKER_TOKEN \
+  -e NEXUS_LIVE_AVATAR_HOST=0.0.0.0 \
+  -e NEXUS_LIVE_AVATAR_CONTROL_URL_BASE=wss://<gateway-host> \
+  -e NEXUS_LIVE_AVATAR_ALLOWED_ORIGINS=https://<nexus-frontend-origin> \
+  nexus-live-avatar-gateway
+  ```
 
-Use it as the integration point for a future FasterLivePortrait/RTSP/WebRTC renderer or a
-hosted GPU worker.
+Terminate TLS at a trusted reverse proxy for hosted deployments and proxy the control
+WebSocket as well as HTTP. The worker's WebRTC ICE candidates/media ports must be reachable
+from the browser; add TURN only when the network requires it. Do not publish the worker
+token to the browser or commit it to Git. GPU type, model compatibility, render latency,
+FPS, and A/V offset belong to the worker deployment and must be measured there.
+Run one gateway process/replica unless session state is moved to a shared store and control
+connections are routed consistently.
+
+The existing local GTX 970 reports 4 GB VRAM. This repo's FasterLivePortrait setup script
+installs its batch/ONNX bridge and is not evidence that this card can run a warm low-latency
+neural stream. No GPU worker is bundled or configured in this checkout; a compatible worker
+must be supplied and tested before live can report available.
