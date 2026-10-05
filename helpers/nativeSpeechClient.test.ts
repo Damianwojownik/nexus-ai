@@ -44,13 +44,22 @@ test('native speech is restricted to local credential-free endpoints', () => {
 test('browser client verifies and schedules native PCM then waits for actual playback completion', async () => {
   const backend = new Backend();
   let scheduled = 0;
+  const audioChunks: Array<{streamId:string;sequence:number;pcm16:Uint8Array;ptsMs:number}> = [];
   const result = await playNativePaulinaStream('http://127.0.0.1:8788', 'Cześć', new AbortController().signal, {
     backend, fetch: fetcher(), onAudioScheduled: () => scheduled++,
+    onAudioChunk: chunk => audioChunks.push({
+      streamId: chunk.streamId, sequence: chunk.event.sequence, pcm16: chunk.pcm16, ptsMs: chunk.ptsMs,
+    }),
   });
   assert.equal(result.totalSamples, 320);
   assert.equal(backend.scheduled, 1);
   assert.equal(scheduled, 1);
   assert.equal(backend.stopped, 0);
+  assert.equal(audioChunks.length, 1);
+  assert.match(audioChunks[0].streamId, /^[A-Za-z0-9_-]{1,80}$/);
+  assert.equal(audioChunks[0].sequence, 0);
+  assert.equal(audioChunks[0].ptsMs, 0);
+  assert.deepEqual(Buffer.from(audioChunks[0].pcm16), bytes);
 });
 
 test('bad digest, request identity, missing end or final counters fail explicitly', async () => {

@@ -1,12 +1,7 @@
 export const NEXUS_DEFAULT_AVATAR = {
-  id: 'android-face-test-9ebe69ed',
-  portrait: '/avatars/nexus-android.png',
-  video: '/avatars/nexus-android.mp4',
-  idleVideo: '/avatars/luna-idle-blink.mp4',
-  idleSha256: '086f45d30a0b321890aeccdd9c3f0c5b7633a068bb1ea4bc0429f058c91dbc9f',
-  idleDurationSeconds: 5.04,
-  sha256: '7c3c47c550b44a574a7c0edfa49562d9048c6fd6ec86906f5943b8e2572095fd',
+  id: 'nexus-librarian',
+  portrait: '/avatars/references/nexus-librarian/nexus-librarian-front-facing.jpeg',
+  sha256: '5810f3518ad5ac9a326ae720797c9c9117fb8160f94f00caeec019a260ea2e04',
   width: 768,
-  height: 768,
-  durationSeconds: 3.2,
+  height: 1024,
 } as const;

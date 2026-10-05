@@ -23,8 +23,7 @@ import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
 import type { AgentHubConnectionStatus } from '../helpers/agentHubClient';
 import type { AgentEvent } from '../helpers/agentProtocol';
 import { LocalCapabilitiesClient } from '../helpers/localCapabilitiesClient';
-import { avatarMotionCssVars, createAvatarMotionFrame } from '../helpers/avatarMotion';
-import { appendSapiVisemeCue, estimateVisemePlan, mouthShapeForViseme, sampleVisemeAt } from '../helpers/visemeEngine';
+import { appendSapiVisemeCue } from '../helpers/visemeEngine';
 import type { VisemeCue } from '../helpers/visemeEngine';
 import type { StreamingAudioClock } from '../helpers/pcmStream';
 import type { VoiceEventType } from '../helpers/agentProtocol';
@@ -34,12 +33,31 @@ import { generateNexusImage } from '../helpers/nexusImageGenerator';
 import { SPEECH_LANGUAGES, speechLanguage, matchingVoices, selectSpeechVoice, speechReplyContext, speechPreview, createFinalSpeechSubmission, prepareSpeechText } from '../helpers/speechPreferences';
 import { waitForAvatarVideo, requestPolishAudio, requestConversationVideo } from '../helpers/avatarStudio';
 import { NEXUS_DEFAULT_AVATAR } from '../helpers/nexusDefaultAvatar';
-import { AvatarSpeechVideo } from '../components/AvatarSpeechVideo';
 import { advanceCreation, creationQuestion, websiteDocument, websitePrompt } from '../helpers/creationFlow';
 import type { CreationFlow } from '../helpers/creationFlow';
-import { LUNA_GREETING } from '../helpers/assistantPersona';
-import { CHARACTER_PROFILES, verifiedCharacterPortrait } from '../helpers/characterProfiles';
+import { NEXUS_GREETING } from '../helpers/assistantPersona';
+import { CHARACTER_PROFILES, characterProfile, verifiedCharacterPortrait } from '../helpers/characterProfiles';
 import { playNativePaulinaStream } from '../helpers/nativeSpeechClient';
+import { AgentHubLiveAvatarClient, NeuralLiveAvatarProvider } from '../helpers/neuralLiveAvatarProvider';
+import type { NeuralAvatarState, NeuralLiveSession } from '../helpers/neuralLiveAvatarProvider';
+
+const LIBRARIAN_PROFILE = characterProfile('nexus-librarian');
+type ActiveCharacterId = 'nexus-librarian' | 'luna' | 'bear' | 'custom' | 'custom-default';
+const ACTIVE_CHARACTER_IDS: readonly ActiveCharacterId[] = ['nexus-librarian', 'luna', 'bear', 'custom', 'custom-default'];
+
+function isActiveCharacterId(value: string): value is ActiveCharacterId {
+  return ACTIVE_CHARACTER_IDS.some(id=>id===value);
+}
+
+function storedCharacterId(): ActiveCharacterId {
+  const saved = localStorage.getItem('nexus-active-character-id');
+  if (saved && isActiveCharacterId(saved)
+    && (saved !== 'custom' || localStorage.getItem('nexus-avatar-portrait'))
+    && (saved !== 'custom-default' || localStorage.getItem('nexus-avatar-default-portrait'))) return saved as ActiveCharacterId;
+  if (localStorage.getItem('nexus-avatar-selection') === 'custom' && localStorage.getItem('nexus-avatar-portrait')) return 'custom';
+  if (localStorage.getItem('nexus-avatar-default-portrait')) return 'custom-default';
+  return 'nexus-librarian';
+}
 
 const ollamaClient = new OllamaClient();
 const memoryStore = new MemoryStore();
@@ -54,6 +72,7 @@ const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
 });
 const voiceEventBus = new VoiceEventBus();
 const agentHubClient = new AgentHubClient();
+const neuralLiveAvatarProvider = new NeuralLiveAvatarProvider(new AgentHubLiveAvatarClient(agentHubClient.baseUrl));
 const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
 const generalOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
@@ -83,30 +102,43 @@ async function uploadAvatarPortrait(portraitData: string, signal?:AbortSignal): 
 
 export default function Home() {
   const nexusAvatarSrc=NEXUS_DEFAULT_AVATAR.portrait;
+  const [activeCharacterId,setActiveCharacterId]=useState<ActiveCharacterId>(storedCharacterId);
   const [prompt,setPrompt]=useState('');
   const [status,setStatus]=useState('Gotowa do rozmowy');
   const [listening,setListening]=useState(false);
   const [speaking,setSpeaking]=useState(false);
   const [animationVideoUrl,setAnimationVideoUrl]=useState<string|null>(null);
-  const [customPortrait,setCustomPortrait]=useState<string|null>(null);
-  const [defaultAvatarPortrait,setDefaultAvatarPortrait]=useState<string|null>(null);
-  const portraitSource=customPortrait??defaultAvatarPortrait??nexusAvatarSrc;
-  const isNexus=!customPortrait&&!defaultAvatarPortrait;
+  const [customPortrait,setCustomPortrait]=useState<string|null>(()=>localStorage.getItem('nexus-avatar-selection')==='custom'?localStorage.getItem('nexus-avatar-portrait'):null);
+  const [defaultAvatarPortrait,setDefaultAvatarPortrait]=useState<string|null>(()=>localStorage.getItem('nexus-avatar-default-portrait'));
+  const isNexus=activeCharacterId==='nexus-librarian';
+  const portraitSource=activeCharacterId==='custom'
+    ? customPortrait??nexusAvatarSrc
+    : activeCharacterId==='custom-default'
+      ? defaultAvatarPortrait??nexusAvatarSrc
+      : CHARACTER_PROFILES.find(profile=>profile.identity.id===activeCharacterId)?.portrait??nexusAvatarSrc;
   const [uploadedPortraitPath,setUploadedPortraitPath]=useState<string|null>(null);
   const [portraitError,setPortraitError]=useState('');
   const [avatarAnimationError,setAvatarAnimationError]=useState('');
   const [avatarRendering,setAvatarRendering]=useState(false);
   const [avatarImageFailed,setAvatarImageFailed]=useState(false);
-  const [avatarVideoFailed,setAvatarVideoFailed]=useState(false);
+  const [liveAvatarStatus,setLiveAvatarStatus]=useState<'checking'|'connected'|'unavailable'|'error'>('unavailable');
+  const [liveAvatarRetry,setLiveAvatarRetry]=useState(0);
+  const [liveAvatarMessage,setLiveAvatarMessage]=useState('Live avatar unavailable — warm persistent neural renderer is not connected.');
+  const [liveVideoStream,setLiveVideoStream]=useState<MediaStream|null>(null);
+  const [liveFrameReady,setLiveFrameReady]=useState(false);
+  const liveVideoRef=useRef<HTMLVideoElement|null>(null);
+  const liveAvatarSessionRef=useRef<NeuralLiveSession|null>(null);
+  const liveAvatarStateRef=useRef<NeuralAvatarState>('IDLE');
+  const liveAudioStreamIdRef=useRef<string|null>(null);
   const settingsDialogRef=useRef<HTMLDialogElement>(null);
   const [settingsContainer,setSettingsContainer]=useState<HTMLDivElement|null>(null);
   const [creationFlow,setCreationFlow]=useState<CreationFlow|null>(null);
   const [websiteHtml,setWebsiteHtml]=useState('');
-  const [avatarImagePrompt,setAvatarImagePrompt]=useState('Photorealistic cinematic portrait of a friendly adult male cybernetic AI assistant, visible head and upper body, luminous green cybernetic eyes, dark futuristic armor with subtle neon green circuitry, inside a high-tech command center filled with green digital screens and matrix code, approachable expression, facing the camera, realistic face and skin, no text, no watermark.');
+  const [avatarImagePrompt,setAvatarImagePrompt]=useState('Photorealistic portrait of the same professional adult woman shown in the canonical Nexus librarian reference, seated in a natural modern office with a refined dark book titled Nexus AI. Keep her face, hairstyle and identity consistent with the supplied reference; calm, approachable expression, realistic skin, natural soft daylight, no cybernetic features, no extra text, no watermark.');
   const [avatarImageBusy,setAvatarImageBusy]=useState(false);
   const [avatarImageError,setAvatarImageError]=useState('');
   const [avatarImagePreview,setAvatarImagePreview]=useState<{url:string;model:string|null;seed:string|null}|null>(null);
-  const [batchText,setBatchText]=useState(LUNA_GREETING);
+  const [batchText,setBatchText]=useState(NEXUS_GREETING);
   const [batchCharacter,setBatchCharacter]=useState('current');
   const [batchMessage,setBatchMessage]=useState('');
   const [batchBusy,setBatchBusy]=useState(false);
@@ -186,7 +218,7 @@ export default function Home() {
   const [speechPreparing,setSpeechPreparing]=useState(false);
   const [speechConfigError,setSpeechConfigError]=useState('');
   const speechSequenceRef=useRef(0);
-  const localSpeechRef=useRef<{controller:AbortController;audio?:HTMLAudioElement;url?:string;clock?:Pick<StreamingAudioClock,'positionMs'>}|null>(null);
+  const localSpeechRef=useRef<{controller:AbortController;audio?:HTMLAudioElement;url?:string;clock?:Pick<StreamingAudioClock,'positionMs'|'streamId'>}|null>(null);
   const cancelSpeech=()=>{
     speechSequenceRef.current++;
     window.speechSynthesis?.cancel();
@@ -197,7 +229,24 @@ export default function Home() {
     const current=localSpeechRef.current;
     localSpeechRef.current=null;
     speechVisemePlanRef.current=[];
-    if(current){current.controller.abort();if(current.audio){current.audio.onended=null;current.audio.onerror=null;current.audio.pause();current.audio.removeAttribute('src');current.audio.load();}if(current.url)URL.revokeObjectURL(current.url);}
+    liveAudioStreamIdRef.current=null;
+    let interruptPtsMs=0;
+    if(current?.clock){
+      try{interruptPtsMs=current.clock.positionMs();}
+      catch(error){console.error('Live avatar interruption clock failed:',error);}
+    }
+    if(current){
+      current.controller.abort();
+      if(current.audio){current.audio.onended=null;current.audio.onerror=null;current.audio.pause();current.audio.removeAttribute('src');current.audio.load();}
+      if(current.url)URL.revokeObjectURL(current.url);
+    }
+    if(current?.clock&&liveAvatarSessionRef.current){
+      try{
+        liveAvatarStateRef.current='INTERRUPTED';
+        liveAvatarSessionRef.current.interrupt(interruptPtsMs);
+      }
+      catch(error){console.error('Live avatar interruption failed:',error);}
+    }
   };
   const operationBusyRef=useRef(false);
   const recognitionRef=useRef<any>(null);
@@ -231,17 +280,105 @@ export default function Home() {
   const portraitInputRef=useRef<HTMLInputElement|null>(null);
   const videoInputRef=useRef<HTMLInputElement|null>(null);
   const hubSseConnectedRef=useRef(false);
-  const avatarRef=useRef<HTMLDivElement | null>(null);
-  const motionStateRef=useRef<VoiceEventType>('IDLE');
-  const speechStartedAtRef=useRef(0);
-  const speechBoundaryRef=useRef({at:0,intensity:0});
   const speechVisemePlanRef=useRef<VisemeCue[]>([]);
-  const pointerRef=useRef({x:0,y:0});
   const generatedImageUrlRef=useRef('');
 
   useEffect(() => () => {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
   }, []);
+
+  useEffect(()=>{
+    let disposed=false;
+    let session:NeuralLiveSession|undefined;
+    setLiveVideoStream(null);
+    setLiveFrameReady(false);
+    if(!isNexus){
+      setLiveAvatarStatus('unavailable');
+      setLiveAvatarMessage('Live avatar unavailable for this character; only the selected static portrait is shown.');
+      return;
+    }
+    setLiveAvatarStatus('checking');
+    setLiveAvatarMessage('Live avatar unavailable — checking for a warm persistent neural renderer.');
+    void neuralLiveAvatarProvider.checkHealth().then(async health=>{
+      if(disposed)return;
+      if(!health.available){
+        setLiveAvatarStatus('unavailable');
+        setLiveAvatarMessage(`Live avatar unavailable${health.reason?`: ${health.reason}`:'.'}`);
+        return;
+      }
+      setLiveAvatarMessage('Live avatar unavailable — establishing the neural video stream.');
+      const liveSession=await neuralLiveAvatarProvider.startSession(LIBRARIAN_PROFILE.identity,stream=>{
+        if(!disposed){
+          setLiveVideoStream(stream);
+          setLiveAvatarMessage('Live avatar unavailable — waiting for the first decoded neural video frame.');
+        }
+      });
+      session=liveSession;
+      if(disposed){await liveSession.close();return;}
+      liveAvatarSessionRef.current=liveSession;
+      liveSession.setState(liveAvatarStateRef.current,localSpeechRef.current?.clock?.positionMs()??0);
+    }).catch(error=>{
+      if(disposed)return;
+      console.error('Live neural avatar connection failed:',error);
+      setLiveAvatarStatus('error');
+      setLiveAvatarMessage(`Live avatar unavailable: ${error instanceof Error?error.message:'Neural renderer connection failed'}`);
+    });
+    return()=>{
+      disposed=true;
+      if(liveAvatarSessionRef.current===session)liveAvatarSessionRef.current=null;
+      if(session)void session.close().catch(error=>console.error('Live avatar session cleanup failed:',error));
+    };
+  },[activeCharacterId,liveAvatarRetry]);
+
+  useEffect(()=>{
+    const video=liveVideoRef.current;
+    if(video&&liveVideoStream&&video.srcObject!==liveVideoStream){
+      video.srcObject=liveVideoStream;
+      void video.play().catch(error=>console.error('Live avatar video autoplay failed:',error));
+    }
+  },[liveVideoStream]);
+
+  useEffect(()=>{
+    const state:NeuralAvatarState=speaking&&localSpeechRef.current?.clock?'SPEAKING':listening?'LISTENING':isThinking?'THINKING':'IDLE';
+    liveAvatarStateRef.current=state;
+    const session=liveAvatarSessionRef.current;
+    if(!isNexus||!session)return;
+    try{session.setState(state,localSpeechRef.current?.clock?.positionMs()??0);}
+    catch(error){
+      console.error('Live avatar state update failed:',error);
+      setLiveAvatarStatus('error');
+      setLiveAvatarMessage(`Live avatar unavailable: ${error instanceof Error?error.message:'Renderer state update failed'}`);
+    }
+  },[isNexus,speaking,listening,isThinking]);
+
+  useEffect(()=>{
+    return voiceEventBus.subscribe(event=>{
+      const session=liveAvatarSessionRef.current;
+      if(!isNexus||!session)return;
+      let state:NeuralAvatarState;
+      switch(event.type){
+        case 'LISTENING': state='LISTENING'; break;
+        case 'THINKING': state='THINKING'; break;
+        case 'DELEGATING':
+        case 'WAITING_FOR_APPROVAL': state='THINKING'; break;
+        case 'EXECUTING': state='EXECUTING'; break;
+        case 'INTERRUPTED': state='INTERRUPTED'; break;
+        case 'ERROR': state='ERROR'; break;
+        case 'IDLE': state='IDLE'; break;
+        case 'SPEAKING':
+          if(!localSpeechRef.current?.clock)return;
+          state='SPEAKING';
+          break;
+      }
+      liveAvatarStateRef.current=state;
+      try{session.setState(state,localSpeechRef.current?.clock?.positionMs()??0);}
+      catch(error){
+        console.error('Live avatar event-state update failed:',error);
+        setLiveAvatarStatus('error');
+        setLiveAvatarMessage(`Live avatar unavailable: ${error instanceof Error?error.message:'Renderer event update failed'}`);
+      }
+    });
+  },[isNexus]);
 
   useEffect(()=>()=>{if(importedVideo)URL.revokeObjectURL(importedVideo.url);},[importedVideo]);
 
@@ -264,24 +401,14 @@ export default function Home() {
   },[]);
 
   useEffect(()=>{
-    if(localStorage.getItem('nexus-avatar-default-version')!=='cyborg-v1'){
-      if(localStorage.getItem('nexus-avatar-selection')!=='custom'){
-        localStorage.removeItem('nexus-avatar-default-portrait');
-        localStorage.setItem('nexus-avatar','Nexus');
-        localStorage.setItem('nexus-avatar-selection','nexus-cyborg');
-      }
-      localStorage.setItem('nexus-avatar-default-version','cyborg-v1');
-    }
     const savedDefaultPortrait=localStorage.getItem('nexus-avatar-default-portrait');
     if(savedDefaultPortrait)setDefaultAvatarPortrait(savedDefaultPortrait);
     if(localStorage.getItem('nexus-avatar-selection')==='custom'){
       setCustomPortrait(localStorage.getItem('nexus-avatar-portrait'));
       setUploadedPortraitPath(localStorage.getItem('nexus-avatar-portrait-path'));
-    }else if(savedDefaultPortrait){
-      localStorage.setItem('nexus-avatar-selection','floot-default');
-    }else{
-      localStorage.setItem('nexus-avatar','Nexus');
-      localStorage.setItem('nexus-avatar-selection','nexus-cyborg');
+    }
+    if(!localStorage.getItem('nexus-active-character-id')){
+      localStorage.setItem('nexus-active-character-id',storedCharacterId());
     }
     const savedCameraView=localStorage.getItem('nexus-camera-view');
     if(savedCameraView==='full'||savedCameraView==='face')setCameraView(savedCameraView);
@@ -548,71 +675,26 @@ export default function Home() {
     setAttachments((current) => [...current, ...selected].slice(0, 8));
   };
 
-  useEffect(() => {
-    const unsubscribe = voiceEventBus.subscribe((event) => {
-      motionStateRef.current = event.type as VoiceEventType;
-      if (event.type === 'SPEAKING') speechStartedAtRef.current = performance.now();
-    });
-
-    let frameId = 0;
-    const animate = (nowMs: number) => {
-      const state = motionStateRef.current;
-      const speakingNow = state === 'SPEAKING';
-      const currentSpeech=localSpeechRef.current;
-      const audio=currentSpeech?.audio;
-      let speechElapsedMs=audio?audio.currentTime*1000:Math.max(0,nowMs-speechStartedAtRef.current);
-      if(speakingNow&&currentSpeech?.clock){
-        try{speechElapsedMs=currentSpeech.clock.positionMs();}
-        catch(error){
-          console.error('Nexus Live playback clock failed:',error);
-          currentSpeech.clock=undefined;
-          speechElapsedMs=0;
-          currentSpeech.controller.abort(error);
-        }
-      }
-      const speechPhase = speechElapsedMs / 1000;
-      const boundaryAge = Math.max(0, nowMs - speechBoundaryRef.current.at);
-      const boundaryPulse = boundaryAge < 180 ? speechBoundaryRef.current.intensity * (1 - boundaryAge / 180) : 0;
-      const speechEnergy = speakingNow
-        ? Math.min(1, 0.18 + boundaryPulse + 0.22 * Math.abs(Math.sin(speechPhase * 9.7)) + 0.12 * Math.abs(Math.sin(speechPhase * 5.3 + 0.7)))
-        : 0;
-      const visemeCue = speakingNow
-        ? sampleVisemeAt(speechVisemePlanRef.current, speechElapsedMs)
-        : undefined;
-      const mouthShape = visemeCue ? mouthShapeForViseme(visemeCue.viseme) : undefined;
-      const frame = createAvatarMotionFrame({
-        state,
-        nowMs,
-        speechEnergy,
-        visemeOpen: mouthShape ? mouthShape.open * visemeCue!.intensity : undefined,
-      });
-      frame.gazeX += pointerRef.current.x * 2.2;
-      frame.gazeY += pointerRef.current.y * 1.4;
-      const node = avatarRef.current;
-      if (node) {
-        const vars = avatarMotionCssVars(frame);
-        Object.entries(vars).forEach(([name, value]) => node.style.setProperty(name, value));
-        node.style.setProperty('--nexus-mouth-wide', (mouthShape?.wide ?? 0.15).toFixed(3));
-        node.style.setProperty('--nexus-mouth-round', (mouthShape?.round ?? 0.05).toFixed(3));
-        node.style.setProperty('--nexus-mouth-press', (mouthShape?.press ?? 0.1).toFixed(3));
-        node.style.transform = '';
-        node.style.willChange = 'transform';
-        node.dataset.motionState = state.toLowerCase();
-        node.dataset.expression = frame.expression;
-        node.dataset.viseme = visemeCue?.viseme ?? 'REST';
-        node.dataset.visemeSource = currentSpeech?.clock ? 'native-sapi' : speechVisemePlanRef.current.length ? 'estimated' : 'none';
-      }
-      frameId = requestAnimationFrame(animate);
-    };
-    frameId = requestAnimationFrame(animate);
-    return () => { unsubscribe(); cancelAnimationFrame(frameId); };
-  }, [customPortrait]);
-
   const emitVoiceEvent = (type: VoiceEventType, message: string) => {
     voiceEventBus.emit(type, 'nexus', message, undefined, { source: 'ui' });
   };
 
   const chooseCameraView=(view:'full'|'face')=>{setCameraView(view);localStorage.setItem('nexus-camera-view',view)};
+  const chooseCharacter=(id:ActiveCharacterId)=>{
+    cancelSpeech();
+    setSpeaking(false);
+    setSpeechPreparing(false);
+    setActiveCharacterId(id);
+    localStorage.setItem('nexus-active-character-id',id);
+    localStorage.setItem('nexus-avatar-selection',id);
+    if(id==='nexus-librarian'){
+      setAnimationVideoUrl(null);
+      setImportedVideo(null);
+      setAvatarAnimationError('');
+    }
+    setAvatarImageFailed(false);
+    setLiveFrameReady(false);
+  };
   const loadPortrait = async (file?:File, saveAsDefault=false) => {
     if(!file)return;
     setPortraitError('');
@@ -637,11 +719,15 @@ export default function Home() {
         localStorage.removeItem('nexus-avatar-portrait');
         localStorage.removeItem('nexus-avatar-portrait-path');
         localStorage.setItem('nexus-avatar-selection','floot-default');
+        localStorage.setItem('nexus-active-character-id','custom-default');
+        setActiveCharacterId('custom-default');
         setDefaultAvatarPortrait(portrait);
         setCustomPortrait(null);
       }else{
         localStorage.setItem('nexus-avatar-portrait',portrait);
         localStorage.setItem('nexus-avatar-selection','custom');
+        localStorage.setItem('nexus-active-character-id','custom');
+        setActiveCharacterId('custom');
         localStorage.removeItem('nexus-avatar-portrait-path');
         setCustomPortrait(portrait);
       }
@@ -664,7 +750,10 @@ export default function Home() {
     localStorage.removeItem('nexus-avatar-portrait');
     localStorage.removeItem('nexus-avatar-portrait-path');
     const savedDefaultPortrait=localStorage.getItem('nexus-avatar-default-portrait');
-    localStorage.setItem('nexus-avatar-selection',savedDefaultPortrait?'floot-default':'nexus-cyborg');
+    const nextCharacter:ActiveCharacterId=savedDefaultPortrait?'custom-default':'nexus-librarian';
+    localStorage.setItem('nexus-avatar-selection',savedDefaultPortrait?'floot-default':'nexus-librarian');
+    localStorage.setItem('nexus-active-character-id',nextCharacter);
+    setActiveCharacterId(nextCharacter);
     if(!savedDefaultPortrait)localStorage.setItem('nexus-avatar','Nexus');
     setCustomPortrait(null);
     setAnimationVideoUrl(null);
@@ -678,7 +767,9 @@ export default function Home() {
     localStorage.removeItem('nexus-avatar-default-portrait');
     setDefaultAvatarPortrait(null);
     localStorage.setItem('nexus-avatar','Nexus');
-    localStorage.setItem('nexus-avatar-selection','nexus-cyborg');
+    localStorage.setItem('nexus-avatar-selection','nexus-librarian');
+    localStorage.setItem('nexus-active-character-id','nexus-librarian');
+    setActiveCharacterId('nexus-librarian');
     clearPortrait();
   };
   const generateAvatarImage=async()=>{
@@ -722,8 +813,6 @@ export default function Home() {
       setStatus('Nie udało się zapisać nowego avatara.');
     }
   };
-  const trackPointer=(e:React.PointerEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();pointerRef.current={x:Math.max(-1,Math.min(1,(e.clientX-(r.left+r.width/2))/(r.width/2))),y:Math.max(-1,Math.min(1,(e.clientY-(r.top+r.height/2))/(r.height/2)))};};
-  const resetPointer=()=>{pointerRef.current={x:0,y:0};};
   const speak=async(text:string)=>{
     if(!voiceEnabled)return;
     text=prepareSpeechText(text,language);
@@ -737,30 +826,69 @@ export default function Home() {
         setStatus('Natywny strumień wymaga polskiej lokalnej Pauliny. Wybierz ją lub wyłącz tryb strumieniowy.');
         return;
       }
-      const current:{controller:AbortController;clock?:Pick<StreamingAudioClock,'positionMs'>}={controller:new AbortController()};
+      const current:{controller:AbortController;clock?:Pick<StreamingAudioClock,'positionMs'|'streamId'>}={controller:new AbortController()};
       localSpeechRef.current=current;
       speechVisemePlanRef.current=[];
       setSpeechPreparing(true);
       setStatus('Przygotowuję natywny strumień Pauliny — lokalny CPU…');
       try{
+        let sentVisemes=0;
+        const flushLiveVisemes=()=>{
+          const session=liveAvatarSessionRef.current;
+          const streamId=current.clock?.streamId;
+          if(!session||!streamId||liveAudioStreamIdRef.current!==streamId)return;
+          while(sentVisemes<speechVisemePlanRef.current.length){
+            session.pushViseme(streamId,speechVisemePlanRef.current[sentVisemes]);
+            sentVisemes++;
+          }
+        };
+        const disableLiveAvatar=(error:unknown)=>{
+          console.error('Neural avatar media update failed:',error);
+          const session=liveAvatarSessionRef.current;
+          liveAvatarSessionRef.current=null;
+          setLiveVideoStream(null);
+          setLiveAvatarStatus('error');
+          setLiveAvatarMessage(`Live avatar unavailable: ${error instanceof Error?error.message:'Neural media update failed'}`);
+          if(session)void session.close().catch(closeError=>console.error('Failed to close live avatar after a transport error:',closeError));
+        };
         await playNativePaulinaStream(agentHubClient.baseUrl,text,AbortSignal.any([current.controller.signal,AbortSignal.timeout(180000)]),{
           onClock:clock=>{if(sequence===speechSequenceRef.current)current.clock=clock;},
+          onAudioChunk:chunk=>{
+            if(sequence!==speechSequenceRef.current||!isNexus)return;
+            const session=liveAvatarSessionRef.current;
+            if(!session)return;
+            try{
+              session.pushAudioChunk(chunk.streamId,chunk.event.sequence,chunk.pcm16,chunk.ptsMs);
+              liveAudioStreamIdRef.current=chunk.streamId;
+              flushLiveVisemes();
+            }catch(error){disableLiveAvatar(error);}
+          },
           onCue:event=>{
             if(sequence!==speechSequenceRef.current||event.type!=='viseme')return;
             appendSapiVisemeCue(speechVisemePlanRef.current,event.viseme,event.audioPositionMs,event.durationMs,event.emphasis);
+            try{flushLiveVisemes();}
+            catch(error){disableLiveAvatar(error);}
           },
           onAudioScheduled:()=>{
             if(sequence!==speechSequenceRef.current)return;
             setSpeechPreparing(false);setSpeaking(true);
+            const session=liveAvatarSessionRef.current;
+            if(isNexus&&session){
+              try{session.setState('SPEAKING',current.clock?.positionMs()??0);}
+              catch(error){disableLiveAvatar(error);}
+            }
             setStatus(isNexus
-              ? 'Paulina Live: PCM i natywne visemy; film Luny pozostaje podglądem.'
-              : 'Paulina Live: PCM i natywne visemy; usta portretu poruszają się zgodnie z mową.');
+              ? liveAvatarSessionRef.current
+                ? 'Paulina Live: PCM i natywne visemy sterują persistentnym rendererem neuralnym.'
+                : 'Paulina Live: PCM działa; obraz Nexusa pozostaje statyczny, bo renderer neuralny jest niedostępny.'
+              : 'Paulina Live: lokalny strumień PCM działa.');
             emitVoiceEvent('SPEAKING','Natywny strumień Pauliny');
           },
         });
         if(sequence!==speechSequenceRef.current)return;
         localSpeechRef.current=null;
         speechVisemePlanRef.current=[];
+        liveAudioStreamIdRef.current=null;
         setSpeechPreparing(false);setSpeaking(false);setStatus('Gotowa do rozmowy');emitVoiceEvent('IDLE','Gotowa do rozmowy');
       }catch(error){
         if(sequence!==speechSequenceRef.current)return;
@@ -771,7 +899,7 @@ export default function Home() {
       }
       return;
     }
-    if(isNexus&&conversationLipSync){
+    if(!isNexus&&conversationLipSync){
       setAnimationVideoUrl(null);
       setAvatarAnimationError('');
       if(language!=='pl-PL'||(voiceURI!==''&&!/Paulina/i.test(voiceURI))){
@@ -810,12 +938,11 @@ export default function Home() {
         current.url=URL.createObjectURL(blob);
         const audio=new Audio(current.url);
         current.audio=audio;
-        speechVisemePlanRef.current=estimateVisemePlan(text,{charactersPerSecond:14});
-        audio.onended=()=>{if(sequence!==speechSequenceRef.current)return;cancelSpeech();setSpeaking(false);setSpeechPreparing(false);emitVoiceEvent('IDLE','Luna ready');setStatus('Gotowa do rozmowy');};
+        audio.onended=()=>{if(sequence!==speechSequenceRef.current)return;cancelSpeech();setSpeaking(false);setSpeechPreparing(false);emitVoiceEvent('IDLE','Gotowe');setStatus('Gotowa do rozmowy');};
         audio.onerror=()=>{if(sequence!==speechSequenceRef.current)return;console.error('Local speech audio playback failed');cancelSpeech();setSpeaking(false);setSpeechPreparing(false);setStatus('Nie można odtworzyć głosu lokalnego. Odpowiedź jest dostępna jako tekst.');emitVoiceEvent('ERROR','Błąd odtwarzania głosu');};
         await audio.play();
         if(sequence!==speechSequenceRef.current)return;
-        setSpeechPreparing(false);setSpeaking(true);speechStartedAtRef.current=performance.now();setStatus('Luna mówi…');emitVoiceEvent('SPEAKING','Luna mówi…');
+        setSpeechPreparing(false);setSpeaking(true);setStatus('Postać mówi…');emitVoiceEvent('SPEAKING','Postać mówi…');
       }catch(error){
         if(sequence!==speechSequenceRef.current)return;
         console.error('Local speech failed:',error);
@@ -832,10 +959,8 @@ export default function Home() {
     const selectedVoice=selectSpeechVoice(window.speechSynthesis.getVoices(),language,voiceURI,{localFemalePolish:isNexus});
     if(!selectedVoice){setStatus(isNexus&&language==='pl-PL'?'Brak lokalnego kobiecego głosu Paulina. Wybierz głos w ustawieniach lub zainstaluj polski głos Windows. Odpowiedź pozostaje dostępna jako tekst.':'Brak głosu dla wybranego języka. Odpowiedź jest dostępna jako tekst; wybierz inny język lub zainstaluj głos w systemie.');return;}
     u.voice=selectedVoice;
-    speechVisemePlanRef.current=estimateVisemePlan(text,{charactersPerSecond:14/u.rate});
-    u.onstart=()=>{if(sequence!==speechSequenceRef.current)return;speechStartedAtRef.current=performance.now();setSpeaking(true);setStatus('Luna mówi…');emitVoiceEvent('SPEAKING','Luna mówi…')};
-    u.onboundary=event=>{if(sequence!==speechSequenceRef.current)return;const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
-    u.onend=()=>{if(sequence!==speechSequenceRef.current)return;setSpeaking(false); emitVoiceEvent('IDLE', 'Luna ready'); setStatus('Gotowa do rozmowy')};
+    u.onstart=()=>{if(sequence!==speechSequenceRef.current)return;setSpeaking(true);setStatus('Postać mówi…');emitVoiceEvent('SPEAKING','Postać mówi…')};
+    u.onend=()=>{if(sequence!==speechSequenceRef.current)return;setSpeaking(false); emitVoiceEvent('IDLE', 'Gotowe'); setStatus('Gotowa do rozmowy')};
     u.onerror=event=>{if(sequence!==speechSequenceRef.current)return;setSpeaking(false);if(event.error==='canceled'||event.error==='interrupted')return;console.error('Speech synthesis failed:',event.error);setStatus(`Nie można odczytać odpowiedzi: ${event.error}`);emitVoiceEvent('ERROR',`Błąd głosu: ${event.error}`);};
     window.speechSynthesis.speak(u);
   };
@@ -1029,6 +1154,9 @@ export default function Home() {
     if(!SR){setMicrophoneError('Rozpoznawanie mowy wymaga zwykłego Edge/Chrome. Przeglądarka VS Code może nie obsługiwać tej usługi.');setStatus('Rozpoznawanie mowy niedostępne');return;}
     if(listening){recognitionRef.current?.abort(); emitVoiceEvent('INTERRUPTED','Voice input stopped');return;}
     if(microphoneBusy||operationBusyRef.current)return;
+    cancelSpeech();
+    setSpeechPreparing(false);
+    setSpeaking(false);
     if(!await detectMicrophones())return;
     if(/\bElectron\//.test(navigator.userAgent)){
       const message='Mikrofon działa, ale usługa Web Speech nie jest obsługiwana w przeglądarce VS Code. Otwórz ten sam adres w zwykłym Edge/Chrome. Tutaj możesz pisać lub użyć dyktowania Windows: kliknij pole polecenia i naciśnij Win+H, potem Wyślij.';
@@ -1037,16 +1165,19 @@ export default function Home() {
       return;
     }
     emitVoiceEvent('LISTENING','Nexus słucha…');
-    cancelSpeech();
-    setSpeechPreparing(false);
-    setSpeaking(false);
     const r=new SR(); recognitionRef.current=r;
     let finalText='';
     let failed=false;
     let submitted=false;
     const submitFinal=createFinalSpeechSubmission(text=>{submitted=true;void runNexusConversation(text);});
     r.lang=language; r.continuous=false; r.interimResults=true;
-    r.onstart=()=>{setListening(true);setStatus('Nexus słucha…')};
+    r.onstart=()=>{
+      setListening(true);
+      setStatus('Nexus słucha…');
+      liveAvatarStateRef.current='LISTENING';
+      try{liveAvatarSessionRef.current?.setState('LISTENING',localSpeechRef.current?.clock?.positionMs()??0);}
+      catch(error){console.error('Live avatar listening-state update failed:',error);}
+    };
     r.onresult=(e:any)=>{if(submitted)return;let t='';finalText='';for(let i=0;i<e.results.length;i++){t+=e.results[i][0].transcript;if(e.results[i].isFinal)finalText+=e.results[i][0].transcript;}setPrompt(t);if(finalText.trim())submitFinal(finalText);};
     r.onerror=(e:any)=>{
       if(submitted)return;
@@ -1094,29 +1225,36 @@ export default function Home() {
       </details>
       </>,settingsContainer)}
       <div ref={avatarStageRef} className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
-        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(isNexus?styles.nexusPortrait:styles.photoPortrait)+(speaking?' '+styles.speaking:'')+(listening?' '+styles.listening:'')+(cameraView==='face'?' '+styles.cameraFace:'')}>
+        <div data-live-status={liveAvatarStatus} className={styles.avatar+' '+(isNexus?styles.nexusPortrait:styles.photoPortrait)+(speaking&&!isNexus?' '+styles.speaking:'')+(listening?' '+styles.listening:'')+(cameraView==='face'&&!isNexus?' '+styles.cameraFace:'')}>
           <div className={styles.scan}/>
-          {conversationVideo
+          {isNexus
+            ? <>
+              {liveVideoStream&&<video ref={liveVideoRef} autoPlay muted playsInline poster={nexusAvatarSrc} className={styles.person+' '+styles.liveVideo+(liveFrameReady?' '+styles.liveVideoReady:'')}
+                onLoadedData={()=>{setLiveFrameReady(true);setLiveAvatarStatus('connected');setLiveAvatarMessage('Live neural avatar video is rendering.');}}
+                onError={()=>{setLiveFrameReady(false);setLiveAvatarStatus('error');setLiveAvatarMessage('Live avatar unavailable — the neural video track failed to decode.');}}/>}
+              {(!liveVideoStream||!liveFrameReady)&&<>
+                {avatarImageFailed
+                  ? <div className={styles.portraitFallback}>Nexus — bibliotekarka<br/><small>{liveAvatarMessage}</small></div>
+                  : <img className={styles.person} src={nexusAvatarSrc} alt="Nexus — kanoniczny portret bibliotekarki" onError={()=>setAvatarImageFailed(true)}/>}
+                <div className={styles.liveUnavailable} role="status" aria-live="polite">
+                  <span>Live avatar unavailable — {liveAvatarMessage.replace(/^Live avatar unavailable\s*[-—:]?\s*/i,'')}</span>
+                  {liveAvatarStatus!=='checking'&&<button type="button" onClick={()=>setLiveAvatarRetry(value=>value+1)}>Retry neural renderer</button>}
+                </div>
+              </>}
+            </>
+            : conversationVideo
             ? <video ref={conversationVideoRef} autoPlay controls playsInline className={styles.person} src={conversationVideo}
-                onPlay={()=>{setSpeaking(true);setStatus('Luna mówi — audio i ruch ust z tego samego renderu');emitVoiceEvent('SPEAKING','Luna mówi');}}
+                onPlay={()=>{setSpeaking(true);setStatus('Postać mówi — audio i ruch ust z tego samego renderu');emitVoiceEvent('SPEAKING','Postać mówi');}}
                 onPause={()=>setSpeaking(false)}
-                onEnded={()=>{cancelSpeech();setSpeaking(false);setConversationVideo(null);setStatus('Gotowa do rozmowy');emitVoiceEvent('IDLE','Luna ready');}}
+                onEnded={()=>{cancelSpeech();setSpeaking(false);setConversationVideo(null);setStatus('Gotowa do rozmowy');emitVoiceEvent('IDLE','Gotowe');}}
                 onError={()=>{cancelSpeech();setSpeaking(false);setAvatarAnimationError('Nie można odtworzyć zsynchronizowanej odpowiedzi. Nie uruchomiono starej animacji ani zastępczego głosu.');}}/>
             : animationVideoUrl
-            ? <video autoPlay controls={!isNexus&&!importedVideo} loop={isNexus||!!importedVideo} muted={isNexus||!!importedVideo} playsInline className={styles.person} src={animationVideoUrl} onEnded={()=>setAnimationVideoUrl(null)} onError={()=>{setAnimationVideoUrl(null);setAvatarAnimationError('Nie udało się odtworzyć filmu postaci.');}}/>
+            ? <video autoPlay controls={!importedVideo} loop={!!importedVideo} muted={!!importedVideo} playsInline className={styles.person} src={animationVideoUrl} onEnded={()=>setAnimationVideoUrl(null)} onError={()=>{setAnimationVideoUrl(null);setAvatarAnimationError('Nie udało się odtworzyć filmu postaci.');}}/>
             : avatarImageFailed
               ? <div className={styles.portraitFallback}>Dodaj zdjęcie postaci<br/><small>Użyj fotografii, którą chcesz ustawić jako awatara.</small></div>
-              : isNexus
-                ? avatarVideoFailed
-                  ? <img className={styles.person} src={nexusAvatarSrc} alt="Luna — zapisany portret androidki" onError={()=>setAvatarImageFailed(true)}/>
-                  : <AvatarSpeechVideo speaking={speaking&&!conversationLipSync} className={styles.person} src={NEXUS_DEFAULT_AVATAR.video} idleSrc={NEXUS_DEFAULT_AVATAR.idleVideo} poster={nexusAvatarSrc} onError={()=>{setAvatarVideoFailed(true);setAvatarAnimationError('Nie udało się odtworzyć filmu androidki; pokazuję jej zapisany portret.');}}/>
-              : <img key={portraitSource} className={styles.person} src={portraitSource} alt={isNexus?'Luna — androidka':customPortrait||defaultAvatarPortrait?'Nexus — zapisany portret postaci':'Luna — androidka'} onError={()=>setAvatarImageFailed(true)}/>}
-          {!isNexus&&!avatarImageFailed&&!animationVideoUrl&&!conversationVideo&&(
-            <div className={styles.faceRig} aria-hidden="true">
-              <span className={styles.mouthRig}/>
-            </div>
-          )}
-          <div className={styles.wave}><i/><i/><i/><i/><i/></div>
+              : <img key={portraitSource} className={styles.person} src={portraitSource}
+                  alt={activeCharacterId==='luna'?'Luna — zapisany portret':activeCharacterId==='bear'?'Miś — zapisany portret':'Wybrana postać — zapisany portret'}
+                  onError={()=>setAvatarImageFailed(true)}/>}
         </div></div>
         {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
         {creationFlow&&<div className={styles.portraitActions} role="group" aria-label="Opcje bieżącego zadania">
@@ -1191,9 +1329,9 @@ export default function Home() {
             cancelSpeech();setSpeaking(false);setSpeechPreparing(false);
             setStatus(event.target.checked?'Natywny głos Live włączony — wymaga lokalnego Agent Hub i Pauliny.':'Zwykły odczyt głosowy przywrócony.');
           }}/> Nexus Live — strumień PCM Pauliny, lokalny CPU</label>
-          {nativeSpeechStreaming&&<p className={styles.status}>Nowy silnik odtwarza audio po pierwszych fragmentach, nie czeka na cały WAV ani MP4. Natywne czasy fonemów i visemów są dostępne w protokole. Ten przełącznik uruchamia głos, nie generatywny obraz realtime; {isNexus?'film Luny pozostaje tylko podglądem.':'natywne visemy sterują ustami wybranego portretu.'} Wymaga Windows i lokalnego Agent Hub, nie działa automatycznie na hosted Floot.</p>}
-          <label><input type="checkbox" checked={conversationLipSync} disabled={speaking||speechPreparing||nativeSpeechStreaming} onChange={event=>{setConversationLipSync(event.target.checked);localStorage.setItem('nexus-conversation-lipsync',String(event.target.checked));cancelSpeech();setSpeaking(false);setSpeechPreparing(false);setAvatarAnimationError('');setStatus(event.target.checked?'Tryb filmu odpowiedzi włączony — wymaga aktywnego renderera.':'Zwykły lokalny odczyt głosowy włączony.');}}/> Ruch ust do aktualnej odpowiedzi — nowy film EchoMimic w darmowym Colabie</label>
-          {conversationLipSync&&<><label><input type="checkbox" checked={conversationConsent} onChange={event=>{setConversationConsent(event.target.checked);localStorage.setItem('nexus-conversation-cloud-consent',String(event.target.checked));if(!event.target.checked){cancelSpeech();setSpeaking(false);setSpeechPreparing(false);}}}/> Zgadzam się wysłać portret androidki, treść odpowiedzi i jej audio do mojego darmowego renderera Colab</label><p className={styles.status}>Ten tryb używa lokalnej Pauliny i jednego filmu z dźwiękiem. Oczekiwanie może trwać kilka minut. Maksymalnie 30 sekund mowy, bez obcinania. Bez kredytów i płatnego fallbacku. Brak renderera pozostawia odpowiedź jako tekst. Wyłączenie tej opcji przywraca zwykły odczyt i starą animację, która nie jest synchronizacją ust.</p></>}
+          {nativeSpeechStreaming&&<p className={styles.status}>Paulina odtwarza lokalny PCM od pierwszych fragmentów. Gdy Nexus jest aktywny i działa warm neural renderer, ten sam strumień PCM oraz natywne visemy trafiają do niego z PTS audio. Bez dostępnego renderera Nexus pozostaje statycznym, niezmiennym portretem. Wymaga lokalnego Agent Hub i Pauliny.</p>}
+          {!isNexus&&<label><input type="checkbox" checked={conversationLipSync} disabled={speaking||speechPreparing||nativeSpeechStreaming} onChange={event=>{setConversationLipSync(event.target.checked);localStorage.setItem('nexus-conversation-lipsync',String(event.target.checked));cancelSpeech();setSpeaking(false);setSpeechPreparing(false);setAvatarAnimationError('');setStatus(event.target.checked?'Tryb filmu odpowiedzi włączony — wymaga aktywnego renderera.':'Zwykły lokalny odczyt głosowy włączony.');}}/> Tryb batch: animacja wypowiedzi postaci przez renderer EchoMimic</label>}
+          {!isNexus&&conversationLipSync&&<><label><input type="checkbox" checked={conversationConsent} onChange={event=>{setConversationConsent(event.target.checked);localStorage.setItem('nexus-conversation-cloud-consent',String(event.target.checked));if(!event.target.checked){cancelSpeech();setSpeaking(false);setSpeechPreparing(false);}}}/> Zgadzam się wysłać wybrany portret, tekst i audio do mojego renderera batch</label><p className={styles.status}>To osobny tryb batch, nie renderer live. Oczekiwanie może trwać kilka minut. Brak renderera pozostawia odpowiedź jako tekst. Nigdy nie uruchamia się automatycznie dla Nexus Live.</p></>}
           {speechConfigError&&<p role="alert" className={styles.status}>{speechConfigError}</p>}
           <select id="nexus-speech-voice" disabled={speaking||isThinking||speechPreparing} value={(language==='pl-PL'&&piperAvailable&&voiceURI==='piper:pl-darkman')||matchingVoices(voices,language).some(voice=>voice.voiceURI===voiceURI)?voiceURI:''} onChange={event=>{setVoiceURI(event.target.value);localStorage.setItem('nexus-speech-voice',event.target.value);}}>
             <option value="">{isNexus&&language==='pl-PL'?'Automatyczny — Paulina, kobiecy i lokalny':'Automatyczny — naturalny, jeśli dostępny'}</option>
@@ -1202,12 +1340,18 @@ export default function Home() {
           </select>
           <label><input type="checkbox" checked={voiceEnabled} onChange={event=>{setVoiceEnabled(event.target.checked);localStorage.setItem('nexus-voice-enabled',String(event.target.checked));if(!event.target.checked){cancelSpeech();setSpeechPreparing(false);setSpeaking(false);emitVoiceEvent('IDLE','Odczyt wyłączony');setStatus('Odczyt odpowiedzi wyłączony');}}}/> Czytaj odpowiedzi na głos</label>
           <Button variant="secondary" disabled={!voiceEnabled||speaking||isThinking||speechPreparing||!(matchingVoices(voices,language).length||(language==='pl-PL'&&piperAvailable))} onClick={()=>void speak(speechPreview(language))}><Volume2 size={16}/>Sprawdź głos</Button>
-          <p className={styles.status}>{isNexus&&language==='pl-PL'?'Automatyczny głos androidki: lokalna Microsoft Paulina, bez płatnego TTS. Jeśli jej brakuje, nie zastępuję jej automatycznie męskim lektorem. Ręczny wybór głosu ma pierwszeństwo.':language==='pl-PL'&&piperAvailable?'Automatyczny głos polski: Piper Darkman, pobrany, CPU, bez przesyłania tekstu do internetu. Możesz wybrać inny głos z listy.':matchingVoices(voices,language).length?'Lista zawiera głosy dostępne w tej przeglądarce. Głos online może przesyłać tekst do dostawcy.':'Brak głosu dla tego języka na liście przeglądarki. Rozmowa tekstowa nadal działa; zainstaluj głos w systemie lub wybierz inny język.'} Polecenie wysyłam od razu po końcowym rozpoznaniu, bez czekania na zamknięcie mikrofonu. Czas odpowiedzi zależy też od modelu i sieci.</p>
+          <p className={styles.status}>{isNexus&&language==='pl-PL'?'Preferowany głos Nexusa: lokalna Microsoft Paulina. Natywny strumień PCM jest wymagany do przekazania zsynchronizowanego audio i visemów do neural renderera. Ręczny wybór głosu ma pierwszeństwo.':language==='pl-PL'&&piperAvailable?'Automatyczny głos polski: Piper Darkman, pobrany, CPU, bez przesyłania tekstu do internetu. Możesz wybrać inny głos z listy.':matchingVoices(voices,language).length?'Lista zawiera głosy dostępne w tej przeglądarce. Głos online może przesyłać tekst do dostawcy.':'Brak głosu dla tego języka na liście przeglądarki. Rozmowa tekstowa nadal działa; zainstaluj głos w systemie lub wybierz inny język.'} Polecenie wysyłam od razu po końcowym rozpoznaniu, bez czekania na zamknięcie mikrofonu. Czas odpowiedzi zależy też od modelu i sieci.</p>
           <p className={styles.status}>Lektor do gotowych filmów: <a href="https://app.clipchamp.com/" target="_blank" rel="noopener noreferrer">Clipchamp</a> · <a href="https://www.capcut.com/" target="_blank" rel="noopener noreferrer">CapCut</a>. To osobne edytory; dostępność głosów i limity ustala ich dostawca. Nexus nie wysyła tam automatycznie tekstu ani zdjęć.</p>
           <div className={styles.cameraControls} role="group" aria-label="Ustawienie kadru awatara">
             <span>Widok</span>
             <Button variant={cameraView==='full'?'primary':'secondary'} aria-pressed={cameraView==='full'} onClick={()=>chooseCameraView('full')}>Cała postać</Button>
             <Button variant={cameraView==='face'?'primary':'secondary'} aria-pressed={cameraView==='face'} onClick={()=>chooseCameraView('face')}>Twarz</Button>
+            <label htmlFor="active-character">Postać</label>
+            <select id="active-character" value={activeCharacterId} onChange={event=>{if(isActiveCharacterId(event.target.value))chooseCharacter(event.target.value);}}>
+              {CHARACTER_PROFILES.map(profile=><option key={profile.identity.id} value={profile.identity.id}>{profile.name}</option>)}
+              {customPortrait&&<option value="custom">Własne zdjęcie postaci</option>}
+              {defaultAvatarPortrait&&<option value="custom-default">Zapisany portret domyślny</option>}
+            </select>
           </div>
           <p className={styles.status}>Generator obrazów Nexus wymaga aktywnego Image Engine i ustawień NEXUS_IMAGE_SERVER_URL oraz NEXUS_IMAGE_SERVER_TOKEN w lokalnym Agent Hub. Token pozostaje wyłącznie po stronie serwera.</p>
           <Button variant="secondary" disabled={microphoneBusy} onClick={()=>void detectMicrophones()}>{microphoneBusy?'Wykrywam mikrofony…':'Wykryj mikrofony'}</Button>
@@ -1221,7 +1365,7 @@ export default function Home() {
           {!customPortrait&&defaultAvatarPortrait&&<Button variant="secondary" disabled={avatarRendering||batchBusy} onClick={restoreNexusAvatar}>Przywróć fabrycznego Nexusa</Button>}
           <Button variant="secondary" disabled={avatarRendering||!response.trim()||!cloudRenderReady||!cloudConsent} onClick={()=>void animateAvatar(response)}>{avatarRendering?'Silnik Nexusa renderuje…':'Animuj odpowiedź — silnik Nexusa'}</Button>
         </div>
-        {isNexus&&<p className={styles.status}>{conversationLipSync?'Tryb rozmowy wymaga nowego filmu z głosem aktualnej odpowiedzi. Stary film nie zastępuje synchronizacji ust. W oczekiwaniu Luna odtwarza osobną, wyciszoną animację mrugania.':'W ciszy Luna odtwarza osobną animację spokojnego mrugania. Podczas mowy odtwarza wyciszony film mówienia; po niej wraca do animacji oczekiwania. Zwykły film mówienia nie jest synchronizowany z poszczególnymi głoskami.'}</p>}
+        {isNexus&&<p className={styles.status}>{liveAvatarMessage}</p>}
         <p className={styles.status}>Lokalny render GPU wyłączony. Animacja wymaga własnego serwera Nexusa w chmurze; przycisk wysyła tam zdjęcie i odpowiedź. Bez HeyGen.</p>
         <details className={styles.batchPanel}>
           <summary>Generator obrazów Nexus</summary>

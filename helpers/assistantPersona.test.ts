@@ -4,14 +4,14 @@ import { NexusAgent } from './nexusAgent.ts';
 import { ModelRouter } from './modelRouter.ts';
 import { MemoryStore, InMemoryMemoryBackend } from './memoryStore.ts';
 import { ToolRegistry } from './toolRegistry.ts';
-import { LUNA_IDENTITY, LUNA_GREETING, LUNA_EMOTION_CONTEXT, LUNA_IDENTITY_REMINDER } from './assistantPersona.ts';
+import { NEXUS_IDENTITY, NEXUS_GREETING, NEXUS_EMOTION_CONTEXT, NEXUS_IDENTITY_REMINDER } from './assistantPersona.ts';
 
-test('default and company conversations send Luna feminine identity even with old history', async () => {
+test('default and company conversations send canonical Nexus feminine identity even with old history', async () => {
   class RecordingRouter extends ModelRouter {
     prompt = '';
     override async route(prompt: string): Promise<string> {
       this.prompt = prompt;
-      return 'Jestem Luna, asystentka Nexus AI. Jestem gotowa.';
+      return 'Jestem Nexus, asystentka Nexus AI. Jestem gotowa.';
     }
   }
   for (const options of [{}, { systemPrompt: 'You are an independent business assistant.' }]) {
@@ -21,12 +21,12 @@ test('default and company conversations send Luna feminine identity even with ol
       text: 'Jak masz na imie?',
       history: [{ role: 'assistant', content: 'Jestem Nexus.' }],
     });
-    assert.ok(router.prompt.includes(LUNA_IDENTITY));
-    assert.ok(router.prompt.includes(LUNA_EMOTION_CONTEXT));
-    assert.ok(router.prompt.indexOf(LUNA_IDENTITY_REMINDER) > router.prompt.indexOf('Jestem Nexus.'));
+    assert.ok(router.prompt.includes(NEXUS_IDENTITY));
+    assert.ok(router.prompt.includes(NEXUS_EMOTION_CONTEXT));
+    assert.ok(router.prompt.indexOf(NEXUS_IDENTITY_REMINDER) > router.prompt.indexOf('Jestem Nexus.'));
     assert.match(router.prompt, /always use feminine grammatical forms/);
-    assert.match(result.text, /Luna.*gotowa/);
-    assert.match(LUNA_GREETING, /jestem Luna, asystentka Nexus AI/);
+    assert.match(result.text, /Nexus.*gotowa/);
+    assert.match(NEXUS_GREETING, /jestem Nexus, asystentka Nexus AI/);
   }
 });
 
@@ -35,7 +35,7 @@ test('stable persona prefix precedes changing memory/history for local prompt ca
     prompts: string[] = [];
     override async route(prompt: string): Promise<string> {
       this.prompts.push(prompt);
-      return 'Jestem Luna.';
+      return 'Jestem Nexus.';
     }
   }
   const router = new RecordingRouter();
@@ -44,15 +44,15 @@ test('stable persona prefix precedes changing memory/history for local prompt ca
   await agent.send({ text: 'Jak masz na imię?', history: [{ role: 'assistant', content: 'Jestem Nexus.' }] });
   const prefixes = router.prompts.map(prompt => prompt.split('Memory context:')[0]);
   assert.equal(prefixes[0], prefixes[1]);
-  assert.ok(prefixes[0].includes(LUNA_IDENTITY));
-  assert.ok(prefixes[0].includes(LUNA_EMOTION_CONTEXT));
+  assert.ok(prefixes[0].includes(NEXUS_IDENTITY));
+  assert.ok(prefixes[0].includes(NEXUS_EMOTION_CONTEXT));
   assert.ok(router.prompts[1].includes('Jestem Nexus.'));
   assert.ok(router.prompts[1].includes('User message: Jak masz na imię?'));
 });
 
 test('emotion guidance is contextual and compassionate rather than aggressive', () => {
-  assert.match(LUNA_EMOTION_CONTEXT, /meaning of the conversation, not isolated emotion keywords/);
-  assert.match(LUNA_EMOTION_CONTEXT, /Do not smile or joke about grief/);
-  assert.match(LUNA_EMOTION_CONTEXT, /without mirroring aggression/);
-  assert.match(LUNA_EMOTION_CONTEXT, /do not announce emotion labels/);
+  assert.match(NEXUS_EMOTION_CONTEXT, /meaning of the conversation, not isolated emotion keywords/);
+  assert.match(NEXUS_EMOTION_CONTEXT, /Do not smile or joke about grief/);
+  assert.match(NEXUS_EMOTION_CONTEXT, /without mirroring aggression/);
+  assert.match(NEXUS_EMOTION_CONTEXT, /do not announce emotion labels/);
 });

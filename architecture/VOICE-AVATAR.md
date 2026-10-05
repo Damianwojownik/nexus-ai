@@ -33,17 +33,48 @@ One real Windows verification synthesized 4.43 seconds / 70,880 samples,
 1,619 ms cold including 1,532 ms worker warm-up, versus 5.72 ms warm;
 these are speech-worker observations, not LLM-to-avatar latency. Native HTTP,
 browser packet validation/playback, interruption and legacy speech tests passed.
-The opt-in "Nexus Live" checkbox streams local Paulina PCM and now feeds native
-SAPI viseme cues into the existing procedural mouth rig using the scheduled PCM
-clock. The rig smooths transitions; these broad viseme classes are not exact
-phoneme alignment or a neural live renderer. Luna's looping MP4 remains a
-visual preview and is not synchronized to the new speech. This local Windows
-path is separate from the hosted Floot backend.
+The "Nexus Live" PCM client now offers a non-blocking audio-chunk callback.
+When a warm persistent neural renderer is genuinely available, the browser
+provider sends those PCM16LE chunks, sample-derived PTS and native Paulina
+visemes over WebRTC/DataChannel plus its session control WebSocket. The local
+Agent Hub proxies session creation, SDP offers and teardown without exposing
+the upstream token. Audio playback remains master-clocked by
+`PcmStreamPlayer.positionMs()`.
 
-For a static photo portrait, the full-body camera mode keeps the original image
-uncropped and its eyes untouched; it does not place procedural eyes over the
-photo. During speech, the synchronized mouth cue is positioned over the portrait
-mouth. This remains lightweight 2D motion, not generated full-body animation.
+The Nexus librarian is now the default identity, pinned to the frontal JPEG and
+two SHA-256-pinned expression references. Only the frontal image is used as the
+conversation portrait; the expression images are not switched in as frames.
+`faceRig`, `mouthRig`, CSS image deformation and automatic MP4 playback have
+been removed from the main portrait renderer. Until a live video track produces
+a decoded frame, the UI shows the unchanged portrait and the explicit message
+"Live avatar unavailable". The live renderer server/model is NOT currently
+configured, so no live video, FPS, first-frame latency or A/V offset has been
+measured. The existing Paulina playback path is retained and remains separate
+from hosted Floot.
+
+### Neural renderer service contract and current limit
+
+The browser talks only to loopback Agent Hub routes:
+`GET /api/avatar/live/health`, `POST /api/avatar/live/sessions`,
+`POST /api/avatar/live/sessions/:id/offer`, and
+`DELETE /api/avatar/live/sessions/:id`. Agent Hub forwards them to the
+server-only `NEXUS_LIVE_AVATAR_SERVER_URL` and
+`NEXUS_LIVE_AVATAR_SERVER_TOKEN` contract. The upstream must report
+`available: true`, `warm: true` and `mode: "persistent-neural-stream"` before
+a session can be created. Each session returns a video-capable WebRTC answer,
+ICE configuration and a WSS control URL; ordered DataChannel messages carry
+length-prefixed JSON metadata followed by PCM16LE bytes. Control messages carry
+state, emotion, PTS and native viseme intervals. The adapter verifies the
+character ID and pinned face hash; batch renderers and Colab URLs are not valid
+live providers.
+
+There is currently no implementation of that neural renderer service in this
+checkout, and no server URL/token are configured. Therefore the UI deliberately
+fails closed instead of displaying a fake speaking loop. Clicking the
+microphone during native Paulina playback aborts the PCM player first, sends
+`INTERRUPT` at the playback clock position and changes the session to
+`LISTENING` when recognition starts. Automatic always-on VAD, a renderer-side
+GPU/model and real five-turn/latency/FPS measurements remain unverified.
 
 The user explicitly cancelled the three-minute EchoMimic experiment to focus
 on realtime. Its owned process was terminated; no completed long film is
@@ -124,6 +155,13 @@ Selecting a batch profile does not replace Luna, change her voice, claim a
 trained rig, or upload to Colab automatically. The existing batch request format
 is preserved. A generated bear video must be reviewed before live use.
 
+The main screen now has an explicit `activeCharacterId` selector. The
+`nexus-librarian` identity is the default on a fresh profile; prior custom
+portraits are preserved and can be explicitly selected. The three reference
+images have pinned hashes, but only the frontal face is displayed during the
+conversation. Older prototype switching/overlay behavior is retired from the
+main view and is not an accepted live renderer.
+
 The first original-bear speech test has now rendered successfully through the
 existing EchoMimic adapter on Colab L4. Output: 672x848, 78 frames at 25 FPS,
 3.12 seconds, H.264/AAC. Both streams start at zero and report 3.12 seconds.
@@ -136,8 +174,9 @@ A job-specific runner adds a bear prompt without modifying the shared adapter.
 Six sampled frames show blinking, several muzzle shapes and paw movement, but
 also generated teeth not supplied by the original. This is a batch preview,
 not exact therapeutic articulation, measured phoneme alignment, a trained bear
-model, or proof of identity stability over minutes. No default Luna replacement
-or Floot deployment was performed.
+model, or proof of identity stability over minutes. At the time of that
+historical render no default avatar replacement or Floot deployment was
+performed; the current default profile is documented above.
 
 The user increased the total authorized allowance to 30 existing Colab compute
 units, with no purchases or paid API authorization. The initial balance was
@@ -251,47 +290,30 @@ The renderer should consume semantic signals rather than model-specific UI state
 
 Browser SpeechSynthesis and Web Speech can remain the zero-cost MVP where supported. High-fidelity lip sync requires timing/viseme data or a dedicated avatar renderer; moving a single PNG is not considered final lip sync.
 
-Local FasterLivePortrait rendering is disabled in the Agent Hub: the avatar API never starts Python, CUDA or a local inference process. This prevents avatar rendering from competing for GPU memory on the desktop. Browser portrait display, lightweight CSS motion and speech synthesis remain available; they are not generative lip sync.
-
-The default Nexus avatar is `public/avatars/nexus-android.mp4`, the accepted
-`android-face-test-9ebe69ed` EchoMimicV3 Flash Pro result (768x768, 25 FPS,
-3.2 seconds). The exact video was recovered from its embedded Colab preview
-and checked against the saved SHA256; no new render was performed.
-`public/avatars/nexus-android.png` is its original first-frame poster and
-fallback if video decoding fails. Older working assets remain for rollback. The MP4
-plays muted only during ordinary TTS when conversation-render mode is disabled.
-When speech stops, playback pauses and resets. Idle looping is disabled because
-the stock film contains prerecorded lip movement as well as head movement.
-The separate silent `public/avatars/luna-idle-blink.mp4` now plays in idle
-instead of that talking loop. Its source is a reviewed 3.2-second EchoMimic
-experiment with silent input, audio guidance disabled and seed 7. The model
-closed its eyes without reopening them, so the genuine eyelid motion was
-retimed and reversed for reopening, followed by a neutral hold (5.04 seconds,
-25 FPS, 126 frames, no audio). This is edited generated motion, not a live
-facial rig or painted eyelid overlay. It is not an emotion-specific clip.
-Its mouth is not synchronized to arbitrary live replies. Browser-local default-
-avatar preferences can override the built-in image; custom photos and Studio-
-rendered videos retain their existing paths.
+Local FasterLivePortrait rendering remains batch-only in the Agent Hub: its
+`run_audio_driving(...)` integration produces a completed MP4, not incremental
+frames. EchoMimic and the legacy android/Luna videos remain available only for
+explicit batch, Studio or legacy/demo flows. None is a fallback for the default
+Nexus Live session. Browser-local custom portraits remain selectable, while
+fresh installs use the verified librarian reference.
 
 ## Per-reply conversation rendering
 
-The android assistant introduces herself as Luna, the assistant of Nexus AI.
-Conversation and company agents share this identity and use feminine Polish
-self-reference (for example, "jestem gotowa"). Nexus AI remains the application
-name; Paulina remains the local speech voice, not the assistant's name.
-Voice previews and new Studio greeting text use Luna. Previously rendered
-clips retain their original audio; changing the persona does not rewrite them.
-This is the current Luna persona, not a rule for every future avatar. The
-planned male Nexus persona will use masculine self-reference. Multiple avatar
-profiles and their selector are not implemented by this change.
+The current default assistant identity is `nexus-librarian`, a professional
+photorealistic woman matching the fixed frontal reference. Conversation and
+company agents use the Nexus identity and feminine Polish self-reference.
+Nexus AI remains the application name; Paulina remains the local speech voice,
+not the assistant's name. Luna, bear and user-provided portraits remain
+separately selectable; switching the active character does not change the
+canonical librarian's pinned identity.
 The conversation prompt asks for contextual warmth, compassion for sadness and
 calm acknowledgement of frustration, without aggression or emotion labels in
 speech. This governs wording, not facial animation. Automatic facial emotion
 selection and reviewed sadness/displeasure clips are not yet available.
 
-The default android's voice settings offer a separate opt-in batch lip-sync mode.
-It is off by default so an unavailable renderer does not freeze the ordinary
-animated preview or prevent local TTS.
+Non-Nexus characters retain a separate opt-in batch lip-sync mode. It is
+disabled for the canonical Nexus Live identity and never substitutes a
+pre-rendered clip when its neural renderer is unavailable.
 `POST /api/avatar/conversation` accepts the actual current reply and explicit
 cloud consent. The Hub checks `NEXUS_AVATAR_FREE_CONFIRMED=true` and a healthy
 zero-cost EchoMimic worker with supplied-audio support before starting synthesis.

@@ -1,5 +1,5 @@
 import { parsePaulinaSpeechEvent, decodePaulinaAudioBase64 } from './paulinaSpeechProtocol.ts';
-import type { PaulinaEndEvent, PaulinaSpeechEvent } from './paulinaSpeechProtocol.ts';
+import type { PaulinaAudioEvent, PaulinaEndEvent, PaulinaSpeechEvent } from './paulinaSpeechProtocol.ts';
 import { browserPcmBackend, PcmBackpressureError, PcmStreamPlayer } from './pcmStream.ts';
 import type { PcmPlaybackBackend } from './pcmStream.ts';
 
@@ -8,6 +8,7 @@ export interface NativeSpeechPlaybackOptions {
   fetch?: typeof fetch;
   onClock?: (clock: PcmStreamPlayer) => void;
   onAudioScheduled?: () => void;
+  onAudioChunk?: (chunk: { streamId: string; event: PaulinaAudioEvent; pcm16: Uint8Array; ptsMs: number }) => void;
   onCue?: (event: Extract<PaulinaSpeechEvent, { type: 'phoneme' | 'viseme' }>) => void;
 }
 
@@ -87,6 +88,7 @@ export async function playNativePaulinaStream(
         if (event.type === 'audio') {
           if (event.sequence !== chunks || event.startSample !== samples) throw new Error('Discontinuous native PCM stream');
           const pcm16 = decodePaulinaAudioBase64(event.bytesBase64, event.sampleCount);
+          const rendererPcm16 = options.onAudioChunk ? pcm16.slice() : undefined;
           for (;;) {
             signal.throwIfAborted();
             try {
@@ -98,6 +100,12 @@ export async function playNativePaulinaStream(
             }
           }
           samples += event.sampleCount;
+          if (rendererPcm16) options.onAudioChunk?.({
+            streamId: player.streamId,
+            event,
+            pcm16: rendererPcm16,
+            ptsMs: event.startSample / event.sampleRate * 1000,
+          });
           if (chunks++ === 0) options.onAudioScheduled?.();
         } else if (event.type === 'phoneme' || event.type === 'viseme') {
           const previous = event.type === 'phoneme' ? lastPhonemeMs : lastVisemeMs;

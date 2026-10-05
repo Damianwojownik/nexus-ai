@@ -11,6 +11,9 @@ import { createTask } from './agentProtocol.ts';
 import type { AgentKind, AgentResult, AgentTaskStatus } from './agentProtocol.ts';
 import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts';
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
+import { SelfHostedLiveAvatarServerClient } from './selfHostedLiveAvatarServer.ts';
+import { validateCharacterIdentity } from './characterEngine.ts';
+import type { CharacterIdentity } from './characterEngine.ts';
 import { assertFreeConversationWorker, conversationAudio, synthesizeConversationSpeech } from './conversationSpeech.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
@@ -287,6 +290,9 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
   const paulinaStream = new PaulinaSpeechStream();
   const localCapabilities = new LocalCapabilities(options.workspaceDir ?? join(process.cwd(), 'workspace'));
   const avatarServer = new SelfHostedAvatarServerClient();
+  const liveAvatarServer = new SelfHostedLiveAvatarServerClient();
+  const liveAvatarSessions = new Set<string>();
+  let liveAvatarSessionCreations = 0;
   const imageServer = new SelfHostedImageServerClient(options.imageServerUrl, options.imageServerToken);
   const cloudRouter = new NexusCloudRouter();
   const configuredFreeMode = nexusFreeMode();
@@ -310,7 +316,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
     const corsAllowed = !!origin && isAllowedOrigin(origin, options.allowedOrigins ?? []);
     if (corsAllowed) {
       response.setHeader('Access-Control-Allow-Origin', origin);
-      response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      response.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
       response.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type, Last-Event-ID');
       response.setHeader('Vary', 'Origin');
       if (request.headers['access-control-request-private-network'] === 'true') {
@@ -559,6 +565,72 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
           configured: !!process.env.NEXUS_AVATAR_SERVER_URL && !!process.env.NEXUS_AVATAR_SERVER_TOKEN,
           conversationFreeConfirmed: process.env.NEXUS_AVATAR_FREE_CONFIRMED === 'true',
         });
+        return;
+      }
+
+      if (url.pathname.startsWith('/api/avatar/live/') && origin && !isLoopbackOrigin(origin)) {
+        throw new HttpError(403, 'Live avatar sessions are only available from the local Nexus frontend');
+      }
+
+      if (method === 'GET' && url.pathname === '/api/avatar/live/health') {
+        sendJson(response, 200, await liveAvatarServer.health());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/avatar/live/sessions') {
+        if (liveAvatarSessions.size + liveAvatarSessionCreations >= 16) throw new HttpError(429, 'Live avatar session limit reached');
+        liveAvatarSessionCreations++;
+        try {
+          const body = await readJson(request, 16 * 1024);
+          if (!isRecord(body.identity)) throw new HttpError(400, 'identity is required');
+          const rawIdentity = body.identity;
+          if (typeof rawIdentity.id !== 'string' || typeof rawIdentity.revision !== 'string'
+            || typeof rawIdentity.referenceSha256 !== 'string' || typeof rawIdentity.rigRevision !== 'string') {
+            throw new HttpError(400, 'identity fields are invalid');
+          }
+          const identity: CharacterIdentity = {
+            id: rawIdentity.id,
+            revision: rawIdentity.revision,
+            referenceSha256: rawIdentity.referenceSha256,
+            rigRevision: rawIdentity.rigRevision,
+          };
+          try { validateCharacterIdentity(identity); }
+          catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Invalid character identity'); }
+          if (identity.id !== 'nexus-librarian'
+            || identity.referenceSha256 !== '5810f3518ad5ac9a326ae720797c9c9117fb8160f94f00caeec019a260ea2e04') {
+            throw new HttpError(400, 'The live prototype currently accepts only the pinned nexus-librarian identity');
+          }
+          if (!(await liveAvatarServer.health()).available) {
+            throw new HttpError(503, 'Live avatar unavailable: a warm persistent neural renderer is not connected.');
+          }
+          const session = await liveAvatarServer.createSession(identity);
+          liveAvatarSessions.add(session.sessionId);
+          sendJson(response, 201, session);
+        } finally {
+          liveAvatarSessionCreations--;
+        }
+        return;
+      }
+
+      if (method === 'POST' && segments[0] === 'api' && segments[1] === 'avatar'
+        && segments[2] === 'live' && segments[3] === 'sessions' && segments.length === 6
+        && segments[5] === 'offer') {
+        const sessionId = segments[4];
+        if (!liveAvatarSessions.has(sessionId)) throw new HttpError(404, 'Live avatar session not found');
+        const body = await readJson(request, 272 * 1024);
+        if (body.type !== 'offer' || typeof body.sdp !== 'string') throw new HttpError(400, 'A WebRTC SDP offer is required');
+        const answer = await liveAvatarServer.exchangeOffer(sessionId, body.sdp);
+        sendJson(response, 200, answer);
+        return;
+      }
+
+      if (method === 'DELETE' && segments[0] === 'api' && segments[1] === 'avatar'
+        && segments[2] === 'live' && segments[3] === 'sessions' && segments.length === 5) {
+        const sessionId = segments[4];
+        if (!liveAvatarSessions.has(sessionId)) throw new HttpError(404, 'Live avatar session not found');
+        await liveAvatarServer.closeSession(sessionId);
+        liveAvatarSessions.delete(sessionId);
+        sendJson(response, 200, { closed: true });
         return;
       }
 
@@ -986,6 +1058,12 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       sendJson(response, statusCode, { error: message });
     }
   });
-  server.once('close', () => { localSpeech.close(); paulinaStream.close(); });
+  server.once('close', () => {
+    localSpeech.close();
+    paulinaStream.close();
+    for (const sessionId of liveAvatarSessions) {
+      void liveAvatarServer.closeSession(sessionId).catch(error => console.error('Failed to close live avatar during Agent Hub shutdown:', error));
+    }
+  });
   return server;
 }
