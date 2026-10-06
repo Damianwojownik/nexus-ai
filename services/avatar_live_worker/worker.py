@@ -377,6 +377,7 @@ async def health(authorization: str | None = Header(default=None)) -> dict[str, 
         "avatarPrepareMs": round(engine.metrics.avatar_prepare_ms, 2),
         "lastNeuralFps": round(engine.metrics.last_render_fps, 2),
         "gpu": engine.gpu_info(),
+        "visual": engine.visual_info() if engine.ready else {},
         **({"reason": engine.error} if not engine.ready and engine.error else {}),
     }
 
