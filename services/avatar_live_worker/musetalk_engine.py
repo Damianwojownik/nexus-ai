@@ -27,11 +27,11 @@ class MuseTalkMetrics:
 
 
 class MuseTalkEngine:
-    """Persistent MuseTalk 1.5 renderer.
+    """Persistent MuseTalk 1.5 renderer for the pinned Nexus identity.
 
-    Models and the canonical Nexus identity are loaded once. Each call consumes a
-    short PCM16LE window and emits complete BGR frames through the supplied sink.
-    No MP4 is created in the live path.
+    A canonical still works immediately. For more natural motion, an explicitly
+    approved base video of the same Nexus identity can be configured. The base
+    frames are prepared once; live calls only infer the audio-driven face region.
     """
 
     def __init__(self) -> None:
@@ -46,6 +46,10 @@ class MuseTalkEngine:
                     "nexus-librarian-front-facing.jpeg"),
             )
         ).resolve()
+        base_video = os.environ.get("NEXUS_LIVE_BASE_VIDEO", "").strip()
+        self.base_video = Path(base_video).resolve() if base_video else None
+        self.base_video_sha256 = os.environ.get("NEXUS_LIVE_BASE_VIDEO_SHA256", "").strip().lower()
+        self.max_base_frames = int(os.environ.get("NEXUS_LIVE_BASE_MAX_FRAMES", "250"))
         self.fps = int(os.environ.get("NEXUS_LIVE_RENDER_FPS", "25"))
         self.batch_size = int(os.environ.get("NEXUS_MUSETALK_BATCH_SIZE", "8"))
         self.extra_margin = int(os.environ.get("NEXUS_MUSETALK_EXTRA_MARGIN", "10"))
@@ -56,7 +60,10 @@ class MuseTalkEngine:
         self.metrics = MuseTalkMetrics()
         self.ready = False
         self.error: str | None = None
-        self._lock = threading.RLock()
+        self._render_lock = threading.RLock()
+        self._idle_lock = threading.Lock()
+        self._idle_cursor = 0
+        self._render_cursor = 0
 
         self.cv2 = None
         self.np = None
@@ -72,11 +79,19 @@ class MuseTalkEngine:
         self.datagen = None
         self.get_image_blending = None
 
-        self.base_frame = None
-        self.bbox = None
-        self.mask = None
-        self.mask_crop_box = None
-        self.latent = None
+        self.base_frames: list[object] = []
+        self.bboxes: list[list[int]] = []
+        self.masks: list[object] = []
+        self.mask_crop_boxes: list[object] = []
+        self.latents: list[object] = []
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
 
     def _validate_config(self) -> None:
         if not self.musetalk_dir.is_dir():
@@ -85,11 +100,25 @@ class MuseTalkEngine:
             )
         if not self.reference.is_file():
             raise RuntimeError(f"Nexus librarian reference missing: {self.reference}")
-        digest = hashlib.sha256(self.reference.read_bytes()).hexdigest()
+        digest = self._sha256(self.reference)
         if digest != LIBRARIAN_SHA256:
             raise RuntimeError(
                 f"Nexus librarian identity hash mismatch: expected {LIBRARIAN_SHA256}, got {digest}"
             )
+        if self.base_video is not None:
+            if not self.base_video.is_file():
+                raise RuntimeError(f"Nexus live base video does not exist: {self.base_video}")
+            if not self.base_video_sha256 or len(self.base_video_sha256) != 64:
+                raise RuntimeError(
+                    "NEXUS_LIVE_BASE_VIDEO requires NEXUS_LIVE_BASE_VIDEO_SHA256 from an approved asset"
+                )
+            actual = self._sha256(self.base_video)
+            if actual != self.base_video_sha256:
+                raise RuntimeError(
+                    f"Nexus live base video hash mismatch: expected {self.base_video_sha256}, got {actual}"
+                )
+        if self.max_base_frames < 1 or self.max_base_frames > 1000:
+            raise RuntimeError("NEXUS_LIVE_BASE_MAX_FRAMES must be within 1..1000")
         if self.fps < 12 or self.fps > 30:
             raise RuntimeError("NEXUS_LIVE_RENDER_FPS must be between 12 and 30")
         if self.batch_size < 1 or self.batch_size > 32:
@@ -99,8 +128,40 @@ class MuseTalkEngine:
         if bool(self.output_width) != bool(self.output_height):
             raise RuntimeError("set both NEXUS_LIVE_OUTPUT_WIDTH and NEXUS_LIVE_OUTPUT_HEIGHT, or neither")
 
+    def _extract_base_paths(self, cv2, temp_dir: str) -> list[str]:
+        if self.base_video is None:
+            return [str(self.reference)]
+
+        capture = cv2.VideoCapture(str(self.base_video))
+        if not capture.isOpened():
+            raise RuntimeError("Nexus live base video could not be opened")
+        source_fps = float(capture.get(cv2.CAP_PROP_FPS) or self.fps)
+        if source_fps <= 0:
+            source_fps = float(self.fps)
+        step = source_fps / self.fps
+        next_source_index = 0.0
+        source_index = 0
+        output: list[str] = []
+        try:
+            while len(output) < self.max_base_frames:
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                if source_index + 1e-6 >= next_source_index:
+                    target = Path(temp_dir) / f"{len(output):06d}.png"
+                    if not cv2.imwrite(str(target), frame):
+                        raise RuntimeError("failed to materialize Nexus base-video frame")
+                    output.append(str(target))
+                    next_source_index += step
+                source_index += 1
+        finally:
+            capture.release()
+        if not output:
+            raise RuntimeError("Nexus live base video yielded no frames")
+        return output
+
     def load(self) -> None:
-        with self._lock:
+        with self._render_lock:
             if self.ready:
                 return
             self._validate_config()
@@ -166,23 +227,39 @@ class MuseTalkEngine:
 
                 fp = FaceParsing(left_cheek_width=90, right_cheek_width=90)
                 prep_started = time.perf_counter()
-                coord_list, frame_list = get_landmark_and_bbox([str(self.reference)], 0)
-                if len(coord_list) != 1 or len(frame_list) != 1:
-                    raise RuntimeError("Nexus reference preprocessing did not produce exactly one face frame")
-                bbox = coord_list[0]
-                frame = frame_list[0]
-                if not bbox or len(bbox) != 4:
-                    raise RuntimeError("Nexus reference face was not detected")
-                x1, y1, x2, y2 = [int(v) for v in bbox]
-                y2 = min(frame.shape[0], y2 + self.extra_margin)
-                if x2 <= x1 or y2 <= y1:
-                    raise RuntimeError("Nexus reference produced an invalid face bounding box")
-                crop = frame[y1:y2, x1:x2]
-                crop = cv2.resize(crop, (256, 256), interpolation=cv2.INTER_LANCZOS4)
-                latent = vae.get_latents_for_unet(crop)
-                mask, mask_crop_box = get_image_prepare_material(
-                    frame, [x1, y1, x2, y2], fp=fp, mode=self.parsing_mode
-                )
+                with tempfile.TemporaryDirectory(prefix="nexus-live-base-") as temp_dir:
+                    paths = self._extract_base_paths(cv2, temp_dir)
+                    coord_list, frame_list = get_landmark_and_bbox(paths, 0)
+
+                if not coord_list or len(coord_list) != len(frame_list):
+                    raise RuntimeError("Nexus base preprocessing returned inconsistent face/frame data")
+
+                base_frames: list[object] = []
+                bboxes: list[list[int]] = []
+                masks: list[object] = []
+                mask_crop_boxes: list[object] = []
+                latents: list[object] = []
+                for index, (bbox, frame) in enumerate(zip(coord_list, frame_list)):
+                    if not bbox or len(bbox) != 4 or tuple(float(value) for value in bbox) == (0.0, 0.0, 0.0, 0.0):
+                        raise RuntimeError(f"Nexus face was not detected in base frame {index}")
+                    x1, y1, x2, y2 = [int(v) for v in bbox]
+                    y2 = min(frame.shape[0], y2 + self.extra_margin)
+                    if x2 <= x1 or y2 <= y1:
+                        raise RuntimeError(f"Nexus base frame {index} produced an invalid face bounding box")
+                    crop = frame[y1:y2, x1:x2]
+                    crop = cv2.resize(crop, (256, 256), interpolation=cv2.INTER_LANCZOS4)
+                    latent = vae.get_latents_for_unet(crop)
+                    mask, mask_crop_box = get_image_prepare_material(
+                        frame, [x1, y1, x2, y2], fp=fp, mode=self.parsing_mode
+                    )
+                    base_frames.append(frame)
+                    bboxes.append([x1, y1, x2, y2])
+                    masks.append(mask)
+                    mask_crop_boxes.append(mask_crop_box)
+                    latents.append(latent)
+
+                if not base_frames:
+                    raise RuntimeError("Nexus live identity produced no usable base frames")
 
                 self.cv2 = cv2
                 self.np = np
@@ -196,11 +273,13 @@ class MuseTalkEngine:
                 self.weight_dtype = weight_dtype
                 self.datagen = datagen
                 self.get_image_blending = get_image_blending
-                self.base_frame = frame
-                self.bbox = [x1, y1, x2, y2]
-                self.mask = mask
-                self.mask_crop_box = mask_crop_box
-                self.latent = latent
+                self.base_frames = base_frames
+                self.bboxes = bboxes
+                self.masks = masks
+                self.mask_crop_boxes = mask_crop_boxes
+                self.latents = latents
+                self._idle_cursor = 0
+                self._render_cursor = 0
                 self.metrics.avatar_prepare_ms = (time.perf_counter() - prep_started) * 1000
                 self.metrics.model_load_ms = (time.perf_counter() - started) * 1000
                 self.ready = True
@@ -213,10 +292,12 @@ class MuseTalkEngine:
                 os.chdir(old_cwd)
 
     def idle_frame(self):
-        if not self.ready or self.base_frame is None:
+        if not self.ready or not self.base_frames:
             raise RuntimeError("MuseTalk engine is not ready")
-        frame = self.base_frame.copy()
-        return self._resize(frame)
+        with self._idle_lock:
+            index = self._idle_cursor % len(self.base_frames)
+            self._idle_cursor = (self._idle_cursor + 1) % len(self.base_frames)
+        return self._resize(self.base_frames[index].copy())
 
     def _resize(self, frame):
         if self.output_width and self.output_height:
@@ -250,7 +331,7 @@ class MuseTalkEngine:
             raise ValueError("MuseTalk live windows must contain at least 40 ms of 16 kHz PCM")
         still_current = still_current or (lambda: True)
 
-        with self._lock:
+        with self._render_lock:
             if not still_current():
                 return 0
             wav_path = self._write_pcm_wave(pcm16le)
@@ -275,14 +356,19 @@ class MuseTalkEngine:
                 if len(whisper_chunks) == 0:
                     return 0
 
+                indices = [
+                    (self._render_cursor + offset) % len(self.latents)
+                    for offset in range(len(whisper_chunks))
+                ]
+                window_latents = [self.latents[index] for index in indices]
                 generator = self.datagen(
                     whisper_chunks,
-                    [self.latent],
+                    window_latents,
                     self.batch_size,
                     delay_frame=0,
                     device=self.device,
                 )
-                x1, y1, x2, y2 = self.bbox
+
                 for whisper_batch, latent_batch in generator:
                     if not still_current():
                         break
@@ -305,18 +391,21 @@ class MuseTalkEngine:
                     for predicted in recon:
                         if not still_current():
                             break
+                        index = indices[frames % len(indices)]
+                        x1, y1, x2, y2 = self.bboxes[index]
                         mouth = self.cv2.resize(
                             predicted.astype(self.np.uint8), (x2 - x1, y2 - y1)
                         )
                         combined = self.get_image_blending(
-                            self.base_frame.copy(),
+                            self.base_frames[index].copy(),
                             mouth,
-                            self.bbox,
-                            self.mask,
-                            self.mask_crop_box,
+                            self.bboxes[index],
+                            self.masks[index],
+                            self.mask_crop_boxes[index],
                         )
                         emit(self._resize(combined))
                         frames += 1
+                self._render_cursor = (self._render_cursor + frames) % len(self.latents)
             finally:
                 os.chdir(old_cwd)
                 try:
@@ -342,4 +431,12 @@ class MuseTalkEngine:
             "vramGiB": round(props.total_memory / 1024**3, 2),
             "allocatedGiB": round(allocated / 1024**3, 2),
             "reservedGiB": round(reserved / 1024**3, 2),
+        }
+
+    def visual_info(self) -> dict[str, object]:
+        return {
+            "baseMode": "approved-video" if self.base_video is not None else "canonical-still",
+            "baseFrames": len(self.base_frames),
+            "baseVideoSha256": self.base_video_sha256 if self.base_video is not None else None,
+            "referenceSha256": LIBRARIAN_SHA256,
         }
