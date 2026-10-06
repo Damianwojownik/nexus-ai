@@ -19,10 +19,12 @@ class Backend implements PcmPlaybackBackend {
   time = 0;
   scheduled = 0;
   stopped = 0;
+  lastWhen = -1;
   nowSeconds() { return this.time; }
   async resume() {}
   schedule(samples: Float32Array, rate: number, when: number, ended: () => void) {
     this.scheduled++;
+    this.lastWhen = when;
     const timer = setTimeout(() => { this.time = when + samples.length / rate; ended(); }, 1);
     return { stop: () => { clearTimeout(timer); this.stopped++; } };
   }
@@ -45,16 +47,22 @@ test('browser client verifies and schedules native PCM then waits for actual pla
   const backend = new Backend();
   let scheduled = 0;
   const audioChunks: Array<{streamId:string;sequence:number;pcm16:Uint8Array;ptsMs:number}> = [];
+  let rendererSawChunkBeforeAudioSchedule = false;
   const result = await playNativePaulinaStream('http://127.0.0.1:8788', 'Cześć', new AbortController().signal, {
-    backend, fetch: fetcher(), onAudioScheduled: () => scheduled++,
-    onAudioChunk: chunk => audioChunks.push({
-      streamId: chunk.streamId, sequence: chunk.event.sequence, pcm16: chunk.pcm16, ptsMs: chunk.ptsMs,
-    }),
+    backend, fetch: fetcher(), startDelayMs: 700, onAudioScheduled: () => scheduled++,
+    onAudioChunk: chunk => {
+      rendererSawChunkBeforeAudioSchedule = backend.scheduled === 0;
+      audioChunks.push({
+        streamId: chunk.streamId, sequence: chunk.event.sequence, pcm16: chunk.pcm16, ptsMs: chunk.ptsMs,
+      });
+    },
   });
   assert.equal(result.totalSamples, 320);
   assert.equal(backend.scheduled, 1);
   assert.equal(scheduled, 1);
   assert.equal(backend.stopped, 0);
+  assert.equal(backend.lastWhen, 0.7);
+  assert.equal(rendererSawChunkBeforeAudioSchedule, true);
   assert.equal(audioChunks.length, 1);
   assert.match(audioChunks[0].streamId, /^[A-Za-z0-9_-]{1,80}$/);
   assert.equal(audioChunks[0].sequence, 0);
