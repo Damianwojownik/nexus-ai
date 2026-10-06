@@ -192,6 +192,34 @@ requires a real WebRTC session and measured FPS/latency.
 - current stream/sequence
 - last render time and frame count
 
+## Optional natural-motion base video
+
+For a Vidu-like continuous presence, use a short visually approved video of the
+**same Nexus woman** with a neutral closed/resting mouth, stable camera and
+natural blink/head/breath motion. First validate it:
+
+```bash
+services/avatar_live_worker/.venv/bin/python \
+  services/avatar_live_worker/approve_base_video.py /path/to/nexus-idle.mp4
+```
+
+Then set the printed values:
+
+```text
+NEXUS_LIVE_BASE_VIDEO=/path/to/nexus-idle.mp4
+NEXUS_LIVE_BASE_VIDEO_SHA256=<approved-sha256>
+NEXUS_LIVE_BASE_MAX_FRAMES=250
+```
+
+The worker samples the source to the live target FPS, prepares face latents and
+masks once at startup, cycles those real source frames while idle, and applies
+the current MuseTalk speech face to matching moving frames during speech. A
+different or modified video fails closed because its hash no longer matches.
+
+The approval command verifies media structure and hash, **not facial identity**.
+A person must visually confirm that the clip is the canonical Nexus before
+pinning it.
+
 ## Sync
 
 The browser can reserve a 700 ms first-frame lead when a neural session is
