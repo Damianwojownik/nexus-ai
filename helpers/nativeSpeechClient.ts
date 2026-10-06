@@ -8,6 +8,8 @@ export interface NativeSpeechPlaybackOptions {
   fetch?: typeof fetch;
   onClock?: (clock: PcmStreamPlayer) => void;
   onAudioScheduled?: () => void;
+  /** Extra browser playback lead reserved for a remote neural renderer. Defaults to the PCM player's 60 ms. */
+  startDelayMs?: number;
   onAudioChunk?: (chunk: { streamId: string; event: PaulinaAudioEvent; pcm16: Uint8Array; ptsMs: number }) => void;
   onCue?: (event: Extract<PaulinaSpeechEvent, { type: 'phoneme' | 'viseme' }>) => void;
 }
@@ -40,7 +42,10 @@ export async function playNativePaulinaStream(
   signal.throwIfAborted();
   let context: AudioContext | undefined;
   const backend = options.backend ?? browserPcmBackend(context = new AudioContext());
-  const player = new PcmStreamPlayer(backend, { streamId: crypto.randomUUID() });
+  const player = new PcmStreamPlayer(backend, {
+    streamId: crypto.randomUUID(),
+    ...(options.startDelayMs !== undefined ? { startDelayMs: options.startDelayMs } : {}),
+  });
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let completed = false;
   const aborted = () => { player.stop(); };
@@ -89,6 +94,15 @@ export async function playNativePaulinaStream(
           if (event.sequence !== chunks || event.startSample !== samples) throw new Error('Discontinuous native PCM stream');
           const pcm16 = decodePaulinaAudioBase64(event.bytesBase64, event.sampleCount);
           const rendererPcm16 = options.onAudioChunk ? pcm16.slice() : undefined;
+          // Give the neural renderer the packet before scheduling the matching browser audio.
+          // A configurable playback lead lets remote GPU rendering produce the first frames
+          // without moving the authoritative PTS away from the audio sample position.
+          if (rendererPcm16) options.onAudioChunk?.({
+            streamId: player.streamId,
+            event,
+            pcm16: rendererPcm16,
+            ptsMs: event.startSample / event.sampleRate * 1000,
+          });
           for (;;) {
             signal.throwIfAborted();
             try {
@@ -100,12 +114,6 @@ export async function playNativePaulinaStream(
             }
           }
           samples += event.sampleCount;
-          if (rendererPcm16) options.onAudioChunk?.({
-            streamId: player.streamId,
-            event,
-            pcm16: rendererPcm16,
-            ptsMs: event.startSample / event.sampleRate * 1000,
-          });
           if (chunks++ === 0) options.onAudioScheduled?.();
         } else if (event.type === 'phoneme' || event.type === 'viseme') {
           const previous = event.type === 'phoneme' ? lastPhonemeMs : lastVisemeMs;
