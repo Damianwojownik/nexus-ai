@@ -20,6 +20,7 @@ MUSETALK_UPSTREAM_COMMIT = "0a89dec45a0192b824e3cf4daf96c239440c5ed8"
 class MuseTalkMetrics:
     model_load_ms: float = 0.0
     avatar_prepare_ms: float = 0.0
+    warmup_ms: float = 0.0
     last_render_ms: float = 0.0
     last_render_frames: int = 0
     last_render_fps: float = 0.0
@@ -294,6 +295,12 @@ class MuseTalkEngine:
                 self.metrics.model_load_ms = (time.perf_counter() - started) * 1000
                 self.ready = True
                 self.error = None
+
+                if os.environ.get("NEXUS_LIVE_SKIP_WARMUP", "").strip().lower() not in ("1", "true", "yes"):
+                    warmup_started = time.perf_counter()
+                    warm_samples = max(640, round(16000 * 0.48))
+                    self.render_pcm(b"\\x00\\x00" * warm_samples, lambda _frame: None)
+                    self.metrics.warmup_ms = (time.perf_counter() - warmup_started) * 1000
             except Exception as exc:
                 self.error = str(exc)
                 self.ready = False
