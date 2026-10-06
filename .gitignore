@@ -13,3 +13,5 @@ __pycache__/
 !.env.example
 services/avatar_live/.venv/services/avatar_live_worker/.venv/
 services/avatar_live_worker/cache/
+.nexus-live.local.ps1
+.nexus-live.local.ps1.bak-*
