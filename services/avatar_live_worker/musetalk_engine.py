@@ -106,7 +106,10 @@ class MuseTalkEngine:
             self._validate_config()
             started = time.perf_counter()
             old_cwd = Path.cwd()
-            sys.path.insert(0, str(self.musetalk_dir))
+            for import_path in (self.musetalk_dir, self.musetalk_dir / "musetalk" / "utils"):
+                value = str(import_path)
+                if value not in sys.path:
+                    sys.path.insert(0, value)
             try:
                 os.chdir(self.musetalk_dir)
                 import cv2
