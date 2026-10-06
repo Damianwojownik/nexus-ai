@@ -180,7 +180,7 @@ class MuseTalkEngine:
                 from musetalk.utils.audio_processor import AudioProcessor
                 from musetalk.utils.blending import get_image_blending, get_image_prepare_material
                 from musetalk.utils.face_parsing import FaceParsing
-                from musetalk.utils.preprocessing import get_landmark_and_bbox
+                import musetalk.utils.preprocessing as preprocessing
                 from musetalk.utils.utils import datagen, load_all_model
 
                 if not torch.cuda.is_available():
@@ -229,7 +229,7 @@ class MuseTalkEngine:
                 prep_started = time.perf_counter()
                 with tempfile.TemporaryDirectory(prefix="nexus-live-base-") as temp_dir:
                     paths = self._extract_base_paths(cv2, temp_dir)
-                    coord_list, frame_list = get_landmark_and_bbox(paths, 0)
+                    coord_list, frame_list = preprocessing.get_landmark_and_bbox(paths, 0)
 
                 if not coord_list or len(coord_list) != len(frame_list):
                     raise RuntimeError("Nexus base preprocessing returned inconsistent face/frame data")
@@ -260,6 +260,16 @@ class MuseTalkEngine:
 
                 if not base_frames:
                     raise RuntimeError("Nexus live identity produced no usable base frames")
+
+                # Pose/face detectors are preparation-only. Release their GPU references
+                # before the persistent talking model begins serving sessions.
+                try:
+                    preprocessing.model = None
+                    preprocessing.fa = None
+                    del fp
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
 
                 self.cv2 = cv2
                 self.np = np
