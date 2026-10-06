@@ -852,6 +852,7 @@ export default function Home() {
           if(session)void session.close().catch(closeError=>console.error('Failed to close live avatar after a transport error:',closeError));
         };
         await playNativePaulinaStream(agentHubClient.baseUrl,text,AbortSignal.any([current.controller.signal,AbortSignal.timeout(180000)]),{
+          startDelayMs:isNexus&&liveAvatarSessionRef.current?700:undefined,
           onClock:clock=>{if(sequence===speechSequenceRef.current)current.clock=clock;},
           onAudioChunk:chunk=>{
             if(sequence!==speechSequenceRef.current||!isNexus)return;
