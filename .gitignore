@@ -11,4 +11,5 @@ __pycache__/
 .env
 .env.*
 !.env.example
-services/avatar_live/.venv/
+services/avatar_live/.venv/services/avatar_live_worker/.venv/
+services/avatar_live_worker/cache/
