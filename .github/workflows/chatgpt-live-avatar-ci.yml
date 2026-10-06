@@ -1,0 +1,36 @@
+name: ChatGPT Nexus Live CI
+
+on:
+  push:
+    branches:
+      - chatgpt/nexus-live-complete
+  pull_request:
+    paths:
+      - 'services/avatar_live_worker/**'
+      - 'helpers/nativeSpeechClient.ts'
+      - 'helpers/nativeSpeechClient.test.ts'
+      - 'helpers/neuralLiveAvatarProvider.ts'
+      - 'pages/_index.tsx'
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node --experimental-strip-types --test helpers/nativeSpeechClient.test.ts helpers/neuralLiveAvatarProvider.test.ts
+
+  python-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m py_compile services/avatar_live_worker/protocol.py services/avatar_live_worker/musetalk_engine.py services/avatar_live_worker/worker.py services/avatar_live_worker/download_models.py services/avatar_live_worker/approve_base_video.py
+      - run: cd services/avatar_live_worker && python -m unittest test_protocol.py
