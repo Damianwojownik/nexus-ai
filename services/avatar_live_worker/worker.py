@@ -548,6 +548,12 @@ async def control(websocket: WebSocket, session_id: str) -> None:
 def main() -> None:
     if not API_TOKEN:
         raise SystemExit("Set NEXUS_LIVE_AVATAR_WORKER_TOKEN before starting the live worker")
+    if HOST not in ("127.0.0.1", "localhost", "::1"):
+        if "NEXUS_LIVE_WORKER_CONTROL_URL_BASE" not in os.environ:
+            raise SystemExit("Remote worker binds require NEXUS_LIVE_WORKER_CONTROL_URL_BASE=wss://<public-worker-host>")
+        parsed = urlsplit(CONTROL_URL_BASE)
+        if parsed.scheme != "wss" or not parsed.hostname:
+            raise SystemExit("Remote worker control must use a public WSS URL")
     uvicorn.run(app, host=HOST, port=PORT, log_level=os.environ.get("NEXUS_LIVE_LOG_LEVEL", "info").lower())
 
 
