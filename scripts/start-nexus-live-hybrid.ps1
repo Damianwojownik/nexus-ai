@@ -6,6 +6,10 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = Split-Path -Parent $PSScriptRoot
+$LocalConfig = Join-Path $Root ".nexus-live.local.ps1"
+if (Test-Path -LiteralPath $LocalConfig) {
+  . $LocalConfig
+}
 $GatewayScript = Join-Path $PSScriptRoot "start-live-avatar-gateway-windows.ps1"
 $NexusScript = Join-Path $PSScriptRoot "start-nexus-windows.ps1"
 
