@@ -344,8 +344,8 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         }
       });
       const method = request.method ?? 'GET';
-      if (url.pathname.startsWith('/api/speech/') && origin && !isLoopbackOrigin(origin)) {
-        throw new HttpError(403, 'Local speech is only available from the local Nexus UI.');
+      if (url.pathname.startsWith('/api/speech/') && origin && !isAllowedOrigin(origin, options.allowedOrigins ?? [])) {
+        throw new HttpError(403, 'Local speech is only available from an explicitly trusted Nexus UI origin.');
       }
       if (method === 'GET' && url.pathname === '/api/speech/health') {
         sendJson(response, 200, await localSpeech.health());
@@ -568,8 +568,8 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         return;
       }
 
-      if (url.pathname.startsWith('/api/avatar/live/') && origin && !isLoopbackOrigin(origin)) {
-        throw new HttpError(403, 'Live avatar sessions are only available from the local Nexus frontend');
+      if (url.pathname.startsWith('/api/avatar/live/') && origin && !isAllowedOrigin(origin, options.allowedOrigins ?? [])) {
+        throw new HttpError(403, 'Live avatar sessions are only available from an explicitly trusted Nexus UI origin');
       }
 
       if (method === 'GET' && url.pathname === '/api/avatar/live/health') {
