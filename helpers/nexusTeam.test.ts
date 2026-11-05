@@ -48,6 +48,7 @@ test('specialists execute in dependency-aware phases and the reviewer runs last 
   assert.deepEqual(reviewerCall.disabledTools, [
     'web_search', 'get_weather', 'technical_seo_audit', 'pagespeed_audit',
     'seo_integrations_status', 'search_console_report', 'ga4_report',
+    'google_business_profile_audit',
   ]);
 
   const phaseOneFinished = events.findIndex((event) => event.endsWith(':DONE') && event.startsWith('nexus-keyword-research'));
