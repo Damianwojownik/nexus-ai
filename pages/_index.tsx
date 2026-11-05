@@ -40,7 +40,7 @@ const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memo
 
 export default function Home() {
   const avatars=[{name:'Kosmiczny',src:'/_cdn/static/8c1cadbc-855e-4488-a72b-e88cb715d899.png'},{name:'Luna',src:'/_cdn/static/cc2dde88-daa2-48c9-acc8-1ea16f85990d.png'},{name:'Kai',src:'/_cdn/static/6a74b8c4-e09a-4776-a01a-156edac8441f.png'},{name:'Nova',src:'/_cdn/static/364da496-a271-4b0c-b40e-e23f14fad3a2.png'},{name:'Orbit',src:'/_cdn/static/17f6bda3-9fc8-4e2d-9b46-fec5fc2d91d4.png'},{name:'Void',src:'/_cdn/static/2405769f-a406-4390-9af2-8b74c0fda46c.png'}];
-  const [avatar,setAvatar]=useState(0);
+  const [avatar,setAvatar]=useState(1);
   const [prompt,setPrompt]=useState('');
   const [status,setStatus]=useState('Gotowa do rozmowy');
   const [listening,setListening]=useState(false);
@@ -408,7 +408,7 @@ export default function Home() {
     emitVoiceEvent('SPEAKING', 'Nexus mówi…');
     window.speechSynthesis.cancel();
     const u=new SpeechSynthesisUtterance(text);
-    u.lang='pl-PL'; u.rate=.96;
+    u.lang='pl-PL'; u.rate=1; u.pitch=1.05;
     speechVisemePlanRef.current=estimateVisemePlan(text,{charactersPerSecond:14/u.rate});
     u.onstart=()=>{speechStartedAtRef.current=performance.now();setSpeaking(true);setStatus('Nexus mówi…')};
     u.onboundary=(event:any)=>{const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
@@ -733,7 +733,7 @@ export default function Home() {
       </nav>
       <div className={styles.stage} style={{display:activeWorkspace==='chat'?'flex':'none'}}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
         <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
-        <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
+        <div className={styles.speech}><Sparkles size={16}/> Cześć, jestem Luna. W czym mogę Ci pomóc?</div>
         {(conversationHistory.length>0||response||isThinking)&&<section className={styles.chatTranscript} role="log" aria-live="polite" aria-relevant="additions text">
           {conversationHistory.map((message,index)=><article key={`${index}-${message.role}`} className={styles.chatMessage} data-role={message.role}>
             <span>{message.role==='user'?'TY':'NEXUS'}</span>
