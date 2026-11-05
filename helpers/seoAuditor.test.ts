@@ -4,12 +4,21 @@ import {
   auditPublicSite,
   getSeoIntegrationStatus,
   isDisallowed,
+  normalizePublicWebsiteUrl,
   parseRobots,
   runPageSpeed,
   runSemrushBacklinksOverview,
   runSemrushBacklinkCompetitors,
   runSemrushKeywordMetrics,
 } from './seoAuditor.ts';
+
+test('SEO target accepts unrelated public domains instead of a single configured brand', () => {
+  assert.equal(normalizePublicWebsiteUrl('https://example.com/store?ref=ad'), 'https://example.com/store?ref=ad');
+  assert.equal(normalizePublicWebsiteUrl('https://shop.example.org/de/produkt'), 'https://shop.example.org/de/produkt');
+  assert.equal(normalizePublicWebsiteUrl('https://other-business.net/blog/seo'), 'https://other-business.net/blog/seo');
+  assert.equal(normalizePublicWebsiteUrl('my-site.pl'), 'https://my-site.pl/');
+  assert.throws(() => normalizePublicWebsiteUrl('ftp://example.com'), /HTTP i HTTPS/i);
+});
 
 test('robots.txt applies wildcard groups and excludes rules for named crawlers', () => {
   const lines = [
