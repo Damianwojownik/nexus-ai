@@ -46,7 +46,7 @@ test('rejects literal IP addresses and reserved hostnames for remote connectors'
       name: 'Blocked Tool',
       transport: 'mcp-http',
       url,
-    }])), /public DNS hostname/);
+    }])), /public DNS hostname|Loopback MCP connectors/);
   }
 });
 
