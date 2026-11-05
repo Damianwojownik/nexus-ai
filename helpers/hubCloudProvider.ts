@@ -1,3 +1,4 @@
+import { hubEndpoint } from './mobileEndpoints.ts';
 import type { ModelProvider } from './modelRouter.ts';
 
 export class HubCloudProvider implements ModelProvider {
@@ -8,7 +9,7 @@ export class HubCloudProvider implements ModelProvider {
   private healthCache?: { until: number; value: Awaited<ReturnType<HubCloudProvider['fetchHealth']>> };
   private healthInflight?: Promise<Awaited<ReturnType<HubCloudProvider['fetchHealth']>>>;
 
-  constructor(baseUrl = import.meta.env?.VITE_NEXUS_AGENT_HUB_URL || 'http://127.0.0.1:8788'){
+  constructor(baseUrl = hubEndpoint()){
     this.baseUrl=baseUrl.replace(/\/$/,'');
   }
 
