@@ -724,7 +724,7 @@ export async function runSemrushBacklinksOverview(target: unknown, paidQueryAppr
   return {
     provider: 'Semrush Backlinks API v4',
     target: page.hostname,
-    apiUnitsChargedOrReserved: 45,
+    apiUnitsPerRequest: 45,
     data: data?.data ?? data,
     metadata: data?.meta,
     limitations: ['Semrush jest zewnętrznym płatnym dostawcą; koszt zapytania wynosi 45 jednostek według dokumentacji API.', 'Wynik jest podsumowaniem profilu linków, a nie oceną jakości każdego backlinku.'],
@@ -746,7 +746,7 @@ export async function runSemrushKeywordMetrics(input: { keyword?: unknown; count
     provider: 'Semrush Keyword Reports API v4',
     keyword: input.keyword.trim(),
     country,
-    apiUnitsChargedOrReserved: 20,
+    apiUnitsPerRequest: 20,
     data: data?.data ?? data,
     metadata: data?.meta,
     limitations: ['Koszt wynosi 20 jednostek API za jedno zapytanie o słowo kluczowe.', 'Wolumen jest średnią miesięczną według bazy/kraju dostawcy; nie jest gwarancją ruchu ani pozycji.'],
