@@ -5,6 +5,7 @@ import type { AgentTask } from './agentProtocol.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
 import type { InstallableApp, InstallOperation, WeatherResult, WebSearchResult } from './localCapabilitiesClient.ts';
 import { buildFallbackImagePrompt, imageDimensionsForText, isImageGenerationIntent } from './nexusImageIntent.ts';
+import { NexusTeamOrchestrator, buildSeoTeamPlan } from './nexusTeam.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
 export type NexusPlanStepState = 'PENDING' | 'ACTIVE' | 'DONE' | 'SKIPPED' | 'FAILED';
@@ -87,6 +88,13 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
   if (installationRequest(text)) plan.push({ id: 'approval', label: 'Sprawdzam instalację i wymagane zgody', state: 'PENDING' });
   if (isImageGenerationIntent(text)) plan.push({ id: 'image', label: 'Generuję obraz własnym silnikiem', state: 'PENDING' });
+  const specialistTasks = buildSeoTeamPlan(text);
+  if (specialistTasks.length) {
+    plan.push({ id: 'seo-team', label: 'Koordynuję niezależny zespół SEO/AEO', state: 'PENDING' });
+    for (const specialist of specialistTasks) {
+      plan.push({ id: 'specialist-' + specialist.id, label: specialist.title, state: 'PENDING' });
+    }
+  }
   plan.push(
     { id: 'execute', label: 'Wykonuję zadanie', state: 'PENDING' },
     { id: 'verify', label: 'Weryfikuję i zapisuję wynik', state: 'PENDING' },
@@ -177,6 +185,7 @@ export class NexusOrchestrator {
   private readonly hub: AgentHubClient;
   private readonly memory: MemoryStore;
   private readonly capabilities: LocalCapabilitiesClient;
+  private readonly team: NexusTeamOrchestrator;
 
   constructor(
     agent: NexusAgent,
@@ -188,6 +197,7 @@ export class NexusOrchestrator {
     this.hub = hub;
     this.memory = memory;
     this.capabilities = capabilities;
+    this.team = new NexusTeamOrchestrator(agent);
   }
 
   async start(input: NexusWorkflowInput, onProgress: (progress: NexusWorkflowProgress) => void = () => undefined): Promise<NexusWorkflowOutcome> {
@@ -310,6 +320,105 @@ export class NexusOrchestrator {
             seed: generated.seed,
             steps: generated.steps,
           },
+        };
+      }
+
+
+      const specialistPlan = buildSeoTeamPlan(input.text);
+      if (specialistPlan.length) {
+        const teamIndex = plan.findIndex((step) => step.id === 'seo-team');
+        if (teamIndex >= 0) plan[teamIndex].state = 'ACTIVE';
+        emit('WORKING', 'Uruchamiam zespół specjalistów SEO/AEO i tworzę zadania zależne');
+
+        const childTasks = new Map<string, AgentTask>();
+        if (task && hubAvailable) {
+          for (const specialist of specialistPlan) {
+            try {
+              const child = await this.hub.submitTask({
+                goal: specialist.goal + ' Cel użytkownika: ' + input.text,
+                createdBy: 'nexus-ui',
+                assignedTo: specialist.agentId,
+                scope: 'seo-specialist:' + specialist.id,
+                contextRefs: specialist.capabilities,
+                parentId: task.id,
+              });
+              childTasks.set(specialist.agentId, child);
+            } catch (error) {
+              contextNotes.push('Nie udało się zapisać zadania ' + specialist.agentId + ' w Agent Hub: ' + (error instanceof Error ? error.message : String(error)));
+            }
+          }
+        }
+
+        const teamResult = await this.team.run({
+          text: input.text,
+          history: input.history,
+          projectContext: [input.projectContext, ...contextNotes].filter(Boolean).join('\\n\\n'),
+        }, async (event) => {
+          const stepId = 'specialist-' + event.agentId.replace(/^nexus-/, '');
+          const stepIndex = plan.findIndex((step) => step.id === stepId);
+          if (stepIndex >= 0) {
+            plan[stepIndex].state = event.status === 'STARTED' ? 'ACTIVE' : event.status === 'DONE' ? 'DONE' : 'FAILED';
+          }
+          const child = childTasks.get(event.agentId);
+          if (child && event.status === 'STARTED') {
+            try {
+              const claimedChild = await this.hub.claimTask(child.id, event.agentId);
+              if (claimedChild) await this.hub.leaseTask(child.id, event.agentId, 30 * 60 * 1000);
+            } catch (error) {
+              contextNotes.push('Nie udało się przejąć zadania ' + event.agentId + ': ' + (error instanceof Error ? error.message : String(error)));
+            }
+          }
+          if (child && event.status === 'FAILED') {
+            await this.hub.failTask(child.id, event.message).catch(() => undefined);
+          }
+          emit('WORKING', event.message);
+        });
+
+        for (const report of [...teamResult.reports, teamResult.reviewer]) {
+          const child = childTasks.get(report.agentId);
+          if (!child) continue;
+          if (report.status === 'DONE') {
+            await this.hub.completeTask(child.id, {
+              status: 'SUCCESS',
+              summary: report.name + ' zakończył analizę',
+              payload: {
+                durationMs: report.durationMs,
+                text: report.text.slice(0, 5000),
+                reasoning: report.reasoning,
+              },
+            }).catch(() => undefined);
+          } else {
+            await this.hub.failTask(child.id, report.text).catch(() => undefined);
+          }
+        }
+
+        if (teamIndex >= 0) plan[teamIndex].state = 'DONE';
+        const executeIndex = plan.findIndex((step) => step.id === 'execute');
+        if (executeIndex >= 0) plan[executeIndex].state = 'DONE';
+        const verifyIndex = plan.findIndex((step) => step.id === 'verify');
+        if (verifyIndex >= 0) plan[verifyIndex].state = 'ACTIVE';
+        emit('TESTING', 'Recenzent sprawdził raporty specjalistów; zapisuję wynik audytu');
+        await this.saveTaskMemory(input.text, teamResult.summary, []);
+        if (task) {
+          const completed = teamResult.reports.filter((report) => report.status === 'DONE').length;
+          await this.hub.completeTask(task.id, {
+            status: completed === teamResult.reports.length && teamResult.reviewer.status === 'DONE' ? 'SUCCESS' : 'PARTIAL',
+            summary: 'Zespół SEO/AEO: ' + completed + '/' + teamResult.reports.length + ' specjalistów zakończyło pracę',
+            payload: {
+              specialists: teamResult.plan,
+              reports: teamResult.reports.map((report) => ({ agentId: report.agentId, status: report.status, durationMs: report.durationMs })),
+              reviewer: { status: teamResult.reviewer.status, durationMs: teamResult.reviewer.durationMs },
+            },
+          }).catch(() => undefined);
+        }
+        if (verifyIndex >= 0) plan[verifyIndex].state = 'DONE';
+        emit('DONE', 'Zespół SEO/AEO zakończył pracę i niezależną kontrolę jakości');
+        return {
+          status: 'DONE',
+          taskId: currentTaskId(),
+          text: teamResult.summary,
+          plan: [...plan],
+          searchResults: [],
         };
       }
 
