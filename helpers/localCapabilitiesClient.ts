@@ -113,6 +113,18 @@ export class LocalCapabilitiesClient {
     return response.json() as Promise<T>;
   }
 
+  /** Return neural audio bytes from the user's local Nexus Agent Hub. */
+  async lunaSpeech(text: string): Promise<Blob> {
+    const response = await fetch(this.baseUrl + '/api/voice/luna', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new LocalCapabilitiesError('Głos ZofiaNeural jest niedostępny', response.status);
+    return response.blob();
+  }
+
   async searchWeb(query: string): Promise<{ query: string; provider: string; results: WebSearchResult[] }> {
     return this.request(`/api/search?q=${encodeURIComponent(query)}`);
   }
