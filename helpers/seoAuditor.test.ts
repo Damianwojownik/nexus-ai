@@ -11,7 +11,7 @@ test('public SEO crawler rejects private, loopback and credential-bearing target
   await assert.rejects(() => runPageSpeed('http://localhost'), /lokalny|zarezerwowan/i);
 });
 
-test('integration health reports availability without exposing secret values', () => {
+test('integration health reports availability without exposing secret values', async () => {
   const status = await getSeoIntegrationStatus({
     GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN: 'secret-gsc-token',
     GOOGLE_SEARCH_CONSOLE_SITE_URL: 'sc-domain:example.com',
@@ -30,7 +30,7 @@ test('integration health reports availability without exposing secret values', (
   assert.equal(JSON.stringify(status).includes('secret-'), false);
 });
 
-test('unconfigured integrations are explicitly reported rather than fabricated', () => {
+test('unconfigured integrations are explicitly reported rather than fabricated', async () => {
   const status = await getSeoIntegrationStatus({});
   assert.equal(status.searchConsole.status, 'NOT_CONFIGURED');
   assert.equal(status.ga4.status, 'NOT_CONFIGURED');
