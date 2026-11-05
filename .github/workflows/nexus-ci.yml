@@ -60,6 +60,8 @@ jobs:
         run: npm run test:voice
       - name: Test Agent Hub
         run: npm run test:hub
+      - name: Test private Luna mobile gateway
+        run: node --test scripts/mobile-server.test.mjs
       - name: Test image intent
         run: npm run test:image
       - name: Test image Hub proxy
