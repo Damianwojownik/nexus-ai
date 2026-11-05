@@ -35,12 +35,14 @@ export function parseNexusModelAction(raw: string): NexusModelAction | undefined
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
 
+  const rawCandidate = trimmed.replace(/^\uFEFF/, '');
+  const fencedFinalCandidate = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
   const candidates = [
-    trimmed.replace(/^\uFEFF/, ''),
-    trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim(),
-  ].filter((value): value is string => Boolean(value));
+    { value: rawCandidate, isRaw: true },
+    ...(fencedFinalCandidate ? [{ value: fencedFinalCandidate, isRaw: false }] : []),
+  ];
 
-  for (const candidate of candidates) {
+  for (const { value: candidate, isRaw } of candidates) {
     try {
       const parsed: unknown = JSON.parse(candidate);
       if (!isRecord(parsed)) continue;
@@ -49,6 +51,7 @@ export function parseNexusModelAction(raw: string): NexusModelAction | undefined
         return { type: 'final', text: parsed.text };
       }
       if (parsed.type === 'tool_call'
+        && isRaw
         && typeof parsed.name === 'string'
         && isRecord(parsed.arguments)) {
         return { type: 'tool_call', name: parsed.name, arguments: parsed.arguments };
