@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { auditPublicSite, getSeoIntegrationStatus, parseRobots, runPageSpeed } from './seoAuditor.ts';
+import { auditPublicSite, getSeoIntegrationStatus, parseRobots, runPageSpeed, runSemrushBacklinksOverview, runSemrushKeywordMetrics } from './seoAuditor.ts';
 
 test('robots.txt applies only wildcard user-agent groups and preserves their sitemap directives', () => {
   const parsed = parseRobots(`User-agent: Googlebot
@@ -20,6 +20,21 @@ Disallow: /bing-only/
 
   const blocked = parseRobots('User-agent: *\\nDisallow: /');
   assert.equal(blocked.disallowsAll, true);
+});
+
+test('Semrush paid endpoints reject requests before network access unless explicit per-query approval is true', async () => {
+  await assert.rejects(
+    () => runSemrushBacklinksOverview('https://example.com', false),
+    /45 jednostek API/i,
+  );
+  await assert.rejects(
+    () => runSemrushKeywordMetrics({ keyword: 'seo tools', country: 'DE', paidQueryApproved: false }),
+    /20 jednostek API/i,
+  );
+  await assert.rejects(
+    () => runSemrushKeywordMetrics({ keyword: 'seo tools', country: 'DE', paidQueryApproved: true }),
+    /SEMRUSH_API_KEY/i,
+  );
 });
 
 test('public SEO crawler rejects private, loopback and credential-bearing targets before connecting', async () => {
