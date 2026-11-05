@@ -47,3 +47,22 @@
 .capabilityGroup input:not([type="file"]):not([type="checkbox"]),.capabilityGroup input[type="file"],.capabilityGroup select{background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--foreground);font:13px var(--font-family-base);min-width:0;padding:9px 10px;width:100%}.capabilityGroup input[type="file"]{font-size:11px}.capabilityGroup button{background:var(--secondary);border:1px solid var(--border);border-radius:7px;color:var(--foreground);cursor:pointer;font:600 12px var(--font-family-base);justify-self:start;padding:9px 12px}.capabilityGroup button:disabled{cursor:not-allowed;opacity:.5}.capabilityGroup button:focus-visible,.capabilityGroup select:focus-visible,.capabilityGroup input:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .capabilityForm{display:flex;gap:8px;min-width:0}.capabilityForm input{flex:1}.capabilityForm button{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground);white-space:nowrap}.capabilityMeta{color:var(--muted-foreground);font-size:11px;line-height:1.5;overflow-wrap:anywhere}.capabilityError{color:var(--error);font-size:12px;margin:0;overflow-wrap:anywhere}.capabilitySuccess{color:var(--success);font-size:12px;margin:0;overflow-wrap:anywhere}.searchResults{display:grid;gap:8px;max-height:420px;overflow:auto}.searchResult{border-bottom:1px solid rgba(143,162,186,.14);display:grid;gap:4px;padding:8px 0}.searchResult a{color:var(--primary);font-size:13px;font-weight:600;overflow-wrap:anywhere;text-decoration:none}.searchResult a:hover{text-decoration:underline}.searchResult small{color:var(--muted-foreground);font:10px var(--font-family-monospace);overflow-wrap:anywhere}.searchResult p{color:var(--muted-foreground);font-size:12px;line-height:1.45;margin:0;overflow-wrap:anywhere}.installConsent{align-items:flex-start;color:var(--foreground);display:flex;font-size:12px;gap:8px;line-height:1.4}.installConsent input{accent-color:var(--primary);flex:0 0 auto;margin-top:2px}
 @media(max-width:760px){.capabilityPanel{margin:0 16px 18px;padding:13px}.capabilityHeader{align-items:flex-start}.capabilityGrid{grid-template-columns:minmax(0,1fr)}}
+
+
+/* Independent Nexus chat: keep the avatar secondary and show the actual message history. */
+.stage{justify-content:flex-start;overflow-y:auto;min-height:0}
+.avatarWrap{width:min(190px,34vw);height:220px;min-height:170px}
+.speech{font-size:18px;margin-top:8px}
+.chatTranscript{display:grid;gap:10px;width:min(860px,100%);max-height:38vh;overflow-y:auto;padding:4px 8px 12px;scrollbar-gutter:stable;overscroll-behavior:contain}
+.chatMessage{display:grid;gap:5px;max-width:min(82%,720px);border:1px solid var(--border);border-radius:14px;padding:10px 14px;background:rgba(17,25,39,.72);text-align:left}
+.chatMessage>span{font:600 10px var(--font-family-monospace);letter-spacing:.08em;color:var(--muted-foreground)}
+.chatMessage p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55;font-size:14px}
+.chatMessage[data-role="user"]{justify-self:end;background:rgba(24,95,145,.22);border-color:rgba(124,231,255,.26)}
+.chatMessage[data-role="assistant"]{justify-self:start}
+.chatMessage[data-pending="true"]{border-style:dashed;color:var(--muted-foreground)}
+@media(max-width:760px){
+  .avatarWrap{width:min(140px,42vw);height:160px;min-height:130px}
+  .chatTranscript{max-height:42vh;padding:4px 2px 10px}
+  .chatMessage{max-width:94%;padding:9px 11px}
+  .chatMessage p{font-size:13px}
+}
