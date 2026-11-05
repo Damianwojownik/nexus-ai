@@ -246,14 +246,48 @@ async function requestPublic(
   return result;
 }
 
-export function parseRobots(text: string): { disallow: string[]; sitemaps: string[]; disallowsAll: boolean } {
-  const disallow: string[] = [];
+export interface RobotsPolicy {
+  allow: string[];
+  disallow: string[];
+  sitemaps: string[];
+  disallowsAll: boolean;
+}
+
+type RobotsRule = { kind: 'allow' | 'disallow'; pattern: string };
+
+function robotsRuleMatches(pathname: string, rule: string): boolean {
+  const terminal = rule.endsWith('$');
+  const rawPattern = terminal ? rule.slice(0, -1) : rule;
+  const escaped = rawPattern.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&').replace(/\\\*/g, '.*');
+  try {
+    const expression = new RegExp('^' + escaped + (terminal ? '$' : ''));
+    return expression.test(pathname);
+  } catch {
+    return pathname.startsWith(rule);
+  }
+}
+
+export function isDisallowed(pathname: string, policy: Pick<RobotsPolicy, 'allow' | 'disallow'>): boolean {
+  const candidates: RobotsRule[] = [
+    ...policy.disallow.map((pattern) => ({ kind: 'disallow' as const, pattern })),
+    ...policy.allow.map((pattern) => ({ kind: 'allow' as const, pattern })),
+  ].filter((rule) => robotsRuleMatches(pathname, rule.pattern));
+  if (!candidates.length) return false;
+  const specificity = (rule: RobotsRule) => rule.pattern.replace(/\*/g, '').replace(/\$$/, '').length;
+  const maxSpecificity = Math.max(...candidates.map(specificity));
+  const best = candidates.filter((rule) => specificity(rule) === maxSpecificity);
+  // Allow wins ties, as required by the common robots exclusion interpretation.
+  return !best.some((rule) => rule.kind === 'allow');
+}
+
+export function parseRobots(text: string): RobotsPolicy {
+  const rules: RobotsRule[] = [];
   const sitemaps: string[] = [];
   let groupAgents: string[] = [];
-  let groupRules: string[] = [];
+  let groupRules: RobotsRule[] = [];
 
   const flushGroup = () => {
-    if (groupAgents.includes('*')) disallow.push(...groupRules);
+    if (groupAgents.includes('*')) rules.push(...groupRules);
     groupAgents = [];
     groupRules = [];
   };
@@ -266,28 +300,26 @@ export function parseRobots(text: string): { disallow: string[]; sitemaps: strin
     const key = line.slice(0, separator).trim().toLowerCase();
     const value = line.slice(separator + 1).trim();
     if (key === 'user-agent') {
-      // A new user-agent after rules starts a new group; adjacent user-agent
-      // directives before any rule belong to the same group.
       if (groupRules.length) flushGroup();
       groupAgents.push(value.toLowerCase());
     } else if (key === 'disallow' && value) {
-      groupRules.push(value);
+      groupRules.push({ kind: 'disallow', pattern: value });
+    } else if (key === 'allow' && value) {
+      groupRules.push({ kind: 'allow', pattern: value });
     } else if (key === 'sitemap' && /^https?:\/\//i.test(value)) {
       sitemaps.push(value);
     }
   }
   flushGroup();
 
-  const uniqueDisallow = [...new Set(disallow)];
+  const allow = [...new Set(rules.filter((rule) => rule.kind === 'allow').map((rule) => rule.pattern))];
+  const disallow = [...new Set(rules.filter((rule) => rule.kind === 'disallow').map((rule) => rule.pattern))];
   return {
-    disallow: uniqueDisallow,
+    allow,
+    disallow,
     sitemaps: [...new Set(sitemaps)].slice(0, 5),
-    disallowsAll: uniqueDisallow.includes('/'),
+    disallowsAll: isDisallowed('/', { allow, disallow }),
   };
-}
-
-function isDisallowed(pathname: string, disallow: string[]): boolean {
-  return disallow.some((rule) => rule !== '/' && pathname.startsWith(rule)) || disallow.includes('/');
 }
 
 function addIssue(issues: SeoIssue[], issue: SeoIssue): void {
@@ -435,7 +467,7 @@ export async function auditPublicSite(target: unknown, requestedMaxPages = 20): 
     try { next = normalizeTarget(nextRaw); } catch { continue; }
     if (next.origin !== origin || visited.has(next.toString())) continue;
     visited.add(next.toString());
-    if (isDisallowed(next.pathname, robots.disallow)) continue;
+    if (isDisallowed(next.pathname, robots)) continue;
 
     try {
       const result = await requestPublic(next, host);
