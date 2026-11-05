@@ -152,7 +152,8 @@ export default function Home() {
 
   useEffect(()=>{
     const saved=localStorage.getItem('nexus-avatar');
-    if(saved){const i=avatars.findIndex(a=>a.name===saved);if(i>=0)setAvatar(i)};
+    // Luna is the primary face of Nexus; users may still choose another avatar later.
+    if(saved==='Luna')setAvatar(1);
 
     void (async () => {
       const available = await ollamaClient.listModels();
@@ -765,8 +766,8 @@ export default function Home() {
 
   const run = runNexusConversation;
   return <main className={styles.shell}>
-    <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
-      <nav className={styles.workspaceNav} aria-label="Główna nawigacja Nexusa">
+    <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>LUNA NEXUS</b><span>TWÓJ ASYSTENT AI</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
+      <nav className={styles.workspaceNav} aria-label="Nawigacja Luna Nexus — wspólny panel funkcji">
         <button type="button" aria-pressed={activeWorkspace==='chat'} className={activeWorkspace==='chat'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('chat')}>Rozmowa</button>
         <button type="button" aria-pressed={activeWorkspace==='projects'} className={activeWorkspace==='projects'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('projects')}>Projekty i pliki</button>
         <button type="button" aria-pressed={activeWorkspace==='seo'} className={activeWorkspace==='seo'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('seo')}>SEO i AEO</button>
@@ -779,14 +780,14 @@ export default function Home() {
         <div className={styles.speech}><Sparkles size={16}/> Cześć, jestem Luna. W czym mogę Ci pomóc?</div>
         {(conversationHistory.length>0||response||isThinking)&&<section className={styles.chatTranscript} role="log" aria-live="polite" aria-relevant="additions text">
           {conversationHistory.map((message,index)=><article key={`${index}-${message.role}`} className={styles.chatMessage} data-role={message.role}>
-            <span>{message.role==='user'?'TY':'NEXUS'}</span>
+            <span>{message.role==='user'?'TY':'LUNA'}</span>
             <p>{message.content}</p>
           </article>)}
           {response&&!conversationHistory.some(message=>message.role==='assistant'&&message.content===response)&&<article className={styles.chatMessage} data-role="assistant">
-            <span>NEXUS</span><p>{response}</p>
+            <span>LUNA</span><p>{response}</p>
           </article>}
           {isThinking&&<article className={styles.chatMessage} data-role="assistant" data-pending="true">
-            <span>NEXUS</span><p>{workflowProgress?.message||'Analizuję Twoje polecenie…'}</p>
+            <span>LUNA</span><p>{workflowProgress?.message||'Analizuję Twoje polecenie…'}</p>
           </article>}
         </section>}
         {generatedImageUrl&&<img className={styles.generatedImage} src={generatedImageUrl} alt="Obraz wygenerowany przez Nexus Image Engine"/>}
