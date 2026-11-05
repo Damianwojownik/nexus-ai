@@ -331,9 +331,16 @@ export class NexusOrchestrator {
         emit('WORKING', 'Uruchamiam zespół specjalistów SEO/AEO i tworzę zadania zależne');
 
         const childTasks = new Map<string, AgentTask>();
+        const specialistHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
         if (task && hubAvailable) {
           for (const specialist of specialistPlan) {
             try {
+              await this.hub.registerAgent({
+                agentId: specialist.agentId,
+                kind: specialist.id === 'reviewer' ? 'reviewer' : 'researcher',
+                capabilities: specialist.capabilities,
+              });
+              await this.hub.heartbeat(specialist.agentId);
               const child = await this.hub.submitTask({
                 goal: specialist.goal + ' Cel użytkownika: ' + input.text,
                 createdBy: 'nexus-ui',
@@ -364,15 +371,28 @@ export class NexusOrchestrator {
             try {
               const claimedChild = await this.hub.claimTask(child.id, event.agentId);
               if (claimedChild) await this.hub.leaseTask(child.id, event.agentId, 30 * 60 * 1000);
+              if (!specialistHeartbeats.has(event.agentId)) {
+                specialistHeartbeats.set(event.agentId, setInterval(() => {
+                  void this.hub.heartbeat(event.agentId).catch(() => undefined);
+                }, 15000));
+              }
             } catch (error) {
               contextNotes.push('Nie udało się przejąć zadania ' + event.agentId + ': ' + (error instanceof Error ? error.message : String(error)));
             }
+          }
+          if (child && (event.status === 'FAILED' || event.status === 'DONE')) {
+            const timer = specialistHeartbeats.get(event.agentId);
+            if (timer) clearInterval(timer);
+            specialistHeartbeats.delete(event.agentId);
           }
           if (child && event.status === 'FAILED') {
             await this.hub.failTask(child.id, event.message).catch(() => undefined);
           }
           emit('WORKING', event.message);
         });
+
+        for (const timer of specialistHeartbeats.values()) clearInterval(timer);
+        specialistHeartbeats.clear();
 
         for (const report of [...teamResult.reports, teamResult.reviewer]) {
           const child = childTasks.get(report.agentId);
