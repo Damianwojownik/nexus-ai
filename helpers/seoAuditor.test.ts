@@ -18,7 +18,7 @@ Disallow: /bing-only/
   assert.deepEqual(parsed.sitemaps, ['https://example.com/sitemap.xml']);
   assert.equal(parsed.disallowsAll, false);
 
-  const blocked = parseRobots('User-agent: *\\nDisallow: /');
+  const blocked = parseRobots('User-agent: *\nDisallow: /');
   assert.equal(blocked.disallowsAll, true);
 });
 
