@@ -258,7 +258,7 @@ export function parseRobots(text: string): { disallow: string[]; sitemaps: strin
     groupRules = [];
   };
 
-  for (const rawLine of text.split(/\\r?\\n/)) {
+  for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.split('#')[0].trim();
     if (!line) continue;
     const separator = line.indexOf(':');
