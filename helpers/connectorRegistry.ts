@@ -83,17 +83,19 @@ function safeUrl(raw: string): URL {
   const url = new URL(raw);
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+  if (loopback) {
+    if (url.protocol !== 'http:') throw new Error('Loopback MCP connectors must use explicit local HTTP');
+    return url;
+  }
+  if (url.protocol !== 'https:') {
     throw new Error('Connector URL must use HTTPS, except loopback HTTP is allowed');
   }
   if (url.username || url.password) throw new Error('Connector URL must not embed credentials');
-  if (!loopback) {
-    const reservedName = host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')
-      || host.endsWith('.internal') || host.endsWith('.test') || host.endsWith('.invalid')
-      || host.endsWith('.example') || host === 'metadata.google.internal';
-    if (reservedName || isIP(host) !== 0 || !host.includes('.')) {
-      throw new Error('Connector URL must use a public DNS hostname, not a private, reserved or literal IP address');
-    }
+  const reservedName = host.endsWith('.localhost') || host.endsWith('.local')
+    || host.endsWith('.internal') || host.endsWith('.test') || host.endsWith('.invalid')
+    || host.endsWith('.example') || host === 'metadata.google.internal';
+  if (reservedName || isIP(host) !== 0 || !host.includes('.')) {
+    throw new Error('Connector URL must use a public DNS hostname, not a private, reserved or literal IP address');
   }
   return url;
 }
