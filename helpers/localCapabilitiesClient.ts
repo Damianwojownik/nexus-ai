@@ -161,6 +161,22 @@ export class LocalCapabilitiesClient {
     });
   }
 
+  async semrushBacklinksOverview(url: string, paidQueryApproved: boolean): Promise<any> {
+    return this.request('/api/seo/semrush/backlinks', {
+      method: 'POST',
+      body: JSON.stringify({ url, paidQueryApproved }),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
+  async semrushKeywordMetrics(keyword: string, country: string, paidQueryApproved: boolean): Promise<any> {
+    return this.request('/api/seo/semrush/keyword', {
+      method: 'POST',
+      body: JSON.stringify({ keyword, country, paidQueryApproved }),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
   async searchConsoleReport(startDate?: string, endDate?: string): Promise<any> {
     return this.request('/api/seo/search-console', {
       method: 'POST',
