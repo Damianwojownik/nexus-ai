@@ -36,6 +36,9 @@ test('rejects literal IP addresses and reserved hostnames for remote connectors'
   for (const url of [
     'https://192.168.1.20/mcp',
     'https://10.0.0.8/mcp',
+    'https://192.0.2.15/mcp',
+    'https://198.51.100.22/mcp',
+    'https://192.88.99.8/mcp',
     'https://127.0.0.1/mcp',
     'https://mcp.internal/mcp',
     'https://mcp.example/mcp',
