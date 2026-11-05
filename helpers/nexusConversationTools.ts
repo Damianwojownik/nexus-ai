@@ -140,6 +140,19 @@ export function registerConversationTools(registry: ToolRegistry, capabilities: 
 
 
   registry.register({
+    name: 'google_business_profile_reviews',
+    description: 'Read the latest Google Business Profile reviews, average rating, total review count and reply coverage for a configured, verified location. Read-only; never replies to or edits reviews.',
+    permissionLevel: 'read',
+    modelCallable: true,
+    timeoutMs: 45000,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    execute: async (_args, context) => {
+      if (context?.signal?.aborted) throw new Error('Business Profile reviews audit was cancelled');
+      return capabilities.googleBusinessProfileReviews();
+    },
+  });
+
+  registry.register({
     name: 'google_business_profile_audit',
     description: 'Read the configured Google Business Profile location and check business name, website, phone, address and opening-hours fields. Does not update the listing.',
     permissionLevel: 'read',
