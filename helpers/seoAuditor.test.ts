@@ -18,6 +18,8 @@ test('SEO target accepts unrelated public domains instead of a single configured
   assert.equal(normalizePublicWebsiteUrl('https://other-business.net/blog/seo'), 'https://other-business.net/blog/seo');
   assert.equal(normalizePublicWebsiteUrl('my-site.pl'), 'https://my-site.pl/');
   assert.throws(() => normalizePublicWebsiteUrl('ftp://example.com'), /HTTP i HTTPS/i);
+  assert.throws(() => normalizePublicWebsiteUrl('https://example.com:8080/private'), /porty/i);
+  assert.throws(() => normalizePublicWebsiteUrl('https://user:pass@example.com/'), /logowania/i);
 });
 
 test('robots.txt applies wildcard groups and excludes rules for named crawlers', () => {
