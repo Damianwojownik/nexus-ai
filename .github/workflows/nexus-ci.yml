@@ -56,6 +56,8 @@ jobs:
         run: npm run test:team
       - name: Test SEO crawler and integrations
         run: npm run test:seo
+      - name: Test Luna neural voice adapter
+        run: npm run test:voice
       - name: Test Agent Hub
         run: npm run test:hub
       - name: Test image intent
