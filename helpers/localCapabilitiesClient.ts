@@ -141,6 +141,26 @@ export class LocalCapabilitiesClient {
     return this.request('/api/seo/integrations');
   }
 
+  async startGoogleOAuth(): Promise<{ authorizationUrl: string }> {
+    return this.request('/api/seo/google-oauth/start', { method: 'POST', body: JSON.stringify({}) });
+  }
+
+  async getGoogleOAuthStatus(): Promise<any> {
+    return this.request('/api/seo/google-oauth/status');
+  }
+
+  async disconnectGoogleOAuth(): Promise<{ ok: boolean }> {
+    return this.request('/api/seo/google-oauth/disconnect', { method: 'POST', body: JSON.stringify({}) });
+  }
+
+  async googleBusinessProfileAudit(): Promise<any> {
+    return this.request('/api/seo/google-business-profile', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
   async searchConsoleReport(startDate?: string, endDate?: string): Promise<any> {
     return this.request('/api/seo/search-console', {
       method: 'POST',
