@@ -692,6 +692,67 @@ export async function runGa4Report(input: { startDate?: unknown; endDate?: unkno
   return { provider: 'Google Analytics 4', propertyId, startDate, endDate, dimensionHeaders: data.dimensionHeaders ?? [], metricHeaders: data.metricHeaders ?? [], rows: Array.isArray(data.rows) ? data.rows : [] };
 }
 
+function semrushApiKey(): string {
+  const key = (process.env.SEMRUSH_API_KEY ?? '').trim();
+  if (!key) throw new Error('Semrush API nie jest skonfigurowany. Dodaj SEMRUSH_API_KEY w środowisku serwera.');
+  return key;
+}
+
+async function semrushGet(endpoint: URL): Promise<any> {
+  const response = await fetch(endpoint, {
+    headers: {
+      Authorization: 'Apikey ' + semrushApiKey(),
+      Accept: 'application/json',
+      'User-Agent': USER_AGENT,
+    },
+    signal: AbortSignal.timeout(30_000),
+  });
+  const data = await response.json().catch(() => ({})) as any;
+  if (!response.ok || data?.meta?.success === false) {
+    throw new Error(data?.error?.message || data?.meta?.error_message || 'Semrush API HTTP ' + response.status);
+  }
+  return data;
+}
+
+export async function runSemrushBacklinksOverview(target: unknown, paidQueryApproved: unknown) {
+  if (paidQueryApproved !== true) throw new Error('Semrush Backlinks Overview wymaga jawnej zgody na koszt 45 jednostek API.');
+  const page = normalizeTarget(target);
+  const endpoint = new URL('https://api.semrush.com/apis/v4/backlinks/v1/overview');
+  endpoint.searchParams.set('url', page.hostname);
+  endpoint.searchParams.set('scope', 'ROOT_DOMAIN');
+  const data = await semrushGet(endpoint);
+  return {
+    provider: 'Semrush Backlinks API v4',
+    target: page.hostname,
+    apiUnitsChargedOrReserved: 45,
+    data: data?.data ?? data,
+    metadata: data?.meta,
+    limitations: ['Semrush jest zewnętrznym płatnym dostawcą; koszt zapytania wynosi 45 jednostek według dokumentacji API.', 'Wynik jest podsumowaniem profilu linków, a nie oceną jakości każdego backlinku.'],
+  };
+}
+
+export async function runSemrushKeywordMetrics(input: { keyword?: unknown; country?: unknown; paidQueryApproved?: unknown }) {
+  if (input.paidQueryApproved !== true) throw new Error('Metryki Semrush wymagają jawnej zgody na koszt 20 jednostek API za jedno słowo kluczowe.');
+  if (typeof input.keyword !== 'string' || !input.keyword.trim() || input.keyword.trim().length > 255) {
+    throw new Error('Słowo kluczowe musi zawierać od 1 do 255 znaków.');
+  }
+  const country = typeof input.country === 'string' ? input.country.trim().toUpperCase() : 'DE';
+  if (!/^[A-Z]{2}$/.test(country)) throw new Error('Podaj dwuliterowy kod kraju, np. DE, PL lub US.');
+  const endpoint = new URL('https://api.semrush.com/apis/v4/keywords/v1/metrics');
+  endpoint.searchParams.set('keyword', input.keyword.trim());
+  endpoint.searchParams.set('country', country);
+  const data = await semrushGet(endpoint);
+  return {
+    provider: 'Semrush Keyword Reports API v4',
+    keyword: input.keyword.trim(),
+    country,
+    apiUnitsChargedOrReserved: 20,
+    data: data?.data ?? data,
+    metadata: data?.meta,
+    limitations: ['Koszt wynosi 20 jednostek API za jedno zapytanie o słowo kluczowe.', 'Wolumen jest średnią miesięczną według bazy/kraju dostawcy; nie jest gwarancją ruchu ani pozycji.'],
+  };
+}
+
 export async function runGoogleBusinessProfileAudit() {
   const locationResource = (process.env.GOOGLE_BUSINESS_PROFILE_LOCATION_ID ?? '').trim();
   if (!locationResource) throw new Error('Wymagane jest GOOGLE_BUSINESS_PROFILE_LOCATION_ID, np. locations/123456789.');
