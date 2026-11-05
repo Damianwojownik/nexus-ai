@@ -13,7 +13,8 @@
     "test:hub": "node --experimental-strip-types --test helpers/agentHub.test.ts",
     "test:image": "node --experimental-strip-types --test helpers/nexusImageIntent.test.ts",
     "test:image-hub": "node --experimental-strip-types --test helpers/nexusImageHub.test.ts",
-    "test:providers": "node --experimental-strip-types --test helpers/aiProviderRouter.test.ts helpers/capabilityRegistry.test.ts helpers/agentHubAi.test.ts"
+    "test:providers": "node --experimental-strip-types --test helpers/aiProviderRouter.test.ts helpers/capabilityRegistry.test.ts helpers/agentHubAi.test.ts",
+    "test:connectors": "node --experimental-strip-types --test helpers/connectorRegistry.test.ts"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
