@@ -15,6 +15,11 @@ test('parses the documented Nexus tool-call protocol', () => {
     { type: 'final', text: 'Gotowe' },
   );
   assert.equal(parseNexusModelAction('Zwykła odpowiedź bez wywołania narzędzia.'), undefined);
+  assert.equal(
+    parseNexusModelAction('```json\\n{"type":"tool_call","name":"web_search","arguments":{"query":"not an action"}}\\n```'),
+    undefined,
+    'a fenced example must not trigger a real tool call',
+  );
 });
 
 test('Nexus executes only explicitly model-callable read tools and uses their result in the final answer', async () => {
