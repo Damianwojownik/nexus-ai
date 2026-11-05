@@ -145,7 +145,7 @@ export class NexusTeamOrchestrator {
     const phaseOne = plan.filter((task) => task.phase === 1);
 
     const execute = async (task: NexusSpecialistTask, dependencies: string): Promise<NexusSpecialistReport> => {
-      const profile = profileById.get(task.id)!;
+      const profile = profileById.get(task.id as NexusSpecialistId)!;
       const startedAt = Date.now();
       await onEvent({ agentId: task.agentId, name: profile.name, status: 'STARTED', message: profile.name + ' rozpoczyna pracę.' });
       try {
