@@ -808,7 +808,8 @@ export default function Home() {
         <summary>SEO i AEO · audyt strony, PageSpeed i integracje</summary>
         <div className={styles.seoPanelBody}>
           <div id="nexus-seo-audit" className={styles.seoControls}>
-            <Input value={seoUrl} onChange={event=>setSeoUrl(event.target.value)} placeholder="https://twoja-domena.pl"/>
+            <Input value={seoUrl} onChange={event=>setSeoUrl(event.target.value)} placeholder="https://dowolna-strona.pl"/>
+            <p className={styles.seoMeta}>Wpisz dowolną publiczną stronę klienta lub konkurenta — nie musi być powiązana z Ezostylią ani z żadną konkretną marką.</p>
             <div className={styles.seoActions}>
               <Button onClick={()=>void runSeoAudit()} disabled={seoBusy||!seoUrl.trim()}>{seoBusy?'Pracuję…':'Audyt SEO/AEO · do 30 stron'}</Button>
               <Button variant="secondary" onClick={()=>void runSeoPageSpeed()} disabled={seoBusy||!seoUrl.trim()}>PageSpeed mobile</Button>
