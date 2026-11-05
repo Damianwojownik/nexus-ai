@@ -161,6 +161,14 @@ export class LocalCapabilitiesClient {
     });
   }
 
+  async googleBusinessProfileReviews(): Promise<any> {
+    return this.request('/api/seo/google-business-profile/reviews', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
   async semrushBacklinksOverview(url: string, paidQueryApproved: boolean): Promise<any> {
     return this.request('/api/seo/semrush/backlinks', {
       method: 'POST',
