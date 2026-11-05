@@ -804,8 +804,7 @@ export default function Home() {
 
       </details>
       <details className={styles.seoPanel} open={activeWorkspace==='seo'||activeWorkspace==='integrations'} style={{display:activeWorkspace==='seo'||activeWorkspace==='integrations'?'block':'none'}}>
-        <summary>{activeWorkspace==='integrations'?'Integracje Google i Semrush':'SEO i AEO · audyt strony, PageSpeed i integracje'}</summary>
-        <summary>SEO i AEO · audyt strony, PageSpeed i integracje</summary>
+        <summary>{activeWorkspace==='integrations'?'Integracje Google i Semrush':'SEO i AEO · audyt dowolnej domeny'}</summary>
         <div className={styles.seoPanelBody}>
           <div id="nexus-seo-audit" className={styles.seoControls}>
             <Input value={seoUrl} onChange={event=>setSeoUrl(event.target.value)} placeholder="https://dowolna-strona.pl"/>
