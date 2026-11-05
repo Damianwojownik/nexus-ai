@@ -22,12 +22,15 @@ Recommended on Windows: run the one-click launcher:
 scripts\\start-nexus-windows.bat
 ```
 
-It installs/updates the local dependencies when needed, starts/validates Ollama, Agent Hub and the Vite frontend, then checks ChatGPT-plan/provider status, web search and weather. Manual startup still works:
+It installs/updates the local dependencies when needed, starts/validates Ollama, Agent Hub and the Vite frontend, then checks ChatGPT-plan/provider status, web search and weather. Nexus (interface, local Agent Hub and Luna voice) now starts with one command from the project directory:
 
 ```powershell
-npm run hub
+npm ci
+python -m pip install edge-tts
 npm run dev
 ```
+
+The neural Luna voice uses the local Python `edge-tts` package; if it is not installed, the UI falls back to browser speech synthesis. For troubleshooting only, `npm run hub` and `npm run dev:ui` can still launch the individual components.
 
 Open `http://127.0.0.1:5173/`. The Hub stores runtime state under the user's local app data directory when started by the current Windows setup.
 
