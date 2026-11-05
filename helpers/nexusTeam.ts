@@ -155,6 +155,7 @@ export class NexusTeamOrchestrator {
           history: input.history,
           projectContext: [input.projectContext, dependencies].filter(Boolean).join('\n\n'),
           agentRolePrompt: profile.rolePrompt,
+          skipMemoryWrite: true,
           disabledTools: task.id === 'reviewer'
             ? ['web_search', 'get_weather', 'technical_seo_audit', 'pagespeed_audit', 'seo_integrations_status', 'search_console_report', 'ga4_report']
             : [],
