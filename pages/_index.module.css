@@ -49,3 +49,11 @@
 .websitePreview{margin-top:14px;width:min(900px,100%);display:grid;gap:10px}
 .websitePreview iframe{width:100%;height:440px;border:1px solid var(--border);border-radius:12px;background:white}
 .websitePreview a{color:var(--primary);font-size:14px}
+
+.chatTranscript{display:flex;flex-direction:column;gap:12px;width:min(820px,100%);max-height:min(38vh,420px);overflow:auto;overscroll-behavior:contain;padding:4px 8px 12px;margin:8px auto 0;scrollbar-gutter:stable}
+.chatMessage{display:flex;flex-direction:column;gap:5px;max-width:min(88%,720px);padding:11px 14px;border:1px solid var(--border);border-radius:14px;text-align:left;overflow-wrap:anywhere;white-space:pre-wrap}
+.chatMessage p{margin:0;color:var(--foreground);font-size:14px;line-height:1.6}
+.chatMessageRole{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)}
+.chatMessageUser{align-self:flex-end;background:rgba(67,112,164,.22);border-bottom-right-radius:4px}
+.chatMessageAssistant{align-self:flex-start;background:rgba(17,25,39,.72);border-bottom-left-radius:4px}
+@media(max-width:640px){.chatTranscript{max-height:34vh;padding-left:2px;padding-right:2px}.chatMessage{max-width:96%}}
