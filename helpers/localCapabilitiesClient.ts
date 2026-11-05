@@ -1,3 +1,4 @@
+import { hubEndpoint } from './mobileEndpoints.ts';
 export interface WebSearchResult {
   title: string;
   url: string;
@@ -76,7 +77,7 @@ export class LocalCapabilitiesError extends Error {
 
 const buildEnv = import.meta.env;
 const processEnv = typeof process !== 'undefined' ? process.env : undefined;
-const defaultBaseUrl = buildEnv?.VITE_NEXUS_AGENT_HUB_URL || processEnv?.NEXUS_AGENT_HUB_URL || 'http://127.0.0.1:8788';
+const defaultBaseUrl = hubEndpoint();
 
 export class LocalCapabilitiesClient {
   readonly baseUrl: string;
@@ -113,12 +114,110 @@ export class LocalCapabilitiesClient {
     return response.json() as Promise<T>;
   }
 
+  /** Return neural audio bytes from the user's local Nexus Agent Hub. */
+  async lunaSpeech(text: string): Promise<Blob> {
+    const response = await fetch(this.baseUrl + '/api/voice/luna', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new LocalCapabilitiesError('Głos ZofiaNeural jest niedostępny', response.status);
+    return response.blob();
+  }
+
   async searchWeb(query: string): Promise<{ query: string; provider: string; results: WebSearchResult[] }> {
     return this.request(`/api/search?q=${encodeURIComponent(query)}`);
   }
 
   async getWeather(query: string): Promise<WeatherResult> {
     return this.request(`/api/weather?q=${encodeURIComponent(query)}`);
+  }
+
+  async auditSeo(url: string, maxPages = 20): Promise<any> {
+    return this.request('/api/seo/audit', {
+      method: 'POST',
+      body: JSON.stringify({ url, maxPages }),
+      signal: AbortSignal.timeout(180000),
+    });
+  }
+
+  async runPageSpeed(url: string, strategy: 'mobile' | 'desktop' = 'mobile'): Promise<any> {
+    return this.request('/api/seo/pagespeed', {
+      method: 'POST',
+      body: JSON.stringify({ url, strategy }),
+      signal: AbortSignal.timeout(120000),
+    });
+  }
+
+  async getSeoIntegrations(): Promise<any> {
+    return this.request('/api/seo/integrations');
+  }
+
+  async startGoogleOAuth(): Promise<{ authorizationUrl: string }> {
+    return this.request('/api/seo/google-oauth/start', { method: 'POST', body: JSON.stringify({}) });
+  }
+
+  async getGoogleOAuthStatus(): Promise<any> {
+    return this.request('/api/seo/google-oauth/status');
+  }
+
+  async disconnectGoogleOAuth(): Promise<{ ok: boolean }> {
+    return this.request('/api/seo/google-oauth/disconnect', { method: 'POST', body: JSON.stringify({}) });
+  }
+
+  async googleBusinessProfileAudit(): Promise<any> {
+    return this.request('/api/seo/google-business-profile', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
+  async googleBusinessProfileReviews(): Promise<any> {
+    return this.request('/api/seo/google-business-profile/reviews', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
+  async semrushBacklinksOverview(url: string, paidQueryApproved: boolean): Promise<any> {
+    return this.request('/api/seo/semrush/backlinks', {
+      method: 'POST',
+      body: JSON.stringify({ url, paidQueryApproved }),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
+  async semrushKeywordMetrics(keyword: string, country: string, paidQueryApproved: boolean): Promise<any> {
+    return this.request('/api/seo/semrush/keyword', {
+      method: 'POST',
+      body: JSON.stringify({ keyword, country, paidQueryApproved }),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
+  async semrushBacklinkCompetitors(url: string, paidQueryApproved: boolean): Promise<any> {
+    return this.request('/api/seo/semrush/competitors', {
+      method: 'POST',
+      body: JSON.stringify({ url, paidQueryApproved }),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
+  async searchConsoleReport(startDate?: string, endDate?: string): Promise<any> {
+    return this.request('/api/seo/search-console', {
+      method: 'POST',
+      body: JSON.stringify({ startDate, endDate }),
+    });
+  }
+
+  async ga4Report(startDate?: string, endDate?: string): Promise<any> {
+    return this.request('/api/seo/ga4', {
+      method: 'POST',
+      body: JSON.stringify({ startDate, endDate }),
+    });
   }
 
   async importFile(file: File): Promise<ImportedWorkspaceFile> {

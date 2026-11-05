@@ -1,3 +1,4 @@
+import { ollamaEndpoint } from './mobileEndpoints.ts';
 export type OllamaHealthStatus = 'CONNECTED' | 'OFFLINE' | 'NO_MODEL' | 'ERROR';
 
 export type OllamaModel = {
@@ -28,7 +29,7 @@ export type OllamaHealthResult = {
 const buildEnv = import.meta.env;
 const processEnv = typeof process !== 'undefined' ? process.env : undefined;
 
-const envBaseUrl = buildEnv?.VITE_OLLAMA_BASE_URL || processEnv?.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+const envBaseUrl = ollamaEndpoint();
 
 const envModel = buildEnv?.VITE_OLLAMA_MODEL || processEnv?.OLLAMA_MODEL || 'llama3.1';
 const envTimeout = Number(buildEnv?.VITE_OLLAMA_TIMEOUT_MS || processEnv?.OLLAMA_TIMEOUT_MS || 30000);

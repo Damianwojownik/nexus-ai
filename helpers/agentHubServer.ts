@@ -8,6 +8,9 @@ import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts'
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
+import { auditPublicSite, getSeoIntegrationStatus, runGa4Report, runPageSpeed, runSearchConsoleReport, runSemrushBacklinksOverview, runSemrushBacklinkCompetitors, runSemrushKeywordMetrics } from './seoAuditor.ts';
+import { googleOAuthManager } from './googleOAuth.ts';
+import { synthesizeLunaVoice } from './nexusLunaTts.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -274,6 +277,18 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         return;
       }
 
+      if (method === 'POST' && url.pathname === '/api/voice/luna') {
+        const body = await readJson(request, 4096);
+        const audio = await synthesizeLunaVoice(body.text);
+        response.writeHead(200, {
+          'Content-Type': 'audio/mpeg',
+          'Content-Length': audio.length,
+          'Cache-Control': 'no-store',
+        });
+        response.end(audio);
+        return;
+      }
+
       if (method === 'GET' && url.pathname === '/api/avatar/health') {
         sendJson(response, 200, await avatarServer.health());
         return;
@@ -407,6 +422,106 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         return;
       }
 
+      if (method === 'GET' && url.pathname === '/api/seo/integrations') {
+        sendJson(response, 200, await getSeoIntegrationStatus());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/seo/google-oauth/status') {
+        sendJson(response, 200, await googleOAuthManager.status());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/google-oauth/start') {
+        const returnOrigin = origin && isAllowedOrigin(origin, options.allowedOrigins ?? []) ? origin : undefined;
+        sendJson(response, 200, await googleOAuthManager.startAuthorization(returnOrigin));
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/seo/google-oauth/callback') {
+        const result = await googleOAuthManager.completeAuthorization(url);
+        const targetOrigin = result.returnOrigin ? JSON.stringify(result.returnOrigin) : 'null';
+        const script = result.returnOrigin
+          ? `if(window.opener){window.opener.postMessage({type:'nexus-google-oauth-complete',ok:true},${targetOrigin});window.close();}`
+          : '';
+        sendHtml(response, 200, `<!doctype html><html lang="pl"><meta charset="utf-8"><title>Nexus — Google połączone</title><body style="font-family:system-ui;max-width:38rem;margin:12vh auto;padding:24px;background:#0b1220;color:#eef7ff;border-radius:18px"><h1>Google połączone z Nexusem</h1><p>Autoryzacja zakończona. Możesz wrócić do Nexusa.</p><script>${script}</script></body></html>`);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/google-oauth/disconnect') {
+        await googleOAuthManager.disconnect();
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/google-business-profile') {
+        const { runGoogleBusinessProfileAudit } = await import('./seoAuditor.ts');
+        sendJson(response, 200, await runGoogleBusinessProfileAudit());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/google-business-profile/reviews') {
+        const { runGoogleBusinessProfileReviews } = await import('./seoAuditor.ts');
+        sendJson(response, 200, await runGoogleBusinessProfileReviews());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/semrush/backlinks') {
+        const body = await readJson(request, 16 * 1024);
+        sendJson(response, 200, await runSemrushBacklinksOverview(
+          requiredString(body, 'url'),
+          body.paidQueryApproved === true,
+        ));
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/semrush/competitors') {
+        const body = await readJson(request, 16 * 1024);
+        sendJson(response, 200, await runSemrushBacklinkCompetitors(
+          requiredString(body, 'url'),
+          body.paidQueryApproved === true,
+        ));
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/semrush/keyword') {
+        const body = await readJson(request, 16 * 1024);
+        sendJson(response, 200, await runSemrushKeywordMetrics({
+          keyword: body.keyword,
+          country: body.country,
+          paidQueryApproved: body.paidQueryApproved === true,
+        }));
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/audit') {
+        const body = await readJson(request, 16 * 1024);
+        const result = await auditPublicSite(requiredString(body, 'url'), typeof body.maxPages === 'number' ? body.maxPages : 20);
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/pagespeed') {
+        const body = await readJson(request, 16 * 1024);
+        const result = await runPageSpeed(requiredString(body, 'url'), body.strategy);
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/search-console') {
+        const body = await readJson(request, 16 * 1024);
+        const result = await runSearchConsoleReport({ startDate: body.startDate, endDate: body.endDate });
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/ga4') {
+        const body = await readJson(request, 16 * 1024);
+        const result = await runGa4Report({ startDate: body.startDate, endDate: body.endDate });
+        sendJson(response, 200, result);
+        return;
+      }
+
       if (method === 'POST' && segments.length === 3 && segments[0] === 'api' && segments[1] === 'workspace' && segments[2] === 'import') {
         const body = await readJson(request, 15 * 1024 * 1024);
         const file = await localCapabilities.importFile(body.filename, body.contentBase64);
@@ -496,6 +611,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         const task = createTask({
           goal: requiredString(body, 'goal'),
           createdBy: requiredString(body, 'createdBy'),
+          parentId: typeof body.parentId === 'string' ? body.parentId : undefined,
           assignedTo: requiredString(body, 'assignedTo'),
           scope: requiredString(body, 'scope'),
           contextRefs: Array.isArray(body.contextRefs) ? body.contextRefs.filter((item): item is string => typeof item === 'string') : [],

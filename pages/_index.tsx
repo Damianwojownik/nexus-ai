@@ -10,6 +10,7 @@ import { NexusOrchestrator } from '../helpers/nexusOrchestrator';
 import type { NexusApprovalRequest, NexusWorkflowProgress, NexusWorkflowState } from '../helpers/nexusOrchestrator';
 import { MemoryStore } from '../helpers/memoryStore';
 import { ToolRegistry, registerDefaultTools } from '../helpers/toolRegistry';
+import { registerConversationTools } from '../helpers/nexusConversationTools';
 import { VoiceEventBus } from '../helpers/voiceEventBus';
 import { HubCloudProvider } from '../helpers/hubCloudProvider';
 import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
@@ -25,20 +26,21 @@ const ollamaClient = new OllamaClient();
 const memoryStore = new MemoryStore();
 const toolRegistry = new ToolRegistry();
 registerDefaultTools(toolRegistry);
+const agentHubClient = new AgentHubClient();
+const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
+registerConversationTools(toolRegistry, localCapabilitiesClient);
 const ollamaProvider = new OllamaProvider(ollamaClient);
 const cloudProvider = new HubCloudProvider();
 const modelRouter = new ModelRouter('AUTO', [ollamaProvider], cloudProvider);
 const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
-  systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
+  systemPrompt: 'Jesteś Luną — główną, polskojęzyczną asystentką AI tej aplikacji. Masz wszystkie możliwości silnika Nexus: pamięć, narzędzia, projekty, analizę SEO/AEO, zespół specjalistów i integracje w zakresie rzeczywiście skonfigurowanym. Mów jako Luna, nigdy jako drugi, osobny asystent Nexus. Koordynuj narzędzia bezpiecznie, jasno wyjaśniaj ograniczenia i nie twierdź, że wykonałaś działania, których nie zweryfikowano.',
 });
 const voiceEventBus = new VoiceEventBus();
-const agentHubClient = new AgentHubClient();
-const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
 const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
 export default function Home() {
   const avatars=[{name:'Kosmiczny',src:'/_cdn/static/8c1cadbc-855e-4488-a72b-e88cb715d899.png'},{name:'Luna',src:'/_cdn/static/cc2dde88-daa2-48c9-acc8-1ea16f85990d.png'},{name:'Kai',src:'/_cdn/static/6a74b8c4-e09a-4776-a01a-156edac8441f.png'},{name:'Nova',src:'/_cdn/static/364da496-a271-4b0c-b40e-e23f14fad3a2.png'},{name:'Orbit',src:'/_cdn/static/17f6bda3-9fc8-4e2d-9b46-fec5fc2d91d4.png'},{name:'Void',src:'/_cdn/static/2405769f-a406-4390-9af2-8b74c0fda46c.png'}];
-  const [avatar,setAvatar]=useState(0);
+  const [avatar,setAvatar]=useState(1);
   const [prompt,setPrompt]=useState('');
   const [status,setStatus]=useState('Gotowa do rozmowy');
   const [listening,setListening]=useState(false);
@@ -59,26 +61,99 @@ export default function Home() {
   const [response,setResponse]=useState('');
   const [generatedImageUrl,setGeneratedImageUrl]=useState('');
   const [isThinking,setIsThinking]=useState(false);
-  const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>([]);
+  const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>(()=>{
+    if(typeof window==='undefined') return [];
+    try {
+      const saved=window.localStorage.getItem('nexus-chat-history-v1');
+      const parsed=saved?JSON.parse(saved):[];
+      return Array.isArray(parsed)
+        ? parsed.filter((item):item is {role:'user'|'assistant';content:string} =>
+            item && (item.role==='user'||item.role==='assistant') && typeof item.content==='string'
+          ).slice(-100)
+        : [];
+    } catch {
+      return [];
+    }
+  });
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
+  const [activeWorkspace,setActiveWorkspace]=useState<'chat'|'projects'|'seo'|'team'|'integrations'|'settings'>('chat');
+  const [seoUrl,setSeoUrl]=useState('');
+  const [seoBusy,setSeoBusy]=useState(false);
+  const [seoError,setSeoError]=useState('');
+  const [seoReport,setSeoReport]=useState<any>(null);
+  const [seoPageSpeed,setSeoPageSpeed]=useState<any>(null);
+  const [seoIntegrations,setSeoIntegrations]=useState<any>(null);
+  const [seoDataReport,setSeoDataReport]=useState<any>(null);
+  const [semrushPaidApproval,setSemrushPaidApproval]=useState(false);
+  const [semrushKeyword,setSemrushKeyword]=useState('');
+  const [semrushCountry,setSemrushCountry]=useState('DE');
+  const [workspaceFiles,setWorkspaceFiles]=useState<string[]>([]);
+  const [workspaceSelectedFile,setWorkspaceSelectedFile]=useState('');
+  const [workspaceFileContent,setWorkspaceFileContent]=useState('');
+  const [workspaceError,setWorkspaceError]=useState('');
+  const [workspaceBusy,setWorkspaceBusy]=useState(false);
   const recognitionRef=useRef<any>(null);
   const attachmentInputRef=useRef<HTMLInputElement|null>(null);
+  const workspaceUploadInputRef=useRef<HTMLInputElement|null>(null);
   const hubSseConnectedRef=useRef(false);
   const avatarRef=useRef<HTMLDivElement | null>(null);
   const motionStateRef=useRef<VoiceEventType>('IDLE');
   const speechStartedAtRef=useRef(0);
   const speechBoundaryRef=useRef({at:0,intensity:0});
   const speechVisemePlanRef=useRef<VisemeCue[]>([]);
+  const lunaAudioRef=useRef<HTMLAudioElement|null>(null);
+  const lunaSpeechGenerationRef=useRef(0);
   const pointerRef=useRef({x:0,y:0});
   const generatedImageUrlRef=useRef('');
+  const googleOAuthPopupRef=useRef<Window|null>(null);
 
   useEffect(() => () => {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
   }, []);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('nexus-chat-history-v1', JSON.stringify(conversationHistory.slice(-100)));
+    } catch {
+      // Local history is best-effort; chat remains usable when storage is unavailable.
+    }
+  }, [conversationHistory]);
+
+  useEffect(() => {
+    void localCapabilitiesClient.getSeoIntegrations()
+      .then(setSeoIntegrations)
+      .catch(() => setSeoIntegrations(null));
+  }, []);
+
+  useEffect(() => {
+    if (activeWorkspace === 'seo') document.getElementById('nexus-seo-audit')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (activeWorkspace === 'integrations') document.getElementById('nexus-integrations')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [activeWorkspace]);
+
+  useEffect(() => {
+    if (activeWorkspace === 'projects') void refreshWorkspaceFiles();
+  }, [activeWorkspace]);
+
+  useEffect(() => {
+    const onGoogleOAuthMessage = (event: MessageEvent) => {
+      try {
+        const hubOrigin = new URL(agentHubClient.baseUrl).origin;
+        if (event.origin !== hubOrigin || event.source !== googleOAuthPopupRef.current) return;
+        if (event.data?.type !== 'nexus-google-oauth-complete' || event.data?.ok !== true) return;
+        googleOAuthPopupRef.current = null;
+        void localCapabilitiesClient.getSeoIntegrations().then(setSeoIntegrations).catch(() => undefined);
+      } catch {
+        // Ignore OAuth messages from unknown origins.
+      }
+    };
+    window.addEventListener('message', onGoogleOAuthMessage);
+    return () => window.removeEventListener('message', onGoogleOAuthMessage);
+  }, []);
+
   useEffect(()=>{
     const saved=localStorage.getItem('nexus-avatar');
-    if(saved){const i=avatars.findIndex(a=>a.name===saved);if(i>=0)setAvatar(i)};
+    // Luna is the primary face of Nexus; users may still choose another avatar later.
+    if(saved==='Luna')setAvatar(1);
 
     void (async () => {
       const available = await ollamaClient.listModels();
@@ -206,12 +281,13 @@ export default function Home() {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
     generatedImageUrlRef.current = '';
     setGeneratedImageUrl('');
-    const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-12);
+    const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-100);
+    setConversationHistory(nextHistory);
     try {
       const result = await nexusOrchestrator.start({
         text: messageText,
-        history: conversationHistory.slice(-10),
-        projectContext: 'Nexus local-first workspace. Route through available local capabilities; do not claim unavailable access.',
+        history: conversationHistory.slice(-20),
+        projectContext: 'Luna jest jedyną tożsamością asystentki; korzysta z całego lokalnego silnika Nexus, jego pamięci, narzędzi, projektów i zespołu SEO/AEO. Nie deklaruj niedostępnych uprawnień ani niezrealizowanych działań.',
         attachments,
       }, publishWorkflowProgress);
       setResponse(result.text);
@@ -222,7 +298,7 @@ export default function Home() {
       }
       setLastSources(result.searchResults);
       setConversationHistory(result.status === 'DONE'
-        ? [...nextHistory, { role: 'assistant' as const, content: result.text }].slice(-12)
+        ? [...nextHistory, { role: 'assistant' as const, content: result.text }].slice(-100)
         : nextHistory);
       setPrompt('');
       setAttachments([]);
@@ -231,6 +307,7 @@ export default function Home() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Nexus nie mógł wykonać zadania';
       setResponse(message);
+      setConversationHistory([...nextHistory, { role: 'assistant' as const, content: message }].slice(-100));
       setStatus('Wystąpił błąd');
       voiceEventBus.emit('ERROR', 'nexus', message, workflowProgress?.taskId, { source: 'orchestrator' });
     } finally {
@@ -248,7 +325,7 @@ export default function Home() {
         setApprovalRequest(result.approval);
       } else {
         setApprovalRequest(null);
-        setConversationHistory((history) => [...history, { role: 'assistant' as const, content: result.text }].slice(-12));
+        setConversationHistory((history) => [...history, { role: 'assistant' as const, content: result.text }].slice(-100));
         if (result.text.trim()) speak(result.text);
       }
     } catch (error) {
@@ -267,7 +344,7 @@ export default function Home() {
     setApprovalRequest(null);
     setResponse('Anulowałem tę operację.');
     setStatus('Gotowe');
-    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałem tę operację.' }].slice(-12));
+    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałem tę operację.' }].slice(-100));
   };
 
   const addAttachments = (files: FileList|null) => {
@@ -330,22 +407,63 @@ export default function Home() {
   const trackPointer=(e:React.PointerEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();pointerRef.current={x:Math.max(-1,Math.min(1,(e.clientX-(r.left+r.width/2))/(r.width/2))),y:Math.max(-1,Math.min(1,(e.clientY-(r.top+r.height/2))/(r.height/2)))};};
   const resetPointer=()=>{pointerRef.current={x:0,y:0};};
   const speak=(text:string)=>{
-    if(!('speechSynthesis' in window)) return;
-    emitVoiceEvent('SPEAKING', 'Nexus mówi…');
-    window.speechSynthesis.cancel();
-    const u=new SpeechSynthesisUtterance(text);
-    u.lang='pl-PL'; u.rate=.96;
-    speechVisemePlanRef.current=estimateVisemePlan(text,{charactersPerSecond:14/u.rate});
-    u.onstart=()=>{speechStartedAtRef.current=performance.now();setSpeaking(true);setStatus('Nexus mówi…')};
-    u.onboundary=(event:any)=>{const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
-    u.onend=()=>{setSpeaking(false); emitVoiceEvent('IDLE', 'Nexus ready'); setStatus('Gotowy do rozmowy')};
-    window.speechSynthesis.speak(u);
+    const generation=++lunaSpeechGenerationRef.current;
+    lunaAudioRef.current?.pause();
+    lunaAudioRef.current=null;
+    window.speechSynthesis?.cancel();
+    const normalized=text.replace(/https?:\/\/\S+/g,'').replace(/[✦*_#>`~|]/g,'').replace(/\s+/g,' ').trim();
+    if(!normalized) return;
+    const setSpeechStarted=()=>{
+      speechStartedAtRef.current=performance.now();
+      speechBoundaryRef.current={at:0,intensity:0};
+      speechVisemePlanRef.current=estimateVisemePlan(normalized,{charactersPerSecond:14});
+      setSpeaking(true);
+      setStatus('Luna mówi…');
+      emitVoiceEvent('SPEAKING','Luna mówi…');
+    };
+    const setSpeechEnded=()=>{
+      if(generation!==lunaSpeechGenerationRef.current)return;
+      setSpeaking(false);
+      emitVoiceEvent('IDLE','Luna gotowa');
+      setStatus('Gotowa do rozmowy');
+    };
+    const browserFallback=()=>{
+      if(generation!==lunaSpeechGenerationRef.current||!('speechSynthesis' in window))return;
+      const u=new SpeechSynthesisUtterance(normalized);
+      u.lang='pl-PL';u.rate=1;u.pitch=1.05;
+      const voices=window.speechSynthesis.getVoices().filter(voice=>voice.lang.toLowerCase().startsWith('pl'));
+      const preferred=voices.find(voice=>/zofia|agnieszka|paulina|maja|kasia/i.test(voice.name))??voices[0];
+      if(preferred)u.voice=preferred;
+      u.onstart=setSpeechStarted;
+      u.onboundary=(event:any)=>{const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
+      u.onend=setSpeechEnded;
+      u.onerror=setSpeechEnded;
+      window.speechSynthesis.speak(u);
+    };
+    if(avatar!==1){browserFallback();return;}
+    void (async()=>{
+      try{
+        // Local neural TTS is optional; the browser remains usable if Python is missing.
+        const audioBlob=await localCapabilitiesClient.lunaSpeech(normalized.slice(0,600));
+        if(generation!==lunaSpeechGenerationRef.current)return;
+        const url=URL.createObjectURL(audioBlob);
+        const audio=new Audio(url);
+        lunaAudioRef.current=audio;
+        audio.onended=()=>{URL.revokeObjectURL(url);if(lunaAudioRef.current===audio)lunaAudioRef.current=null;setSpeechEnded();};
+        audio.onerror=()=>{URL.revokeObjectURL(url);if(lunaAudioRef.current===audio)lunaAudioRef.current=null;setSpeechEnded();};
+        try{await audio.play();if(generation===lunaSpeechGenerationRef.current)setSpeechStarted();}
+        catch{URL.revokeObjectURL(url);if(lunaAudioRef.current===audio)lunaAudioRef.current=null;browserFallback();}
+      }catch{browserFallback();}
+    })();
   };
   const startVoice=()=>{
     const w:any=window, SR=w.SpeechRecognition||w.webkitSpeechRecognition;
     if(!SR){emitVoiceEvent('ERROR','Rozpoznawanie mowy nie jest dostępne w tej przeglądarce');setStatus('Rozpoznawanie mowy nie jest dostępne w tej przeglądarce');return;}
     if(listening){recognitionRef.current?.stop(); emitVoiceEvent('INTERRUPTED','Voice input stopped');return;}
     emitVoiceEvent('LISTENING','Nexus słucha…');
+    ++lunaSpeechGenerationRef.current;
+    lunaAudioRef.current?.pause();
+    lunaAudioRef.current=null;
     window.speechSynthesis?.cancel();
     const r=new SR(); recognitionRef.current=r;
     r.lang='pl-PL'; r.continuous=false; r.interimResults=true;
@@ -354,13 +472,324 @@ export default function Home() {
     r.onerror=(e:any)=>{emitVoiceEvent('ERROR', e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu':'Błąd mikrofonu — spróbuj ponownie'); setStatus(e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu':'Błąd mikrofonu — spróbuj ponownie');};
     r.onend=()=>{setListening(false); emitVoiceEvent('IDLE','Voice input ended');}; r.start();
   };
+
+  const refreshWorkspaceFiles = async () => {
+    setWorkspaceBusy(true);
+    setWorkspaceError('');
+    try {
+      const files = await localCapabilitiesClient.listWorkspaceFiles();
+      setWorkspaceFiles(files);
+      if (workspaceSelectedFile && files.includes(workspaceSelectedFile)) {
+        const file = await localCapabilitiesClient.readWorkspaceFile(workspaceSelectedFile);
+        setWorkspaceFileContent(file.content);
+      } else if (files.length) {
+        setWorkspaceSelectedFile(files[0]);
+        const file = await localCapabilitiesClient.readWorkspaceFile(files[0]);
+        setWorkspaceFileContent(file.content);
+      } else {
+        setWorkspaceSelectedFile('');
+        setWorkspaceFileContent('');
+      }
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Nie udało się odczytać workspace.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const selectWorkspaceFile = async (path: string) => {
+    setWorkspaceSelectedFile(path);
+    setWorkspaceBusy(true);
+    setWorkspaceError('');
+    try {
+      const file = await localCapabilitiesClient.readWorkspaceFile(path);
+      setWorkspaceFileContent(file.content);
+    } catch (error) {
+      setWorkspaceFileContent('');
+      setWorkspaceError(error instanceof Error ? error.message : 'Nie udało się otworzyć pliku.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const importWorkspaceFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setWorkspaceBusy(true);
+    setWorkspaceError('');
+    try {
+      for (const file of Array.from(files).slice(0, 8)) {
+        await localCapabilitiesClient.importFile(file);
+      }
+      await refreshWorkspaceFiles();
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Nie udało się zaimportować plików.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const runSeoAudit = async () => {
+    if (!seoUrl.trim()) { setSeoError('Wpisz adres strony do audytu.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoReport(null);
+    try {
+      const result = await localCapabilitiesClient.auditSeo(seoUrl.trim(), 30);
+      setSeoReport(result);
+      setSeoIntegrations(await localCapabilitiesClient.getSeoIntegrations().catch(() => seoIntegrations));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się wykonać audytu SEO.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const runSeoPageSpeed = async () => {
+    if (!seoUrl.trim()) { setSeoError('Wpisz adres strony do pomiaru.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoPageSpeed(null);
+    try {
+      setSeoPageSpeed(await localCapabilitiesClient.runPageSpeed(seoUrl.trim(), 'mobile'));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się uruchomić PageSpeed.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const runSeoDataReport = async (provider: 'gsc' | 'ga4') => {
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      const result = provider === 'gsc'
+        ? await localCapabilitiesClient.searchConsoleReport()
+        : await localCapabilitiesClient.ga4Report();
+      setSeoDataReport(result);
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się pobrać raportu analitycznego.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const connectGoogleOAuth = async () => {
+    const popup = window.open('about:blank', 'nexus-google-oauth', 'popup,width=560,height=720');
+    if (!popup) { setSeoError('Przeglądarka zablokowała okno Google OAuth. Zezwól na popupy dla Nexusa i spróbuj ponownie.'); return; }
+    googleOAuthPopupRef.current = popup;
+    setSeoBusy(true);
+    setSeoError('');
+    try {
+      const authorization = await localCapabilitiesClient.startGoogleOAuth();
+      popup.location.href = authorization.authorizationUrl;
+    } catch (error) {
+      popup.close();
+      googleOAuthPopupRef.current = null;
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się rozpocząć Google OAuth.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const disconnectGoogleOAuth = async () => {
+    setSeoBusy(true);
+    setSeoError('');
+    try {
+      await localCapabilitiesClient.disconnectGoogleOAuth();
+      setSeoIntegrations(await localCapabilitiesClient.getSeoIntegrations());
+      setSeoDataReport(null);
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się rozłączyć Google OAuth.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const runGoogleBusinessProfileAudit = async () => {
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.googleBusinessProfileAudit());
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się odczytać Google Business Profile.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const runSemrushCompetitors = async () => {
+    if (!semrushPaidApproval) { setSeoError('Zaznacz jawną zgodę na maksymalnie 200 jednostek API.'); return; }
+    if (!seoUrl.trim()) { setSeoError('Wpisz adres domeny do porównania.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.semrushBacklinkCompetitors(seoUrl.trim(), true));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się pobrać podobnych domen z Semrush.');
+    } finally {
+      setSeoBusy(false);
+      setSemrushPaidApproval(false);
+    }
+  };
+
+  const runSemrushBacklinks = async () => {
+    if (!semrushPaidApproval) { setSeoError('Zaznacz jawną zgodę na koszt 45 jednostek API.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.semrushBacklinksOverview(seoUrl.trim(), true));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się pobrać backlinków z Semrush.');
+    } finally {
+      setSeoBusy(false);
+      setSemrushPaidApproval(false);
+    }
+  };
+
+  const runSemrushKeyword = async () => {
+    if (!semrushPaidApproval) { setSeoError('Zaznacz jawną zgodę na koszt 20 jednostek API.'); return; }
+    if (!semrushKeyword.trim()) { setSeoError('Wpisz słowo kluczowe do analizy.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.semrushKeywordMetrics(semrushKeyword.trim(), semrushCountry.trim(), true));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się pobrać metryk słowa kluczowego z Semrush.');
+    } finally {
+      setSeoBusy(false);
+      setSemrushPaidApproval(false);
+    }
+  };
+
+  const runGoogleBusinessProfileReviews = async () => {
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.googleBusinessProfileReviews());
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się odczytać opinii Google.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const refreshSeoIntegrations = async () => {
+    setSeoBusy(true);
+    setSeoError('');
+    try {
+      setSeoIntegrations(await localCapabilitiesClient.getSeoIntegrations());
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się sprawdzić integracji.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const renderSeoDataTables = () => {
+    if (!seoDataReport) return null;
+    const rows = Array.isArray(seoDataReport.rows) ? seoDataReport.rows : [];
+    const reviewRows = Array.isArray(seoDataReport.reviews) ? seoDataReport.reviews : [];
+    const dimensionHeaders = Array.isArray(seoDataReport.dimensionHeaders)
+      ? seoDataReport.dimensionHeaders.map((item: any) => String(item.name ?? 'Wymiar'))
+      : rows[0]?.keys?.map((_item: string, index: number) => ['Zapytanie', 'Strona', 'Urządzenie', 'Kraj'][index] ?? 'Wymiar') ?? [];
+    const metricHeaders = Array.isArray(seoDataReport.metricHeaders)
+      ? seoDataReport.metricHeaders.map((item: any) => String(item.name ?? 'Metryka'))
+      : rows[0] && ('clicks' in rows[0] || 'impressions' in rows[0])
+        ? ['clicks', 'impressions', 'ctr', 'position'].filter((key) => key in rows[0]).map((key) => ({
+            clicks: 'Kliknięcia', impressions: 'Wyświetlenia', ctr: 'CTR', position: 'Śr. pozycja',
+          }[key]))
+        : [];
+    const dimensionsForRow = (row: any) => Array.isArray(row.keys)
+      ? row.keys
+      : Array.isArray(row.dimensionValues) ? row.dimensionValues.map((item: any) => item.value) : [];
+    const metricsForRow = (row: any) => Array.isArray(row.metricValues)
+      ? row.metricValues.map((item: any) => item.value)
+      : ['clicks', 'impressions', 'ctr', 'position'].filter((key) => key in row).map((key) => row[key]);
+    const formatCell = (value: unknown, header: string) => {
+      if (typeof value === 'string' && header.toLowerCase() === 'ctr') {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? (numeric * 100).toFixed(2) + '%' : value;
+      }
+      return String(value ?? '—');
+    };
+    return <div className={styles.seoStructuredData}>
+      {seoDataReport.averageRating!==undefined&&<div className={styles.seoMetrics}>
+        <div><b>{Number(seoDataReport.averageRating).toFixed(2)}</b><span>Średnia ocena</span></div>
+        <div><b>{seoDataReport.totalReviewCount??'—'}</b><span>Wszystkie opinie</span></div>
+        <div><b>{seoDataReport.returnedReviewCount??reviewRows.length}</b><span>Pobrane opinie</span></div>
+        <div><b>{seoDataReport.unansweredInReturnedPage??'—'}</b><span>Bez odpowiedzi</span></div>
+      </div>}
+      {reviewRows.length>0&&<div className={styles.seoIssues}>
+        <b>Ostatnie opinie Google</b>
+        {reviewRows.map((review:any,index:number)=><article key={review.reviewId||index}>
+          <div><b>{review.reviewer}</b><span>{String(review.starRating||'').replace('STARS','')}</span><span>{review.hasReply?'Odpowiedź dodana':'Bez odpowiedzi'}</span></div>
+          <small>{review.updateTime||review.createTime||''}</small>
+          <p>{review.comment||'Brak tekstu opinii.'}</p>
+        </article>)}
+      </div>}
+      {rows.length>0&&<div className={styles.seoDataTableWrap}>
+        <table className={styles.seoDataTable}>
+          <thead><tr>{[...dimensionHeaders,...metricHeaders].map((header:string,index:number)=><th key={index}>{header}</th>)}</tr></thead>
+          <tbody>{rows.slice(0,30).map((row:any,index:number)=>{
+            const dimensions=dimensionsForRow(row);
+            const metrics=metricsForRow(row);
+            return <tr key={index}>
+              {dimensions.map((value:unknown,cell:number)=><td key={'d'+cell}>{String(value??'—')}</td>)}
+              {metrics.map((value:unknown,cell:number)=><td key={'m'+cell}>{formatCell(value,metricHeaders[cell]||'')}</td>)}
+            </tr>;
+          })}</tbody>
+        </table>
+        <small>Wyświetlono maksymalnie 30 wierszy z {rows.length} zwróconych.</small>
+      </div>}
+      {reviewRows.length===0&&rows.length===0&&<pre className={styles.seoDataOutputPre}>{JSON.stringify(seoDataReport.data??seoDataReport,null,2)}</pre>}
+    </div>;
+  };
+
+  const exportSeoCsv = () => {
+    if (!seoReport?.issues?.length) return;
+    const columns = ['severity', 'code', 'page', 'title', 'detail', 'recommendation'];
+    const quote = (value: unknown) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const csv = [columns.join(','), ...seoReport.issues.map((issue: any) => columns.map((key) => quote(issue[key])).join(','))].join('\\r\\n');
+    const url = URL.createObjectURL(new Blob(['\\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'nexus-seo-audit.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   const run = runNexusConversation;
   return <main className={styles.shell}>
-    <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
-      <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
-        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
-        <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
-        {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
+    <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>LUNA NEXUS</b><span>TWÓJ ASYSTENT AI</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
+      <nav className={styles.workspaceNav} aria-label="Nawigacja Luna Nexus — wspólny panel funkcji">
+        <button type="button" aria-pressed={activeWorkspace==='chat'} className={activeWorkspace==='chat'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('chat')}>Rozmowa</button>
+        <button type="button" aria-pressed={activeWorkspace==='projects'} className={activeWorkspace==='projects'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('projects')}>Projekty i pliki</button>
+        <button type="button" aria-pressed={activeWorkspace==='seo'} className={activeWorkspace==='seo'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('seo')}>SEO i AEO</button>
+        <button type="button" aria-pressed={activeWorkspace==='team'} className={activeWorkspace==='team'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('team')}>Zespół AI</button>
+        <button type="button" aria-pressed={activeWorkspace==='integrations'} className={activeWorkspace==='integrations'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('integrations')}>Integracje</button>
+        <button type="button" aria-pressed={activeWorkspace==='settings'} className={activeWorkspace==='settings'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('settings')}>Ustawienia</button>
+      </nav>
+      <div className={styles.stage} style={{display:activeWorkspace==='chat'?'flex':'none'}}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
+        <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/>{avatar===1?<div className={styles.lunaLayers}><img src="/luna-face/neutral.webp" alt="Luna — animowana asystentka AI"/><img src="/luna-face/blink.webp" className={styles.lunaBlink} alt="" aria-hidden="true"/><img src="/luna-face/mouth-oo.webp" className={styles.lunaOo} alt="" aria-hidden="true"/><img src="/luna-face/mouth-ah.webp" className={styles.lunaAh} alt="" aria-hidden="true"/></div>:<><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div></>}<div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
+        <div className={styles.speech}><Sparkles size={16}/> Cześć, jestem Luna. W czym mogę Ci pomóc?</div>
+        {(conversationHistory.length>0||response||isThinking)&&<section className={styles.chatTranscript} role="log" aria-live="polite" aria-relevant="additions text">
+          {conversationHistory.map((message,index)=><article key={`${index}-${message.role}`} className={styles.chatMessage} data-role={message.role}>
+            <span>{message.role==='user'?'TY':'LUNA'}</span>
+            <p>{message.content}</p>
+          </article>)}
+          {response&&!conversationHistory.some(message=>message.role==='assistant'&&message.content===response)&&<article className={styles.chatMessage} data-role="assistant">
+            <span>LUNA</span><p>{response}</p>
+          </article>}
+          {isThinking&&<article className={styles.chatMessage} data-role="assistant" data-pending="true">
+            <span>LUNA</span><p>{workflowProgress?.message||'Analizuję Twoje polecenie…'}</p>
+          </article>}
+        </section>}
         {generatedImageUrl&&<img className={styles.generatedImage} src={generatedImageUrl} alt="Obraz wygenerowany przez Nexus Image Engine"/>}
         <div className={styles.status}>{status}</div>
         <input ref={attachmentInputRef} type="file" multiple hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.xlsx,.pptx" onChange={event=>{addAttachments(event.target.files);event.currentTarget.value=''}}/>
@@ -369,16 +798,41 @@ export default function Home() {
         {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button></div>
       </div>
-      <details className={styles.nexusDetails}>
+            <section className={styles.workspaceFilesPanel} style={{display:activeWorkspace==='projects'?'block':'none'}}>
+        <div className={styles.workspaceFilesHeader}>
+          <div><h2>Projekty i pliki</h2><p>Bezpieczny workspace Nexusa. Importowane pliki są kopiowane do katalogu workspace; pliki źródłowe na komputerze pozostają bez zmian.</p></div>
+          <div className={styles.seoActions}>
+            <Button variant="secondary" onClick={()=>void refreshWorkspaceFiles()} disabled={workspaceBusy}>Odśwież</Button>
+            <Button onClick={()=>workspaceUploadInputRef.current?.click()} disabled={workspaceBusy}>Dodaj pliki</Button>
+          </div>
+        </div>
+        <input ref={workspaceUploadInputRef} type="file" multiple hidden accept=".txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.sql,.toml,.yaml,.yml,.pdf,.doc,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp" onChange={event=>{void importWorkspaceFiles(event.target.files);event.currentTarget.value=''}}/>
+        {workspaceError&&<p role="alert" className={styles.capabilityError}>{workspaceError}</p>}
+        <div className={styles.workspaceFilesGrid}>
+          <aside className={styles.workspaceFileList}>
+            <div><b>Pliki workspace</b><span>{workspaceFiles.length}</span></div>
+            {workspaceBusy&&!workspaceFiles.length?<p>Wczytuję…</p>:workspaceFiles.length
+              ? workspaceFiles.map(path=><button type="button" key={path} aria-pressed={workspaceSelectedFile===path} className={workspaceSelectedFile===path?styles.workspaceFileActive:''} onClick={()=>void selectWorkspaceFile(path)}>{path}</button>)
+              : <p>Workspace jest pusty. Dodaj pliki projektu, aby Nexus mógł je przeglądać.</p>}
+          </aside>
+          <section className={styles.workspaceFilePreview}>
+            <div><b>{workspaceSelectedFile||'Podgląd pliku'}</b><span>Odczyt tylko dla dozwolonych typów tekstowych · maks. 128 KB</span></div>
+            <pre>{workspaceBusy?'Wczytuję plik…':workspaceFileContent||'Wybierz plik z listy, aby zobaczyć jego zawartość.'}</pre>
+          </section>
+        </div>
+        <p className={styles.seoMeta}>Import blokuje pliki wykonywalne i instalatory, nie uruchamia plików i nie nadpisuje istniejących plików. Podgląd nie obsługuje jeszcze ekstrakcji treści z PDF/DOCX/XLSX/PPTX.</p>
+      </section>
+<details className={styles.nexusDetails} open={activeWorkspace==='team'||activeWorkspace==='settings'} style={{display:activeWorkspace==='team'||activeWorkspace==='settings'?'block':'none'}}>
+        <summary>{activeWorkspace==='settings'?'Ustawienia i diagnostyka':'Zespół AI · agenci, zadania i postęp'}</summary>
         <summary>Co robi Nexus</summary>
         <div className={styles.workflowSummary}>
           <p>{workflowProgress?.message??'Brak aktywnego zadania.'}</p>
           {workflowProgress&&<ol>{workflowProgress.plan.map(step=><li key={step.id} data-step-state={step.state}>{step.label} · {step.state}</li>)}</ol>}
           {lastSources.length>0&&<div className={styles.workflowSources}><b>Źródła sprawdzone przez Nexusa</b>{lastSources.map(source=><a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title} · {new URL(source.url).hostname}</a>)}</div>}
         </div>
-        <div className={styles.diagnosticsContent} inert={true}>
+        <div className={styles.diagnosticsContent}>
           <section className={styles.settingsPanel}>
-            <h3>NEXUS</h3>
+            <h3>LUNA · silnik Nexus</h3>
             <div className={styles.settingsRow}><span>Primary Agent</span><strong>{primaryStatus}</strong></div>
             <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama · {selectedModel} · {ollamaStatus}</strong></div>
             <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady?'ready':'loading'}</strong></div>
@@ -390,6 +844,98 @@ export default function Home() {
             <div><h4>Zdarzenia</h4>{hubEvents.slice(0,6).map(event=><p key={event.id}>{event.type} · {event.agentId}: {event.message}</p>)}</div>
           </section>
           {hubError&&<p role="alert" className={styles.capabilityError}>{hubError}</p>}
+        </div>
+
+      </details>
+      <details className={styles.seoPanel} open={activeWorkspace==='seo'||activeWorkspace==='integrations'} style={{display:activeWorkspace==='seo'||activeWorkspace==='integrations'?'block':'none'}}>
+        <summary>{activeWorkspace==='integrations'?'Integracje Google i Semrush':'SEO i AEO · audyt dowolnej domeny'}</summary>
+        <div className={styles.seoPanelBody}>
+          <div id="nexus-seo-audit" className={styles.seoControls}>
+            <Input value={seoUrl} onChange={event=>setSeoUrl(event.target.value)} placeholder="https://dowolna-strona.pl"/>
+            <p className={styles.seoMeta}>Wpisz dowolną publiczną stronę klienta lub konkurenta — nie musi być powiązana z Ezostylią ani z żadną konkretną marką.</p>
+            <div className={styles.seoActions}>
+              <Button onClick={()=>void runSeoAudit()} disabled={seoBusy||!seoUrl.trim()}>{seoBusy?'Pracuję…':'Audyt SEO/AEO · do 30 stron'}</Button>
+              <Button variant="secondary" onClick={()=>void runSeoPageSpeed()} disabled={seoBusy||!seoUrl.trim()}>PageSpeed mobile</Button>
+            </div>
+          </div>
+          {seoError&&<p role="alert" className={styles.capabilityError}>{seoError}</p>}
+          {seoReport&&<section className={styles.seoReport}>
+            <div className={styles.seoReportHeader}>
+              <div><b>Raport techniczny</b><small>{seoReport.site} · {seoReport.pagesScanned}/{seoReport.maxPages} stron · {new Date(seoReport.crawledAt).toLocaleString('pl-PL')}</small></div>
+              <div className={styles.seoActions}>
+                <Button variant="secondary" onClick={exportSeoCsv} disabled={!seoReport.issues?.length}>Eksport CSV</Button>
+                <Button variant="secondary" onClick={()=>window.print()}>Drukuj / PDF</Button>
+              </div>
+            </div>
+            <div className={styles.seoMetrics}>
+              <div><b>{seoReport.summary.critical}</b><span>Krytyczne</span></div>
+              <div><b>{seoReport.summary.high}</b><span>Wysokie</span></div>
+              <div><b>{seoReport.summary.medium}</b><span>Średnie</span></div>
+              <div><b>{seoReport.summary.low}</b><span>Niskie</span></div>
+            </div>
+            <div className={styles.seoReportHeader}><b>AEO / gotowość treści</b><small>{seoReport.aeo.directAnswerReadiness.toUpperCase()} · średnio {seoReport.aeo.averageWordsPerPage} słów / stronę</small></div>
+            <div className={styles.seoMeta}>{seoReport.aeo.notes?.map((note:string,index:number)=><p key={index}>{note}</p>)}</div>
+            <div className={styles.seoIssues}>
+              <b>Problemy i zalecenia</b>
+              {seoReport.issues?.length
+                ? seoReport.issues.slice(0,30).map((issue:any,index:number)=><article key={issue.code+'-'+index}>
+                    <div><span data-severity={issue.severity}>{issue.severity.toUpperCase()}</span><b>{issue.title}</b></div>
+                    <small>{issue.page}</small><p>{issue.detail}</p><p>{issue.recommendation}</p>
+                  </article>)
+                : <p>Nie wykryto problemów w zakresie tej próbki crawla.</p>}
+            </div>
+            <p className={styles.seoMeta}>{seoReport.limitations?.join(' ')}</p>
+          </section>}
+          {seoPageSpeed&&<section className={styles.seoReport}>
+            <div className={styles.seoReportHeader}><b>Google PageSpeed Insights · {seoPageSpeed.strategy}</b><small>{seoPageSpeed.url}</small></div>
+            <div className={styles.seoMetrics}>
+              {Object.entries(seoPageSpeed.scores||{}).map(([key,value]:[string,any])=><div key={key}><b>{value}</b><span>{key}</span></div>)}
+            </div>
+            <div className={styles.seoMeta}><p>Laboratorium Lighthouse: LCP {seoPageSpeed.lab.lcpMs??'—'} ms · FCP {seoPageSpeed.lab.fcpMs??'—'} ms · CLS {seoPageSpeed.lab.cls??'—'} · TBT {seoPageSpeed.lab.tbtMs??'—'} ms</p>
+              <p>Dane terenowe: {seoPageSpeed.field?.source||'niedostępne'} {seoPageSpeed.field?.overallCategory||''}</p>
+            </div>
+            <div className={styles.seoIssues}><b>Najważniejsze możliwości poprawy</b>{seoPageSpeed.opportunities?.map((item:any)=><article key={item.id}><div><b>{item.title}</b><span>{item.savingsMs===undefined?'':item.savingsMs+' ms potencjalnej oszczędności'}</span></div><p>{item.description}</p></article>)}</div>
+            <p className={styles.seoMeta}>{seoPageSpeed.limitations?.join(' ')}</p>
+          </section>}
+          <section id="nexus-integrations" className={styles.seoIntegrations}>
+            <div className={styles.seoReportHeader}><b>Integracje danych</b><Button variant="secondary" onClick={()=>void refreshSeoIntegrations()} disabled={seoBusy}>Odśwież statusy</Button></div>
+            {seoIntegrations?.googleOAuth&&<div className={styles.seoGoogleOAuth}>
+              <div><b>Konto Google · OAuth 2.0</b><small>{seoIntegrations.googleOAuth.connected?'Połączone':seoIntegrations.googleOAuth.clientConfigured&&seoIntegrations.googleOAuth.redirectUriConfigured?'Gotowe do autoryzacji':'Wymaga konfiguracji po stronie serwera'}</small></div>
+              <div className={styles.seoActions}>
+                <Button onClick={()=>void connectGoogleOAuth()} disabled={seoBusy||seoIntegrations.googleOAuth.connected||!seoIntegrations.googleOAuth.clientConfigured||!seoIntegrations.googleOAuth.redirectUriConfigured}>Połącz konto Google</Button>
+                <Button variant="secondary" onClick={()=>void disconnectGoogleOAuth()} disabled={seoBusy||!seoIntegrations.googleOAuth.connected}>Rozłącz Google</Button>
+              </div>
+              {!seoIntegrations.googleOAuth.clientConfigured&&<p className={styles.seoMeta}>Dodaj GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET i GOOGLE_OAUTH_REDIRECT_URI w środowisku serwera Nexusa.</p>}
+            </div>}
+            {seoIntegrations?<div className={styles.seoIntegrationGrid}>
+              <div><b>Google Search Console</b><span>{seoIntegrations.searchConsole.status}</span><small>Wymaga OAuth · webmasters.readonly</small><Button variant="secondary" onClick={()=>void runSeoDataReport('gsc')} disabled={seoBusy||seoIntegrations.searchConsole.status!=='CONFIGURED'}>Pobierz raport GSC</Button></div>
+              <div><b>Google Analytics 4</b><span>{seoIntegrations.ga4.status}</span><small>Wymaga OAuth · analytics.readonly</small><Button variant="secondary" onClick={()=>void runSeoDataReport('ga4')} disabled={seoBusy||seoIntegrations.ga4.status!=='CONFIGURED'}>Pobierz raport GA4</Button></div>
+              <div className={styles.seoSemrush}>
+                <b>Semrush API v4</b>
+                <span>{seoIntegrations.backlinks.status}</span>
+                <small>Backlink Overview: 45 jednostek. Metryki 1 słowa: 20 jednostek. Podobne domeny: 40 jednostek za wiersz, maksymalnie 5 wierszy (do 200). Każde zapytanie płatne wymaga osobnej zgody.</small>
+                <Input value={semrushKeyword} onChange={event=>setSemrushKeyword(event.target.value)} placeholder="Słowo kluczowe do sprawdzenia"/>
+                <Input value={semrushCountry} onChange={event=>setSemrushCountry(event.target.value.toUpperCase())} placeholder="Kod kraju, np. DE"/>
+                <label className={styles.seoPaidConsent}>
+                  <input type="checkbox" checked={semrushPaidApproval} onChange={event=>setSemrushPaidApproval(event.target.checked)} disabled={seoBusy||seoIntegrations.backlinks.status!=='CONFIGURED'}/>
+                  <span>Zgadzam się na zużycie jednostek Semrush dla jednego klikniętego zapytania.</span>
+                </label>
+                <div className={styles.seoActions}>
+                  <Button variant="secondary" onClick={()=>void runSemrushKeyword()} disabled={seoBusy||!semrushPaidApproval||seoIntegrations.backlinks.status!=='CONFIGURED'||!semrushKeyword.trim()}>Metryki słowa · 20 jednostek</Button>
+                  <Button variant="secondary" onClick={()=>void runSemrushBacklinks()} disabled={seoBusy||!semrushPaidApproval||seoIntegrations.backlinks.status!=='CONFIGURED'||!seoUrl.trim()}>Backlinki · 45 jednostek</Button>
+                  <Button variant="secondary" onClick={()=>void runSemrushCompetitors()} disabled={seoBusy||!semrushPaidApproval||seoIntegrations.backlinks.status!=='CONFIGURED'||!seoUrl.trim()}>Podobne domeny · max 200 jednostek</Button>
+                </div>
+                {seoIntegrations.backlinks.status!=='CONFIGURED'&&<small>Dodaj SEMRUSH_API_KEY w środowisku serwera. Nexus nie pobiera ani nie rozlicza niczego, dopóki samodzielnie nie włączysz tej integracji i nie zatwierdzisz zapytania.</small>}
+              </div>
+              <div><b>Google Business Profile</b><span>{seoIntegrations.localSeo.status}</span><small>Odczyt nazwy, adresu, telefonu, strony i godzin otwarcia.</small><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileAudit()} disabled={seoBusy||seoIntegrations.localSeo.status!=='CONFIGURED'}>Audyt wizytówki</Button><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileReviews()} disabled={seoBusy||seoIntegrations.localSeo.status!=='CONFIGURED'||!seoIntegrations.localSeo.reviewsConfigured}>Analiza opinii</Button>{!seoIntegrations.localSeo.reviewsConfigured&&<small>Do opinii dodaj GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID oraz GOOGLE_BUSINESS_PROFILE_LOCATION_ID.</small>}</div>
+            </div>:<p className={styles.seoMeta}>Status integracji pojawi się po połączeniu z Agent Hub.</p>}
+            {seoDataReport&&<div className={styles.seoDataOutput}>
+              <div className={styles.seoReportHeader}><b>{seoDataReport.provider||'Raport integracji'}</b><Button variant="secondary" onClick={()=>window.print()}>Drukuj / PDF</Button></div>
+              {renderSeoDataTables()}
+              <p className={styles.seoMeta}>{seoDataReport.limitations?.join(' ')}</p>
+            </div>}
+            <p className={styles.seoMeta}>Tokeny OAuth i klucze API są odczytywane wyłącznie po stronie serwera. Nie wpisuj ich w rozmowie ani w przeglądarce.</p>
+          </section>
         </div>
       </details>
     </section>

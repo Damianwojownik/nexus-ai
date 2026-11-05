@@ -1,14 +1,15 @@
+import { hubEndpoint } from './mobileEndpoints.ts';
 import type { AgentRegistration } from './agentHub.ts';
 import type { AgentEvent, AgentPresence, AgentResult, AgentTask, AgentTaskStatus } from './agentProtocol.ts';
 
 export type AgentHubConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
-export type NewAgentHubTask = Pick<AgentTask, 'goal' | 'createdBy' | 'assignedTo' | 'scope'> & { contextRefs?: string[] };
+export type NewAgentHubTask = Pick<AgentTask, 'goal' | 'createdBy' | 'assignedTo' | 'scope'> & { contextRefs?: string[]; parentId?: string };
 
 type AgentHubResponse<T> = T;
 
 const viteEnv = import.meta.env;
 const processEnv = typeof process !== 'undefined' ? process.env : undefined;
-const defaultBaseUrl = viteEnv?.VITE_NEXUS_AGENT_HUB_URL || processEnv?.NEXUS_AGENT_HUB_URL || 'http://127.0.0.1:8788';
+const defaultBaseUrl = hubEndpoint();
 
 export class AgentHubClientError extends Error {
   readonly statusCode?: number;

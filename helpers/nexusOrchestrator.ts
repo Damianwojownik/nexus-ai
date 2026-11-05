@@ -5,6 +5,7 @@ import type { AgentTask } from './agentProtocol.ts';
 import { LocalCapabilitiesClient } from './localCapabilitiesClient.ts';
 import type { InstallableApp, InstallOperation, WeatherResult, WebSearchResult } from './localCapabilitiesClient.ts';
 import { buildFallbackImagePrompt, imageDimensionsForText, isImageGenerationIntent } from './nexusImageIntent.ts';
+import { NexusTeamOrchestrator, buildSeoTeamPlan } from './nexusTeam.ts';
 
 export type NexusWorkflowState = 'THINKING' | 'SEARCHING' | 'WORKING' | 'TESTING' | 'WAITING_FOR_APPROVAL' | 'DONE' | 'ERROR';
 export type NexusPlanStepState = 'PENDING' | 'ACTIVE' | 'DONE' | 'SKIPPED' | 'FAILED';
@@ -75,6 +76,16 @@ const installationPatterns: Array<{ pattern: RegExp; id: string }> = [
   { pattern: /\bgit\b/i, id: 'Git.Git' },
 ];
 
+/** Quick conversation uses the normal Nexus AI model and memory, without workflow bookkeeping. */
+export function isQuickLunaConversation(text: string, attachmentCount = 0): boolean {
+  if (attachmentCount || text.length > 240) return false;
+  const value = text.trim().toLowerCase();
+  if (!value) return false;
+  // Only explicit small talk; don't skip tools or specialist orchestration for work requests.
+  return /^(?:(?:cześć|czesc|hej|halo|witaj|dzień dobry|dzien dobry|dobry wieczór|siema|hello|hi|hey)[!,.? ]*)+$/.test(value)
+    || /^(?:(?:cześć|czesc|hej|witaj|halo)[,! ]*)?(?:(?:luna|nexus)[,! ]*)?(?:jak się masz|jak sie masz|co u ciebie|kim jesteś|kim jestes|przedstaw się|przedstaw sie|powiedz coś o sobie|powiedz cos o sobie|co potrafisz|jakie masz możliwości|jakie masz mozliwosci)[?.! ]*$/.test(value);
+}
+
 export function buildNexusPlan(text: string, attachments: NexusAttachmentContext[] = []): NexusPlanStep[] {
   const plan: NexusPlanStep[] = [
     { id: 'understand', label: 'Rozpoznaję cel', state: 'PENDING' },
@@ -87,6 +98,13 @@ export function buildNexusPlan(text: string, attachments: NexusAttachmentContext
   if (attachments.length) plan.push({ id: 'attachments', label: 'Analizuję załączniki', state: 'PENDING' });
   if (installationRequest(text)) plan.push({ id: 'approval', label: 'Sprawdzam instalację i wymagane zgody', state: 'PENDING' });
   if (isImageGenerationIntent(text)) plan.push({ id: 'image', label: 'Generuję obraz własnym silnikiem', state: 'PENDING' });
+  const specialistTasks = buildSeoTeamPlan(text);
+  if (specialistTasks.length) {
+    plan.push({ id: 'seo-team', label: 'Koordynuję niezależny zespół SEO/AEO', state: 'PENDING' });
+    for (const specialist of specialistTasks) {
+      plan.push({ id: 'specialist-' + specialist.id, label: specialist.title, state: 'PENDING' });
+    }
+  }
   plan.push(
     { id: 'execute', label: 'Wykonuję zadanie', state: 'PENDING' },
     { id: 'verify', label: 'Weryfikuję i zapisuję wynik', state: 'PENDING' },
@@ -177,6 +195,7 @@ export class NexusOrchestrator {
   private readonly hub: AgentHubClient;
   private readonly memory: MemoryStore;
   private readonly capabilities: LocalCapabilitiesClient;
+  private readonly team: NexusTeamOrchestrator;
 
   constructor(
     agent: NexusAgent,
@@ -188,6 +207,7 @@ export class NexusOrchestrator {
     this.hub = hub;
     this.memory = memory;
     this.capabilities = capabilities;
+    this.team = new NexusTeamOrchestrator(agent);
   }
 
   async start(input: NexusWorkflowInput, onProgress: (progress: NexusWorkflowProgress) => void = () => undefined): Promise<NexusWorkflowOutcome> {
@@ -200,11 +220,26 @@ export class NexusOrchestrator {
     let searchResults: WebSearchResult[] = [];
     const contextNotes: string[] = [];
     let hubAvailable = true;
+    let weatherCompleted = false;
+    let webSearchCompleted = false;
     const inspectedFiles = new Map<string, string>();
     let repairSummary: string | undefined;
     let repairedPath: string | undefined;
 
     try {
+      if (isQuickLunaConversation(input.text, input.attachments?.length ?? 0)) {
+        emit('WORKING', 'Luna odpowiada…');
+        const result = await this.agent.send({
+          text: input.text,
+          mode: 'AUTO',
+          history: input.history,
+          projectContext: input.projectContext,
+          disabledTools: this.agent.listToolNames(),
+        });
+        await this.saveTaskMemory(input.text, result.text, []);
+        emit('DONE', 'Gotowe');
+        return { status: 'DONE', taskId: localTaskId, text: result.text, plan: [...plan], searchResults: [] };
+      }
       emit('THINKING', 'Rozpoznaję cel i układam plan');
       try {
         task = await this.hub.submitTask({
@@ -308,6 +343,125 @@ export class NexusOrchestrator {
             seed: generated.seed,
             steps: generated.steps,
           },
+        };
+      }
+
+
+      const specialistPlan = buildSeoTeamPlan(input.text);
+      if (specialistPlan.length) {
+        const teamIndex = plan.findIndex((step) => step.id === 'seo-team');
+        if (teamIndex >= 0) plan[teamIndex].state = 'ACTIVE';
+        emit('WORKING', 'Uruchamiam zespół specjalistów SEO/AEO i tworzę zadania zależne');
+
+        const childTasks = new Map<string, AgentTask>();
+        const specialistHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
+        if (task && hubAvailable) {
+          for (const specialist of specialistPlan) {
+            try {
+              await this.hub.registerAgent({
+                agentId: specialist.agentId,
+                kind: specialist.id === 'reviewer' ? 'reviewer' : 'researcher',
+                capabilities: specialist.capabilities,
+              });
+              await this.hub.heartbeat(specialist.agentId);
+              const child = await this.hub.submitTask({
+                goal: specialist.goal + ' Cel użytkownika: ' + input.text,
+                createdBy: 'nexus-ui',
+                assignedTo: specialist.agentId,
+                scope: 'seo-specialist:' + specialist.id,
+                contextRefs: specialist.capabilities,
+                parentId: task.id,
+              });
+              childTasks.set(specialist.agentId, child);
+            } catch (error) {
+              contextNotes.push('Nie udało się zapisać zadania ' + specialist.agentId + ' w Agent Hub: ' + (error instanceof Error ? error.message : String(error)));
+            }
+          }
+        }
+
+        const teamResult = await this.team.run({
+          text: input.text,
+          history: input.history,
+          projectContext: [input.projectContext, ...contextNotes].filter(Boolean).join('\\n\\n'),
+        }, async (event) => {
+          const stepId = 'specialist-' + event.agentId.replace(/^nexus-/, '');
+          const stepIndex = plan.findIndex((step) => step.id === stepId);
+          if (stepIndex >= 0) {
+            plan[stepIndex].state = event.status === 'STARTED' ? 'ACTIVE' : event.status === 'DONE' ? 'DONE' : 'FAILED';
+          }
+          const child = childTasks.get(event.agentId);
+          if (child && event.status === 'STARTED') {
+            try {
+              const claimedChild = await this.hub.claimTask(child.id, event.agentId);
+              if (claimedChild) await this.hub.leaseTask(child.id, event.agentId, 30 * 60 * 1000);
+              if (!specialistHeartbeats.has(event.agentId)) {
+                specialistHeartbeats.set(event.agentId, setInterval(() => {
+                  void this.hub.heartbeat(event.agentId).catch(() => undefined);
+                }, 15000));
+              }
+            } catch (error) {
+              contextNotes.push('Nie udało się przejąć zadania ' + event.agentId + ': ' + (error instanceof Error ? error.message : String(error)));
+            }
+          }
+          if (child && (event.status === 'FAILED' || event.status === 'DONE')) {
+            const timer = specialistHeartbeats.get(event.agentId);
+            if (timer) clearInterval(timer);
+            specialistHeartbeats.delete(event.agentId);
+          }
+          if (child && event.status === 'FAILED') {
+            await this.hub.failTask(child.id, event.message).catch(() => undefined);
+          }
+          emit('WORKING', event.message);
+        });
+
+        for (const timer of specialistHeartbeats.values()) clearInterval(timer);
+        specialistHeartbeats.clear();
+
+        for (const report of [...teamResult.reports, teamResult.reviewer]) {
+          const child = childTasks.get(report.agentId);
+          if (!child) continue;
+          if (report.status === 'DONE') {
+            await this.hub.completeTask(child.id, {
+              status: 'SUCCESS',
+              summary: report.name + ' zakończył analizę',
+              payload: {
+                durationMs: report.durationMs,
+                text: report.text.slice(0, 5000),
+                reasoning: report.reasoning,
+              },
+            }).catch(() => undefined);
+          } else {
+            await this.hub.failTask(child.id, report.text).catch(() => undefined);
+          }
+        }
+
+        if (teamIndex >= 0) plan[teamIndex].state = 'DONE';
+        const executeIndex = plan.findIndex((step) => step.id === 'execute');
+        if (executeIndex >= 0) plan[executeIndex].state = 'DONE';
+        const verifyIndex = plan.findIndex((step) => step.id === 'verify');
+        if (verifyIndex >= 0) plan[verifyIndex].state = 'ACTIVE';
+        emit('TESTING', 'Recenzent sprawdził raporty specjalistów; zapisuję wynik audytu');
+        await this.saveTaskMemory(input.text, teamResult.summary, []);
+        if (task) {
+          const completed = teamResult.reports.filter((report) => report.status === 'DONE').length;
+          await this.hub.completeTask(task.id, {
+            status: completed === teamResult.reports.length && teamResult.reviewer.status === 'DONE' ? 'SUCCESS' : 'PARTIAL',
+            summary: 'Zespół SEO/AEO: ' + completed + '/' + teamResult.reports.length + ' specjalistów zakończyło pracę',
+            payload: {
+              specialists: teamResult.plan,
+              reports: teamResult.reports.map((report) => ({ agentId: report.agentId, status: report.status, durationMs: report.durationMs })),
+              reviewer: { status: teamResult.reviewer.status, durationMs: teamResult.reviewer.durationMs },
+            },
+          }).catch(() => undefined);
+        }
+        if (verifyIndex >= 0) plan[verifyIndex].state = 'DONE';
+        emit('DONE', 'Zespół SEO/AEO zakończył pracę i niezależną kontrolę jakości');
+        return {
+          status: 'DONE',
+          taskId: currentTaskId(),
+          text: teamResult.summary,
+          plan: [...plan],
+          searchResults: [],
         };
       }
 
@@ -428,6 +582,7 @@ export class NexusOrchestrator {
         try {
           const weather = await this.capabilities.getWeather(input.text);
           contextNotes.push(`Rzeczywiste dane pogodowe pobrane online. Użyj ich jako źródła prawdy i nie zgaduj:\n${formatWeather(weather)}`);
+          weatherCompleted = true;
           plan[weatherStep].state = 'DONE';
         } catch (error) {
           contextNotes.push(`Pogoda online jest niedostępna: ${error instanceof Error ? error.message : String(error)}. Nie zgaduj bieżącej pogody; wyjaśnij, że połączenie nie zadziałało.`);
@@ -442,6 +597,7 @@ export class NexusOrchestrator {
           const result = await this.capabilities.searchWeb(input.text);
           searchResults = result.results;
           contextNotes.push(`Rzeczywiste wyniki wyszukiwania (${result.provider}):\n${formatSearchResults(searchResults)}`);
+          webSearchCompleted = true;
           plan[plan.findIndex((step) => step.id === 'search')].state = 'DONE';
         } catch (error) {
           contextNotes.push(`Wyszukiwanie WWW jest niedostępne: ${error instanceof Error ? error.message : String(error)}. Kontynuuj na podstawie lokalnej wiedzy i zaznacz, że odpowiedź nie została zweryfikowana w sieci.`);
@@ -458,6 +614,10 @@ export class NexusOrchestrator {
           mode: 'AUTO',
           projectContext: [input.projectContext, ...contextNotes].filter(Boolean).join('\n\n'),
           history: input.history,
+          disabledTools: [
+            ...(weatherCompleted ? ['get_weather'] : []),
+            ...(webSearchCompleted ? ['web_search'] : []),
+          ],
         })).text;
       if (!responseText.trim()) throw new Error('Nexus nie otrzymał odpowiedzi od dostępnego modelu');
 

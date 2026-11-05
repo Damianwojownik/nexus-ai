@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#080b12">
+  <title>Luna Nexus — połącz telefon</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100dvh;background:radial-gradient(circle at 60% 8%,#203256,#080b12 65%);color:#ecf5ff;font:16px system-ui;display:grid;place-items:center;padding:20px}
+    main{max-width:400px;width:100%;padding:30px;border:1px solid #415577;border-radius:24px;background:#101829}
+    h1{margin:0 0 8px}p{color:#bbcee5;line-height:1.5}
+    label{display:block;font-weight:600;margin:24px 0 8px}
+    input{width:100%;height:52px;border-radius:12px;background:#091221;color:#fff;border:1px solid #5b7295;padding:12px;font:20px system-ui;letter-spacing:1px}
+    button{margin-top:18px;width:100%;height:52px;border:0;border-radius:12px;background:#7ce7ff;color:#03101a;font-weight:750;font-size:16px}
+    small{color:#b9cbe0}
+  </style>
+</head>
+<body><main>
+  <h1>☾ Luna Nexus</h1>
+  <p>Połącz telefon z Luną działającą na komputerze. Kod parowania zobaczysz w terminalu VS Code przy uruchomieniu mobilnej wersji.</p>
+  <form method="POST" action="/_pair">
+    <label for="code">Kod parowania</label>
+    <input id="code" name="code" type="password" required maxlength="40" autocomplete="off" autofocus>
+    <button type="submit">Otwórz Lunę</button>
+  </form>
+  <p><small>Jeśli kod nie działa, sprawdź bieżący kod w terminalu. Po 10 nieudanych próbach blokada trwa do 10 minut.</small></p>
+</main></body></html>

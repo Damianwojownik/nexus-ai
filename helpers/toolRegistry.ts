@@ -10,6 +10,7 @@ export interface ToolExecutionContext {
   signal?: AbortSignal;
   allowDestructive?: boolean;
   permissions?: string[];
+  invokedByModel?: boolean;
 }
 
 export interface ToolDefinition {
@@ -22,6 +23,8 @@ export interface ToolDefinition {
   requiredPermissions?: string[];
   timeoutMs?: number;
   validate?: (args: Record<string, any>) => ToolValidationResult;
+  /** Explicit opt-in. Tools are unavailable to model-driven calls by default. */
+  modelCallable?: boolean;
 }
 
 export class ToolRegistry {
@@ -31,9 +34,30 @@ export class ToolRegistry {
   get(name: string) { return this.tools.get(name); }
   list() { return [...this.tools.values()]; }
 
+  /**
+   * Only safe, read-only tools explicitly approved for model use are exposed.
+   * Filesystem writes, shell commands and git mutations stay hidden from the model.
+   */
+  listModelCallable() {
+    return this.list().filter((tool) =>
+      tool.modelCallable === true
+      && tool.permissionLevel === 'read'
+      && tool.destructive !== true
+      && !(tool.requiredPermissions?.length),
+    );
+  }
+
   async execute(name: string, args: Record<string, any> = {}, context: ToolExecutionContext = {}) {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`Tool not found: ${name}`);
+    if (context.invokedByModel && (
+      tool.modelCallable !== true
+      || tool.permissionLevel !== 'read'
+      || tool.destructive === true
+      || Boolean(tool.requiredPermissions?.length)
+    )) {
+      throw new Error(`Tool ${name} is not permitted for model-driven execution.`);
+    }
     if (tool.destructive && !context.allowDestructive) {
       throw new Error(`Tool ${name} requires explicit approval before destructive action.`);
     }

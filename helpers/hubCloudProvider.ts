@@ -1,3 +1,4 @@
+import { hubEndpoint } from './mobileEndpoints.ts';
 import type { ModelProvider } from './modelRouter.ts';
 
 export class HubCloudProvider implements ModelProvider {
@@ -5,12 +6,14 @@ export class HubCloudProvider implements ModelProvider {
   readonly mode='CLOUD' as const;
   readonly role='PRIMARY_ORCHESTRATOR' as const;
   private readonly baseUrl:string;
+  private healthCache?: { until: number; value: Awaited<ReturnType<HubCloudProvider['fetchHealth']>> };
+  private healthInflight?: Promise<Awaited<ReturnType<HubCloudProvider['fetchHealth']>>>;
 
-  constructor(baseUrl = import.meta.env?.VITE_NEXUS_AGENT_HUB_URL || 'http://127.0.0.1:8788'){
+  constructor(baseUrl = hubEndpoint()){
     this.baseUrl=baseUrl.replace(/\/$/,'');
   }
 
-  async checkHealth(){
+  private async fetchHealth(){
     try{
       const r=await fetch(`${this.baseUrl}/api/ai/health`,{signal:AbortSignal.timeout(12000)});
       const body=await r.json().catch(()=>({})) as any;
@@ -23,6 +26,17 @@ export class HubCloudProvider implements ModelProvider {
     }catch(e){
       return {status:'OFFLINE' as const,error:e instanceof Error?e.message:'Nexus Cloud Hub unavailable'};
     }
+  }
+
+  async checkHealth(){
+    if (this.healthCache && Date.now() < this.healthCache.until) return this.healthCache.value;
+    if (!this.healthInflight) {
+      this.healthInflight = this.fetchHealth().then((value) => {
+        this.healthCache = { until: Date.now() + (value.status === 'CONNECTED' ? 20000 : 5000), value };
+        return value;
+      }).finally(() => { this.healthInflight = undefined; });
+    }
+    return this.healthInflight;
   }
 
   async listModels(){
