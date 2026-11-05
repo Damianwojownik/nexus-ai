@@ -38,7 +38,10 @@ The source of truth is `Damianwojownik/nexus-ai`. The separate `my-friend-ai` Ra
 - Search Console read-only report support, with OAuth scope `webmasters.readonly`.
 - GA4 read-only report support, with OAuth scope `analytics.readonly`.
 - Google Business Profile read-only location audit with `business.manage`; reads business name, website, phone, address and hours. Does not edit listings, read reviews or measure Maps rankings.
-- Semrush API is reported as a paid integration; no paid requests are run without a separate explicit approval.
+- Semrush v4 manual integration is implemented for keyword metrics, backlink overview and similar backlink-profile competitors. Each endpoint requires `paidQueryApproved: true`; this approval is surfaced as a checkbox that resets after every request. The AI model cannot invoke these paid tools.
+- Documented request prices: keyword metrics 20 API units per keyword request, backlink overview 45 units per request, backlink competitors 40 units per returned row (UI bounds the response to 5 rows, maximum 200 units). Prices depend on the provider plan and may change.
+- Semrush API access requires a qualifying paid plan/API add-on and available API units. Do not add a key or run queries without the user's separate approval. The backlink competitor endpoint finds backlink-profile competitors; it is not an organic SERP competitor report.
+- Organic competitor research remains available as qualitative public-web/SERP research; do not invent keyword volume, CPC, difficulty or ranking metrics when the required provider endpoint is unavailable.
 
 ### SEO specialist hierarchy
 - Phase 1 parallel: Technical SEO, Keyword/Competitor Research, Search Console/GA4 Analytics, Backlink Intelligence, Local SEO.
