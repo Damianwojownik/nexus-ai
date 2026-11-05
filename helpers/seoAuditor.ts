@@ -194,6 +194,10 @@ async function requestPublic(
   allowedHost: string,
   redirectCount = 0,
 ): Promise<HttpPayload> {
+  // Revalidate every destination, including sitemap links and redirect targets.
+  // Otherwise an allowed hostname could silently switch to an unsafe port
+  // or carry URL credentials after the initial target validation.
+  normalizeTarget(input.toString());
   if (input.hostname.toLowerCase() !== allowedHost.toLowerCase()) {
     throw new Error('Przekierowanie poza pierwotną domenę zostało zablokowane.');
   }
@@ -247,7 +251,7 @@ async function requestPublic(
   if ([301, 302, 303, 307, 308].includes(result.status) && typeof location === 'string') {
     if (redirectCount >= MAX_REDIRECTS) throw new Error('Przekroczono limit przekierowań.');
     const next = new URL(location, input);
-    if (next.protocol !== 'http:' && next.protocol !== 'https:') throw new Error('Nieobsługiwany protokół przekierowania.');
+    normalizeTarget(next.toString());
     if (next.hostname.toLowerCase() !== allowedHost.toLowerCase()) throw new Error('Przekierowanie poza pierwotną domenę zostało zablokowane.');
     return requestPublic(next, allowedHost, redirectCount + 1);
   }
