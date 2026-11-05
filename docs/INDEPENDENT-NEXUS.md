@@ -29,6 +29,7 @@ The source of truth is `Damianwojownik/nexus-ai`. The separate `my-friend-ai` Ra
 - The chat transcript is visible and persisted in the current browser's localStorage (last 100 messages); it is not synced across devices or users.
 
 ### SEO / AEO
+- Generic, domain-independent target selection: the audit takes the exact public URL supplied by the user (any company/site/competitor domain), with no Ezostylia hostname, brand allowlist or required integration. Supported crawl scope is one HTTP/S origin per run.
 - Bounded public-site crawler (maximum 30 pages per run): robots.txt, sitemap, HTTP status, title/description, canonicals, meta robots/noindex, H1/headings, image alt, same-origin links, duplicate titles and JSON-LD.
 - SSRF defenses: rejects private/loopback/reserved IP addresses, permits standard HTTP/S ports, pins DNS resolution for outbound requests, limits response size/time/redirects and blocks redirects to other hosts.
 - Main-content excerpts and heading outlines are passed to the Content/AEO specialist for actual content review.
