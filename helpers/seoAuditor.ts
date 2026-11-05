@@ -144,6 +144,15 @@ function isPublicIp(ip: string): boolean {
   return false;
 }
 
+/**
+ * Normalizes any user-supplied public website URL. No single brand or domain
+ * is privileged: the crawl target always comes from the caller's URL.
+ * DNS/public-IP validation is performed by auditPublicSite before requests.
+ */
+export function normalizePublicWebsiteUrl(value: unknown): string {
+  return normalizeTarget(value).toString();
+}
+
 function normalizeTarget(value: unknown): URL {
   if (typeof value !== 'string' || value.trim().length < 4 || value.length > 2048) {
     throw new Error('Podaj poprawny publiczny adres strony (http:// lub https://).');
