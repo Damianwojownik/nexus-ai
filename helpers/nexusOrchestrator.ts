@@ -119,7 +119,7 @@ function isWebSearchIntent(text: string): boolean {
 }
 
 function isConnectorIntent(text: string): boolean {
-  return /\b(connector|mcp|github|canva|figma|notion|slack|gmail|google\s*drive|dysk\s*google|calendar|kalendarz|repozytor|repo|podłączone narzędzia|zewnętrzne narzędzia)\b/i.test(text);
+  return /\b(connector|mcp|github|canva|figma|notion|slack|gmail|e-?mail|mail|inbox|poczt[ayę]|skrzynk[ayę]|wiadomości|google\s*drive|dysk(?:\s*google)?|google\s*docs|dokumenty\s*google|calendar|kalendarz|meeting|spotkani[aeu]|wydarzeni[ae]?|termin(?:y|ów)?|repozytor|repo|pull\s*request|issue|notatki|notes|podłączone narzędzia|zewnętrzne narzędzia)\b/i.test(text);
 }
 
 function formatWeather(result: WeatherResult): string {
