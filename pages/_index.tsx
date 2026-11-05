@@ -504,6 +504,22 @@ export default function Home() {
     }
   };
 
+  const runSemrushCompetitors = async () => {
+    if (!semrushPaidApproval) { setSeoError('Zaznacz jawną zgodę na maksymalnie 200 jednostek API.'); return; }
+    if (!seoUrl.trim()) { setSeoError('Wpisz adres domeny do porównania.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.semrushBacklinkCompetitors(seoUrl.trim(), true));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się pobrać podobnych domen z Semrush.');
+    } finally {
+      setSeoBusy(false);
+      setSemrushPaidApproval(false);
+    }
+  };
+
   const runSemrushBacklinks = async () => {
     if (!semrushPaidApproval) { setSeoError('Zaznacz jawną zgodę na koszt 45 jednostek API.'); return; }
     setSeoBusy(true);
@@ -675,7 +691,7 @@ export default function Home() {
               <div className={styles.seoSemrush}>
                 <b>Semrush API v4</b>
                 <span>{seoIntegrations.backlinks.status}</span>
-                <small>Backlink Overview: 45 jednostek API. Metryki 1 słowa kluczowego: 20 jednostek API. Każde zapytanie płatne wymaga osobnej zgody.</small>
+                <small>Backlink Overview: 45 jednostek. Metryki 1 słowa: 20 jednostek. Podobne domeny: 40 jednostek za wiersz, maksymalnie 5 wierszy (do 200). Każde zapytanie płatne wymaga osobnej zgody.</small>
                 <Input value={semrushKeyword} onChange={event=>setSemrushKeyword(event.target.value)} placeholder="Słowo kluczowe do sprawdzenia"/>
                 <Input value={semrushCountry} onChange={event=>setSemrushCountry(event.target.value.toUpperCase())} placeholder="Kod kraju, np. DE"/>
                 <label className={styles.seoPaidConsent}>
@@ -685,6 +701,7 @@ export default function Home() {
                 <div className={styles.seoActions}>
                   <Button variant="secondary" onClick={()=>void runSemrushKeyword()} disabled={seoBusy||!semrushPaidApproval||seoIntegrations.backlinks.status!=='CONFIGURED'||!semrushKeyword.trim()}>Metryki słowa · 20 jednostek</Button>
                   <Button variant="secondary" onClick={()=>void runSemrushBacklinks()} disabled={seoBusy||!semrushPaidApproval||seoIntegrations.backlinks.status!=='CONFIGURED'||!seoUrl.trim()}>Backlinki · 45 jednostek</Button>
+                  <Button variant="secondary" onClick={()=>void runSemrushCompetitors()} disabled={seoBusy||!semrushPaidApproval||seoIntegrations.backlinks.status!=='CONFIGURED'||!seoUrl.trim()}>Podobne domeny · max 200 jednostek</Button>
                 </div>
                 {seoIntegrations.backlinks.status!=='CONFIGURED'&&<small>Dodaj SEMRUSH_API_KEY w środowisku serwera. Nexus nie pobiera ani nie rozlicza niczego, dopóki samodzielnie nie włączysz tej integracji i nie zatwierdzisz zapytania.</small>}
               </div>
