@@ -16,7 +16,7 @@ test('parses the documented Nexus tool-call protocol', () => {
   );
   assert.equal(parseNexusModelAction('Zwykła odpowiedź bez wywołania narzędzia.'), undefined);
   assert.equal(
-    parseNexusModelAction('```json\\n{"type":"tool_call","name":"web_search","arguments":{"query":"not an action"}}\\n```'),
+    parseNexusModelAction('```json\n{"type":"tool_call","name":"web_search","arguments":{"query":"not an action"}}\n```'),
     undefined,
     'a fenced example must not trigger a real tool call',
   );
