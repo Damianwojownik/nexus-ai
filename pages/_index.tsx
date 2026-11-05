@@ -76,6 +76,7 @@ export default function Home() {
     }
   });
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
+  const [activeWorkspace,setActiveWorkspace]=useState<'chat'|'seo'|'team'|'integrations'|'settings'>('chat');
   const [seoUrl,setSeoUrl]=useState('');
   const [seoBusy,setSeoBusy]=useState(false);
   const [seoError,setSeoError]=useState('');
@@ -115,6 +116,11 @@ export default function Home() {
       .then(setSeoIntegrations)
       .catch(() => setSeoIntegrations(null));
   }, []);
+
+  useEffect(() => {
+    if (activeWorkspace === 'seo') document.getElementById('nexus-seo-audit')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (activeWorkspace === 'integrations') document.getElementById('nexus-integrations')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [activeWorkspace]);
 
   useEffect(() => {
     const onGoogleOAuthMessage = (event: MessageEvent) => {
@@ -579,7 +585,14 @@ export default function Home() {
   const run = runNexusConversation;
   return <main className={styles.shell}>
     <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
-      <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
+      <nav className={styles.workspaceNav} aria-label="Główna nawigacja Nexusa">
+        <button type="button" aria-pressed={activeWorkspace==='chat'} className={activeWorkspace==='chat'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('chat')}>Rozmowa</button>
+        <button type="button" aria-pressed={activeWorkspace==='seo'} className={activeWorkspace==='seo'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('seo')}>SEO i AEO</button>
+        <button type="button" aria-pressed={activeWorkspace==='team'} className={activeWorkspace==='team'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('team')}>Zespół AI</button>
+        <button type="button" aria-pressed={activeWorkspace==='integrations'} className={activeWorkspace==='integrations'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('integrations')}>Integracje</button>
+        <button type="button" aria-pressed={activeWorkspace==='settings'} className={activeWorkspace==='settings'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('settings')}>Ustawienia</button>
+      </nav>
+      <div className={styles.stage} style={{display:activeWorkspace==='chat'?'flex':'none'}}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
         <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
         {(conversationHistory.length>0||response||isThinking)&&<section className={styles.chatTranscript} role="log" aria-live="polite" aria-relevant="additions text">
@@ -602,14 +615,15 @@ export default function Home() {
         {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button></div>
       </div>
-      <details className={styles.nexusDetails}>
+      <details className={styles.nexusDetails} open={activeWorkspace==='team'||activeWorkspace==='settings'} style={{display:activeWorkspace==='team'||activeWorkspace==='settings'?'block':'none'}}>
+        <summary>{activeWorkspace==='settings'?'Ustawienia i diagnostyka':'Zespół AI · agenci, zadania i postęp'}</summary>
         <summary>Co robi Nexus</summary>
         <div className={styles.workflowSummary}>
           <p>{workflowProgress?.message??'Brak aktywnego zadania.'}</p>
           {workflowProgress&&<ol>{workflowProgress.plan.map(step=><li key={step.id} data-step-state={step.state}>{step.label} · {step.state}</li>)}</ol>}
           {lastSources.length>0&&<div className={styles.workflowSources}><b>Źródła sprawdzone przez Nexusa</b>{lastSources.map(source=><a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title} · {new URL(source.url).hostname}</a>)}</div>}
         </div>
-        <div className={styles.diagnosticsContent} inert={true}>
+        <div className={styles.diagnosticsContent}>
           <section className={styles.settingsPanel}>
             <h3>NEXUS</h3>
             <div className={styles.settingsRow}><span>Primary Agent</span><strong>{primaryStatus}</strong></div>
@@ -626,10 +640,11 @@ export default function Home() {
         </div>
 
       </details>
-      <details className={styles.seoPanel}>
+      <details className={styles.seoPanel} open={activeWorkspace==='seo'||activeWorkspace==='integrations'} style={{display:activeWorkspace==='seo'||activeWorkspace==='integrations'?'block':'none'}}>
+        <summary>{activeWorkspace==='integrations'?'Integracje Google i Semrush':'SEO i AEO · audyt strony, PageSpeed i integracje'}</summary>
         <summary>SEO i AEO · audyt strony, PageSpeed i integracje</summary>
         <div className={styles.seoPanelBody}>
-          <div className={styles.seoControls}>
+          <div id="nexus-seo-audit" className={styles.seoControls}>
             <Input value={seoUrl} onChange={event=>setSeoUrl(event.target.value)} placeholder="https://twoja-domena.pl"/>
             <div className={styles.seoActions}>
               <Button onClick={()=>void runSeoAudit()} disabled={seoBusy||!seoUrl.trim()}>{seoBusy?'Pracuję…':'Audyt SEO/AEO · do 30 stron'}</Button>
@@ -675,7 +690,7 @@ export default function Home() {
             <div className={styles.seoIssues}><b>Najważniejsze możliwości poprawy</b>{seoPageSpeed.opportunities?.map((item:any)=><article key={item.id}><div><b>{item.title}</b><span>{item.savingsMs===undefined?'':item.savingsMs+' ms potencjalnej oszczędności'}</span></div><p>{item.description}</p></article>)}</div>
             <p className={styles.seoMeta}>{seoPageSpeed.limitations?.join(' ')}</p>
           </section>}
-          <section className={styles.seoIntegrations}>
+          <section id="nexus-integrations" className={styles.seoIntegrations}>
             <div className={styles.seoReportHeader}><b>Integracje danych</b><Button variant="secondary" onClick={()=>void refreshSeoIntegrations()} disabled={seoBusy}>Odśwież statusy</Button></div>
             {seoIntegrations?.googleOAuth&&<div className={styles.seoGoogleOAuth}>
               <div><b>Konto Google · OAuth 2.0</b><small>{seoIntegrations.googleOAuth.connected?'Połączone':seoIntegrations.googleOAuth.clientConfigured&&seoIntegrations.googleOAuth.redirectUriConfigured?'Gotowe do autoryzacji':'Wymaga konfiguracji po stronie serwera'}</small></div>
