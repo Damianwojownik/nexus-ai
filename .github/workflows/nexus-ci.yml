@@ -1,0 +1,36 @@
+name: Nexus CI
+
+on:
+  push:
+    branches:
+      - feat/independent-nexus-core
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Type-check and build
+        run: npm run build
+      - name: Test model tool calling
+        run: npm run test:agent
+      - name: Test Agent Hub
+        run: npm run test:hub
+      - name: Test image intent
+        run: npm run test:image
+      - name: Test image Hub proxy
+        run: npm run test:image-hub
