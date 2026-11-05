@@ -101,6 +101,8 @@ export default function Home() {
   const speechStartedAtRef=useRef(0);
   const speechBoundaryRef=useRef({at:0,intensity:0});
   const speechVisemePlanRef=useRef<VisemeCue[]>([]);
+  const lunaAudioRef=useRef<HTMLAudioElement|null>(null);
+  const lunaSpeechGenerationRef=useRef(0);
   const pointerRef=useRef({x:0,y:0});
   const generatedImageUrlRef=useRef('');
   const googleOAuthPopupRef=useRef<Window|null>(null);
@@ -404,25 +406,63 @@ export default function Home() {
   const trackPointer=(e:React.PointerEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();pointerRef.current={x:Math.max(-1,Math.min(1,(e.clientX-(r.left+r.width/2))/(r.width/2))),y:Math.max(-1,Math.min(1,(e.clientY-(r.top+r.height/2))/(r.height/2)))};};
   const resetPointer=()=>{pointerRef.current={x:0,y:0};};
   const speak=(text:string)=>{
-    if(!('speechSynthesis' in window)) return;
-    emitVoiceEvent('SPEAKING', 'Nexus mówi…');
-    window.speechSynthesis.cancel();
-    const u=new SpeechSynthesisUtterance(text);
-    u.lang='pl-PL'; u.rate=1; u.pitch=1.05;
-    const polishVoices=window.speechSynthesis.getVoices().filter(voice=>voice.lang.toLowerCase().startsWith('pl'));
-    const preferred=polishVoices.find(voice=>/zofia|agnieszka|paulina|maja|kasia/i.test(voice.name)) ?? polishVoices.find(voice=>/natural|neural/i.test(voice.name)) ?? polishVoices[0];
-    if(preferred) u.voice=preferred;
-    speechVisemePlanRef.current=estimateVisemePlan(text,{charactersPerSecond:14/u.rate});
-    u.onstart=()=>{speechStartedAtRef.current=performance.now();setSpeaking(true);setStatus('Nexus mówi…')};
-    u.onboundary=(event:any)=>{const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
-    u.onend=()=>{setSpeaking(false); emitVoiceEvent('IDLE', 'Nexus ready'); setStatus('Gotowy do rozmowy')};
-    window.speechSynthesis.speak(u);
+    const generation=++lunaSpeechGenerationRef.current;
+    lunaAudioRef.current?.pause();
+    lunaAudioRef.current=null;
+    window.speechSynthesis?.cancel();
+    const normalized=text.replace(/https?:\/\/\S+/g,'').replace(/[✦*_#>`~|]/g,'').replace(/\s+/g,' ').trim();
+    if(!normalized) return;
+    const setSpeechStarted=()=>{
+      speechStartedAtRef.current=performance.now();
+      speechBoundaryRef.current={at:0,intensity:0};
+      speechVisemePlanRef.current=estimateVisemePlan(normalized,{charactersPerSecond:14});
+      setSpeaking(true);
+      setStatus('Luna mówi…');
+      emitVoiceEvent('SPEAKING','Luna mówi…');
+    };
+    const setSpeechEnded=()=>{
+      if(generation!==lunaSpeechGenerationRef.current)return;
+      setSpeaking(false);
+      emitVoiceEvent('IDLE','Luna gotowa');
+      setStatus('Gotowa do rozmowy');
+    };
+    const browserFallback=()=>{
+      if(generation!==lunaSpeechGenerationRef.current||!('speechSynthesis' in window))return;
+      const u=new SpeechSynthesisUtterance(normalized);
+      u.lang='pl-PL';u.rate=1;u.pitch=1.05;
+      const voices=window.speechSynthesis.getVoices().filter(voice=>voice.lang.toLowerCase().startsWith('pl'));
+      const preferred=voices.find(voice=>/zofia|agnieszka|paulina|maja|kasia/i.test(voice.name))??voices[0];
+      if(preferred)u.voice=preferred;
+      u.onstart=setSpeechStarted;
+      u.onboundary=(event:any)=>{const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
+      u.onend=setSpeechEnded;
+      u.onerror=setSpeechEnded;
+      window.speechSynthesis.speak(u);
+    };
+    if(avatar!==1){browserFallback();return;}
+    void (async()=>{
+      try{
+        // Local neural TTS is optional; the browser remains usable if Python is missing.
+        const audioBlob=await localCapabilitiesClient.lunaSpeech(normalized.slice(0,600));
+        if(generation!==lunaSpeechGenerationRef.current)return;
+        const url=URL.createObjectURL(audioBlob);
+        const audio=new Audio(url);
+        lunaAudioRef.current=audio;
+        audio.onended=()=>{URL.revokeObjectURL(url);if(lunaAudioRef.current===audio)lunaAudioRef.current=null;setSpeechEnded();};
+        audio.onerror=()=>{URL.revokeObjectURL(url);if(lunaAudioRef.current===audio)lunaAudioRef.current=null;setSpeechEnded();};
+        try{await audio.play();if(generation===lunaSpeechGenerationRef.current)setSpeechStarted();}
+        catch{URL.revokeObjectURL(url);if(lunaAudioRef.current===audio)lunaAudioRef.current=null;browserFallback();}
+      }catch{browserFallback();}
+    })();
   };
   const startVoice=()=>{
     const w:any=window, SR=w.SpeechRecognition||w.webkitSpeechRecognition;
     if(!SR){emitVoiceEvent('ERROR','Rozpoznawanie mowy nie jest dostępne w tej przeglądarce');setStatus('Rozpoznawanie mowy nie jest dostępne w tej przeglądarce');return;}
     if(listening){recognitionRef.current?.stop(); emitVoiceEvent('INTERRUPTED','Voice input stopped');return;}
     emitVoiceEvent('LISTENING','Nexus słucha…');
+    ++lunaSpeechGenerationRef.current;
+    lunaAudioRef.current?.pause();
+    lunaAudioRef.current=null;
     window.speechSynthesis?.cancel();
     const r=new SR(); recognitionRef.current=r;
     r.lang='pl-PL'; r.continuous=false; r.interimResults=true;
