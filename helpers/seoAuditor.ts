@@ -649,6 +649,7 @@ export async function getSeoIntegrationStatus(env: NodeJS.ProcessEnv = process.e
   const siteUrl = (env.GOOGLE_SEARCH_CONSOLE_SITE_URL ?? '').trim();
   const propertyId = (env.GOOGLE_GA4_PROPERTY_ID ?? '').trim();
   const locationId = (env.GOOGLE_BUSINESS_PROFILE_LOCATION_ID ?? '').trim();
+  const accountId = (env.GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID ?? '').trim();
   const hasGsc = (Boolean((env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN ?? '').trim())
     || (oauth.connected && oauth.scopes.includes('https://www.googleapis.com/auth/webmasters.readonly')))
     && Boolean(siteUrl);
@@ -664,7 +665,7 @@ export async function getSeoIntegrationStatus(env: NodeJS.ProcessEnv = process.e
     searchConsole: { status: hasGsc ? 'CONFIGURED' : 'NOT_CONFIGURED', requiresOAuth: true, siteConfigured: Boolean(siteUrl), configKeys: ['GOOGLE_SEARCH_CONSOLE_SITE_URL'] },
     ga4: { status: hasGa4 ? 'CONFIGURED' : 'NOT_CONFIGURED', requiresOAuth: true, propertyConfigured: /^\d+$/.test(propertyId), configKeys: ['GOOGLE_GA4_PROPERTY_ID'] },
     backlinks: { status: hasSemrush ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Semrush', paidProvider: true, approvalRequiredBeforeQueries: true, configKeys: ['SEMRUSH_API_KEY'] },
-    localSeo: { status: hasGbp ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Google Business Profile', requiresOAuth: true, locationConfigured: Boolean(locationId), configKeys: ['GOOGLE_BUSINESS_PROFILE_LOCATION_ID'] },
+    localSeo: { status: hasGbp ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Google Business Profile', requiresOAuth: true, locationConfigured: Boolean(locationId), reviewsConfigured: Boolean(locationId && accountId), accountConfigured: Boolean(accountId), configKeys: ['GOOGLE_BUSINESS_PROFILE_LOCATION_ID', 'GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID'] },
   };
 }
 
@@ -806,6 +807,65 @@ export async function runSemrushKeywordMetrics(input: { keyword?: unknown; count
     data: data?.data ?? data,
     metadata: data?.meta,
     limitations: ['Koszt wynosi 20 jednostek API za jedno zapytanie o słowo kluczowe.', 'Wolumen jest średnią miesięczną według bazy/kraju dostawcy; nie jest gwarancją ruchu ani pozycji.'],
+  };
+}
+
+
+export async function runGoogleBusinessProfileReviews() {
+  const locationResource = (process.env.GOOGLE_BUSINESS_PROFILE_LOCATION_ID ?? '').trim();
+  const accountResource = (process.env.GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID ?? '').trim();
+  if (!locationResource || !accountResource) {
+    throw new Error('Opinie Google wymagają GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID i GOOGLE_BUSINESS_PROFILE_LOCATION_ID. Konto musi mieć dostęp do zweryfikowanej lokalizacji.');
+  }
+  const normalizedAccount = accountResource.startsWith('accounts/') ? accountResource : 'accounts/' + accountResource;
+  const normalizedLocation = locationResource.startsWith('locations/') ? locationResource : 'locations/' + locationResource;
+  if (!/^accounts\/[A-Za-z0-9_-]+$/.test(normalizedAccount) || !/^locations\/[A-Za-z0-9_-]+$/.test(normalizedLocation)) {
+    throw new Error('Niepoprawny identyfikator konta lub lokalizacji Google Business Profile.');
+  }
+  const token = (process.env.GOOGLE_BUSINESS_PROFILE_ACCESS_TOKEN ?? '').trim()
+    || await googleOAuthManager.accessToken('https://www.googleapis.com/auth/business.manage');
+  const endpoint = new URL('https://mybusiness.googleapis.com/v4/' + normalizedAccount + '/' + normalizedLocation + '/reviews');
+  endpoint.searchParams.set('pageSize', '50');
+  endpoint.searchParams.set('orderBy', 'updateTime desc');
+  const response = await fetch(endpoint, {
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+    signal: AbortSignal.timeout(30_000),
+  });
+  const data = await response.json().catch(() => ({})) as any;
+  if (!response.ok) throw new Error(data?.error?.message || 'Google Business Profile Reviews API HTTP ' + response.status);
+  const reviews = Array.isArray(data.reviews) ? data.reviews : [];
+  const ratingCounts: Record<string, number> = {};
+  let unanswered = 0;
+  for (const review of reviews) {
+    const rating = typeof review.starRating === 'string' ? review.starRating : 'UNKNOWN';
+    ratingCounts[rating] = (ratingCounts[rating] ?? 0) + 1;
+    if (!review.reviewReply?.comment) unanswered += 1;
+  }
+  return {
+    provider: 'Google Business Profile Reviews API',
+    account: normalizedAccount,
+    location: normalizedLocation,
+    averageRating: data.averageRating,
+    totalReviewCount: data.totalReviewCount,
+    returnedReviewCount: reviews.length,
+    unansweredInReturnedPage: unanswered,
+    ratingCounts,
+    reviews: reviews.map((review: any) => ({
+      reviewId: review.reviewId,
+      reviewer: review.reviewer?.displayName ?? 'Anonimowy użytkownik',
+      starRating: review.starRating,
+      comment: typeof review.comment === 'string' ? review.comment : '',
+      createTime: review.createTime,
+      updateTime: review.updateTime,
+      hasReply: Boolean(review.reviewReply?.comment),
+      replyUpdateTime: review.reviewReply?.updateTime,
+    })),
+    nextPageAvailable: Boolean(data.nextPageToken),
+    limitations: [
+      'Odczyt obejmuje maksymalnie 50 najnowszych opinii w tej sesji. Pełna historia może wymagać kolejnych stron.',
+      'Google Business Profile zwraca recenzje lokalizacji, jeśli jest ona zweryfikowana i dostępna dla konta OAuth.',
+      'Nexus nie publikuje odpowiedzi, nie usuwa i nie edytuje opinii.',
+    ],
   };
 }
 
