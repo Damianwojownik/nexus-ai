@@ -11,7 +11,9 @@
     "test:hub": "node --experimental-strip-types --test helpers/agentHub.test.ts",
     "test:image": "node --experimental-strip-types --test helpers/nexusImageIntent.test.ts",
     "test:image-hub": "node --experimental-strip-types --test helpers/nexusImageHub.test.ts",
-    "test:agent": "node --experimental-strip-types --test helpers/nexusAgent.test.ts"
+    "test:agent": "node --experimental-strip-types --test helpers/nexusAgent.test.ts",
+    "test:team": "node --experimental-strip-types --test helpers/nexusTeam.test.ts",
+    "test:seo": "node --experimental-strip-types --test helpers/seoAuditor.test.ts"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
