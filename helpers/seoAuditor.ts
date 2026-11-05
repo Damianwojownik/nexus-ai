@@ -665,7 +665,7 @@ export async function getSeoIntegrationStatus(env: NodeJS.ProcessEnv = process.e
     searchConsole: { status: hasGsc ? 'CONFIGURED' : 'NOT_CONFIGURED', requiresOAuth: true, siteConfigured: Boolean(siteUrl), configKeys: ['GOOGLE_SEARCH_CONSOLE_SITE_URL'] },
     ga4: { status: hasGa4 ? 'CONFIGURED' : 'NOT_CONFIGURED', requiresOAuth: true, propertyConfigured: /^\d+$/.test(propertyId), configKeys: ['GOOGLE_GA4_PROPERTY_ID'] },
     backlinks: { status: hasSemrush ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Semrush', paidProvider: true, approvalRequiredBeforeQueries: true, configKeys: ['SEMRUSH_API_KEY'] },
-    localSeo: { status: hasGbp ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Google Business Profile', requiresOAuth: true, locationConfigured: Boolean(locationId), reviewsConfigured: Boolean(locationId && accountId), accountConfigured: Boolean(accountId), configKeys: ['GOOGLE_BUSINESS_PROFILE_LOCATION_ID', 'GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID'] },
+    localSeo: { status: hasGbp ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Google Business Profile', requiresOAuth: true, locationConfigured: Boolean(locationId), reviewsConfigured: hasGbp && Boolean(locationId && accountId), accountConfigured: Boolean(accountId), configKeys: ['GOOGLE_BUSINESS_PROFILE_LOCATION_ID', 'GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID'] },
   };
 }
 
