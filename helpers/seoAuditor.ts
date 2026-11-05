@@ -269,7 +269,7 @@ export function parseRobots(text: string): { disallow: string[]; sitemaps: strin
       groupAgents.push(value.toLowerCase());
     } else if (key === 'disallow' && value) {
       groupRules.push(value);
-    } else if (key === 'sitemap' && /^https?:\\/\\//i.test(value)) {
+    } else if (key === 'sitemap' && /^https?:\/\//i.test(value)) {
       sitemaps.push(value);
     }
   }
