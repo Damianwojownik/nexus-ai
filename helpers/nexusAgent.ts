@@ -97,6 +97,11 @@ export class NexusAgent {
     this.options = options;
   }
 
+  /** Names of model-callable tools, for the small-talk fast path only. */
+  listToolNames(): string[] {
+    return this.toolRegistry.listModelCallable().map((tool) => tool.name);
+  }
+
   async send(input: NexusMessageInput): Promise<NexusAgentResult> {
     const mode = input.mode || 'AUTO';
     this.router.setPreferredMode(mode);
