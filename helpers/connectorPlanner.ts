@@ -59,7 +59,7 @@ function connectorMentioned(text: string, connectors: ConnectorHealth[]): boolea
   if (connectors.some((item) => normalized.includes(item.id.toLocaleLowerCase('pl-PL')) || normalized.includes(item.name.toLocaleLowerCase('pl-PL')))) {
     return true;
   }
-  return /\b(connector|mcp|github|canva|figma|notion|slack|gmail|google\s*drive|dysk\s*google|kalendarz|calendar|repozytor|repo)\b/i.test(text);
+  return /\b(connector|mcp|github|canva|figma|notion|slack|gmail|e-?mail|mail|inbox|poczt[ayę]|skrzynk[ayę]|wiadomości|google\s*drive|dysk(?:\s*google)?|google\s*docs|dokumenty\s*google|calendar|kalendarz|meeting|spotkani[aeu]|wydarzeni[ae]?|termin(?:y|ów)?|repozytor|repo|pull\s*request|issue|notatki|notes)\b/i.test(text);
 }
 
 export class ConnectorPlanner {
