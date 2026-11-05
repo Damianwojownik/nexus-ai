@@ -200,6 +200,8 @@ export class NexusOrchestrator {
     let searchResults: WebSearchResult[] = [];
     const contextNotes: string[] = [];
     let hubAvailable = true;
+    let weatherCompleted = false;
+    let webSearchCompleted = false;
     const inspectedFiles = new Map<string, string>();
     let repairSummary: string | undefined;
     let repairedPath: string | undefined;
@@ -428,6 +430,7 @@ export class NexusOrchestrator {
         try {
           const weather = await this.capabilities.getWeather(input.text);
           contextNotes.push(`Rzeczywiste dane pogodowe pobrane online. Użyj ich jako źródła prawdy i nie zgaduj:\n${formatWeather(weather)}`);
+          weatherCompleted = true;
           plan[weatherStep].state = 'DONE';
         } catch (error) {
           contextNotes.push(`Pogoda online jest niedostępna: ${error instanceof Error ? error.message : String(error)}. Nie zgaduj bieżącej pogody; wyjaśnij, że połączenie nie zadziałało.`);
@@ -442,6 +445,7 @@ export class NexusOrchestrator {
           const result = await this.capabilities.searchWeb(input.text);
           searchResults = result.results;
           contextNotes.push(`Rzeczywiste wyniki wyszukiwania (${result.provider}):\n${formatSearchResults(searchResults)}`);
+          webSearchCompleted = true;
           plan[plan.findIndex((step) => step.id === 'search')].state = 'DONE';
         } catch (error) {
           contextNotes.push(`Wyszukiwanie WWW jest niedostępne: ${error instanceof Error ? error.message : String(error)}. Kontynuuj na podstawie lokalnej wiedzy i zaznacz, że odpowiedź nie została zweryfikowana w sieci.`);
@@ -458,6 +462,10 @@ export class NexusOrchestrator {
           mode: 'AUTO',
           projectContext: [input.projectContext, ...contextNotes].filter(Boolean).join('\n\n'),
           history: input.history,
+          disabledTools: [
+            ...(weatherCompleted ? ['get_weather'] : []),
+            ...(webSearchCompleted ? ['web_search'] : []),
+          ],
         })).text;
       if (!responseText.trim()) throw new Error('Nexus nie otrzymał odpowiedzi od dostępnego modelu');
 
