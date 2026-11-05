@@ -243,13 +243,19 @@ async function requestPublic(
   return result;
 }
 
-function parseRobots(text: string): { disallow: string[]; sitemaps: string[]; disallowsAll: boolean } {
+export function parseRobots(text: string): { disallow: string[]; sitemaps: string[]; disallowsAll: boolean } {
   const disallow: string[] = [];
   const sitemaps: string[] = [];
-  let appliesToAll = false;
-  let activeGroup = false;
-  let specificGroupSeen = false;
-  for (const rawLine of text.split(/\r?\n/)) {
+  let groupAgents: string[] = [];
+  let groupRules: string[] = [];
+
+  const flushGroup = () => {
+    if (groupAgents.includes('*')) disallow.push(...groupRules);
+    groupAgents = [];
+    groupRules = [];
+  };
+
+  for (const rawLine of text.split(/\\r?\\n/)) {
     const line = rawLine.split('#')[0].trim();
     if (!line) continue;
     const separator = line.indexOf(':');
@@ -257,20 +263,23 @@ function parseRobots(text: string): { disallow: string[]; sitemaps: string[]; di
     const key = line.slice(0, separator).trim().toLowerCase();
     const value = line.slice(separator + 1).trim();
     if (key === 'user-agent') {
-      if (activeGroup && value === '*') appliesToAll = true;
-      else if (activeGroup && value !== '*') specificGroupSeen = true;
-      activeGroup = value === '*';
-    } else if (key === 'disallow' && activeGroup && value) {
-      disallow.push(value);
-    } else if (key === 'sitemap' && /^https?:\/\//i.test(value)) {
+      // A new user-agent after rules starts a new group; adjacent user-agent
+      // directives before any rule belong to the same group.
+      if (groupRules.length) flushGroup();
+      groupAgents.push(value.toLowerCase());
+    } else if (key === 'disallow' && value) {
+      groupRules.push(value);
+    } else if (key === 'sitemap' && /^https?:\\/\\//i.test(value)) {
       sitemaps.push(value);
     }
   }
-  const filteredDisallow = specificGroupSeen && !appliesToAll ? [] : disallow;
+  flushGroup();
+
+  const uniqueDisallow = [...new Set(disallow)];
   return {
-    disallow: filteredDisallow,
+    disallow: uniqueDisallow,
     sitemaps: [...new Set(sitemaps)].slice(0, 5),
-    disallowsAll: filteredDisallow.includes('/'),
+    disallowsAll: uniqueDisallow.includes('/'),
   };
 }
 
