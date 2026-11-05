@@ -622,6 +622,19 @@ export default function Home() {
     }
   };
 
+  const runGoogleBusinessProfileReviews = async () => {
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.googleBusinessProfileReviews());
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się odczytać opinii Google.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
   const refreshSeoIntegrations = async () => {
     setSeoBusy(true);
     setSeoError('');
@@ -810,7 +823,7 @@ export default function Home() {
                 </div>
                 {seoIntegrations.backlinks.status!=='CONFIGURED'&&<small>Dodaj SEMRUSH_API_KEY w środowisku serwera. Nexus nie pobiera ani nie rozlicza niczego, dopóki samodzielnie nie włączysz tej integracji i nie zatwierdzisz zapytania.</small>}
               </div>
-              <div><b>Google Business Profile</b><span>{seoIntegrations.localSeo.status}</span><small>Odczyt nazwy, adresu, telefonu, strony i godzin otwarcia.</small><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileAudit()} disabled={seoBusy||seoIntegrations.localSeo.status!=='CONFIGURED'}>Audyt wizytówki</Button></div>
+              <div><b>Google Business Profile</b><span>{seoIntegrations.localSeo.status}</span><small>Odczyt nazwy, adresu, telefonu, strony i godzin otwarcia.</small><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileAudit()} disabled={seoBusy||seoIntegrations.localSeo.status!=='CONFIGURED'}>Audyt wizytówki</Button><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileReviews()} disabled={seoBusy||!seoIntegrations.localSeo.reviewsConfigured}>Analiza opinii</Button>{!seoIntegrations.localSeo.reviewsConfigured&&<small>Do opinii dodaj GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID oraz GOOGLE_BUSINESS_PROFILE_LOCATION_ID.</small>}</div>
             </div>:<p className={styles.seoMeta}>Status integracji pojawi się po połączeniu z Agent Hub.</p>}
             {seoDataReport&&<div className={styles.seoDataOutput}>
               <b>{seoDataReport.provider||'Raport integracji'}</b>
