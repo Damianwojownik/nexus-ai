@@ -125,6 +125,7 @@ export class LocalCapabilitiesClient {
     return this.request('/api/seo/audit', {
       method: 'POST',
       body: JSON.stringify({ url, maxPages }),
+      signal: AbortSignal.timeout(180000),
     });
   }
 
@@ -132,6 +133,7 @@ export class LocalCapabilitiesClient {
     return this.request('/api/seo/pagespeed', {
       method: 'POST',
       body: JSON.stringify({ url, strategy }),
+      signal: AbortSignal.timeout(120000),
     });
   }
 
