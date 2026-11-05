@@ -2,7 +2,6 @@ import { ModelRouter } from './modelRouter.ts';
 import type { AIModelMode } from './modelRouter.ts';
 import { MemoryStore } from './memoryStore.ts';
 import { ToolRegistry } from './toolRegistry.ts';
-import type { ToolDefinition } from './toolRegistry.ts';
 
 export type NexusMessageInput = {
   text: string;
@@ -64,7 +63,7 @@ export function parseNexusModelAction(raw: string): NexusModelAction | undefined
 function stringifyToolResult(value: unknown): string {
   let serialized: string;
   try {
-    serialized = JSON.stringify(value);
+    serialized = JSON.stringify(value) ?? String(value);
   } catch {
     serialized = String(value);
   }
