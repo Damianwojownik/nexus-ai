@@ -93,6 +93,7 @@ export default function Home() {
   const speechVisemePlanRef=useRef<VisemeCue[]>([]);
   const pointerRef=useRef({x:0,y:0});
   const generatedImageUrlRef=useRef('');
+  const googleOAuthPopupRef=useRef<Window|null>(null);
 
   useEffect(() => () => {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
@@ -110,6 +111,22 @@ export default function Home() {
     void localCapabilitiesClient.getSeoIntegrations()
       .then(setSeoIntegrations)
       .catch(() => setSeoIntegrations(null));
+  }, []);
+
+  useEffect(() => {
+    const onGoogleOAuthMessage = (event: MessageEvent) => {
+      try {
+        const hubOrigin = new URL(agentHubClient.baseUrl).origin;
+        if (event.origin !== hubOrigin || event.source !== googleOAuthPopupRef.current) return;
+        if (event.data?.type !== 'nexus-google-oauth-complete' || event.data?.ok !== true) return;
+        googleOAuthPopupRef.current = null;
+        void localCapabilitiesClient.getSeoIntegrations().then(setSeoIntegrations).catch(() => undefined);
+      } catch {
+        // Ignore OAuth messages from unknown origins.
+      }
+    };
+    window.addEventListener('message', onGoogleOAuthMessage);
+    return () => window.removeEventListener('message', onGoogleOAuthMessage);
   }, []);
 
   useEffect(()=>{
@@ -439,6 +456,51 @@ export default function Home() {
     }
   };
 
+  const connectGoogleOAuth = async () => {
+    const popup = window.open('about:blank', 'nexus-google-oauth', 'popup,width=560,height=720');
+    if (!popup) { setSeoError('Przeglądarka zablokowała okno Google OAuth. Zezwól na popupy dla Nexusa i spróbuj ponownie.'); return; }
+    googleOAuthPopupRef.current = popup;
+    setSeoBusy(true);
+    setSeoError('');
+    try {
+      const authorization = await localCapabilitiesClient.startGoogleOAuth();
+      popup.location.href = authorization.authorizationUrl;
+    } catch (error) {
+      popup.close();
+      googleOAuthPopupRef.current = null;
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się rozpocząć Google OAuth.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const disconnectGoogleOAuth = async () => {
+    setSeoBusy(true);
+    setSeoError('');
+    try {
+      await localCapabilitiesClient.disconnectGoogleOAuth();
+      setSeoIntegrations(await localCapabilitiesClient.getSeoIntegrations());
+      setSeoDataReport(null);
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się rozłączyć Google OAuth.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const runGoogleBusinessProfileAudit = async () => {
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.googleBusinessProfileAudit());
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się odczytać Google Business Profile.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
   const refreshSeoIntegrations = async () => {
     setSeoBusy(true);
     setSeoError('');
@@ -565,13 +627,24 @@ export default function Home() {
           </section>}
           <section className={styles.seoIntegrations}>
             <div className={styles.seoReportHeader}><b>Integracje danych</b><Button variant="secondary" onClick={()=>void refreshSeoIntegrations()} disabled={seoBusy}>Odśwież statusy</Button></div>
+            {seoIntegrations?.googleOAuth&&<div className={styles.seoGoogleOAuth}>
+              <div><b>Konto Google · OAuth 2.0</b><small>{seoIntegrations.googleOAuth.connected?'Połączone':seoIntegrations.googleOAuth.clientConfigured&&seoIntegrations.googleOAuth.redirectUriConfigured?'Gotowe do autoryzacji':'Wymaga konfiguracji po stronie serwera'}</small></div>
+              <div className={styles.seoActions}>
+                <Button onClick={()=>void connectGoogleOAuth()} disabled={seoBusy||seoIntegrations.googleOAuth.connected||!seoIntegrations.googleOAuth.clientConfigured||!seoIntegrations.googleOAuth.redirectUriConfigured}>Połącz konto Google</Button>
+                <Button variant="secondary" onClick={()=>void disconnectGoogleOAuth()} disabled={seoBusy||!seoIntegrations.googleOAuth.connected}>Rozłącz Google</Button>
+              </div>
+              {!seoIntegrations.googleOAuth.clientConfigured&&<p className={styles.seoMeta}>Dodaj GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET i GOOGLE_OAUTH_REDIRECT_URI w środowisku serwera Nexusa.</p>}
+            </div>}
             {seoIntegrations?<div className={styles.seoIntegrationGrid}>
               <div><b>Google Search Console</b><span>{seoIntegrations.searchConsole.status}</span><small>Wymaga OAuth · webmasters.readonly</small><Button variant="secondary" onClick={()=>void runSeoDataReport('gsc')} disabled={seoBusy||seoIntegrations.searchConsole.status!=='CONFIGURED'}>Pobierz raport GSC</Button></div>
               <div><b>Google Analytics 4</b><span>{seoIntegrations.ga4.status}</span><small>Wymaga OAuth · analytics.readonly</small><Button variant="secondary" size="sm" onClick={()=>void runSeoDataReport('ga4')} disabled={seoBusy||seoIntegrations.ga4.status!=='CONFIGURED'}>Pobierz raport GA4</Button></div>
               <div><b>Backlinki · Semrush</b><span>{seoIntegrations.backlinks.status}</span><small>Płatna usługa i jednostki API; zapytania wymagają osobnej zgody.</small></div>
-              <div><b>Google Business Profile</b><span>{seoIntegrations.localSeo.status}</span><small>Wymaga OAuth i uprawnień do profilu.</small></div>
+              <div><b>Google Business Profile</b><span>{seoIntegrations.localSeo.status}</span><small>Odczyt nazwy, adresu, telefonu, strony i godzin otwarcia.</small><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileAudit()} disabled={seoBusy||seoIntegrations.localSeo.status!=='CONFIGURED'}>Audyt wizytówki</Button></div>
             </div>:<p className={styles.seoMeta}>Status integracji pojawi się po połączeniu z Agent Hub.</p>}
-            {seoDataReport&&<pre className={styles.seoDataOutput}>{JSON.stringify(seoDataReport,null,2)}</pre>}
+            {seoDataReport&&<div className={styles.seoDataOutput}>
+              <b>{seoDataReport.provider||'Raport integracji'}</b>
+              <pre>{JSON.stringify(seoDataReport,null,2)}</pre>
+            </div>}
             <p className={styles.seoMeta}>Tokeny OAuth i klucze API są odczytywane wyłącznie po stronie serwera. Nie wpisuj ich w rozmowie ani w przeglądarce.</p>
           </section>
         </div>
