@@ -258,7 +258,9 @@ type RobotsRule = { kind: 'allow' | 'disallow'; pattern: string };
 function robotsRuleMatches(pathname: string, rule: string): boolean {
   const terminal = rule.endsWith('$');
   const rawPattern = terminal ? rule.slice(0, -1) : rule;
-  const escaped = rawPattern.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&').replace(/\\\*/g, '.*');
+  const escaped = [...rawPattern].map((character) =>
+    character === '*' ? '.*' : '\\^$+?.()|[]{}'.includes(character) ? '\\' + character : character
+  ).join('');
   try {
     const expression = new RegExp('^' + escaped + (terminal ? '$' : ''));
     return expression.test(pathname);
