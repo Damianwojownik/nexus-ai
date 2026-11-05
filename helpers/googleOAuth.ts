@@ -12,6 +12,7 @@ const GOOGLE_SCOPES = [
 interface PendingAuthorization {
   verifier: string;
   createdAt: number;
+  returnOrigin?: string;
 }
 
 interface StoredGoogleTokens {
@@ -90,7 +91,7 @@ export class GoogleOAuthManager {
     };
   }
 
-  async startAuthorization(): Promise<{ authorizationUrl: string }> {
+  async startAuthorization(returnOrigin?: string): Promise<{ authorizationUrl: string }> {
     const clientId = this.clientId();
     const redirectUri = this.redirectUri();
     this.clientSecret();
@@ -98,7 +99,7 @@ export class GoogleOAuthManager {
     const state = randomBytes(32).toString('base64url');
     const verifier = randomBytes(48).toString('base64url');
     const challenge = createHash('sha256').update(verifier).digest('base64url');
-    this.pending.set(state, { verifier, createdAt: Date.now() });
+    this.pending.set(state, { verifier, createdAt: Date.now(), returnOrigin });
     for (const [oldState, pending] of this.pending) {
       if (Date.now() - pending.createdAt > 10 * 60 * 1000) this.pending.delete(oldState);
     }
@@ -117,7 +118,7 @@ export class GoogleOAuthManager {
     return { authorizationUrl: url.toString() };
   }
 
-  async completeAuthorization(callbackUrl: URL): Promise<{ connected: true; scopes: string[]; expiresAt: string }> {
+  async completeAuthorization(callbackUrl: URL): Promise<{ connected: true; scopes: string[]; expiresAt: string; returnOrigin?: string }> {
     const oauthError = callbackUrl.searchParams.get('error');
     if (oauthError) throw new Error('Google OAuth nie został zakończony: ' + oauthError);
     const code = callbackUrl.searchParams.get('code');
@@ -158,7 +159,7 @@ export class GoogleOAuthManager {
     };
     if (!tokens.refresh_token) throw new Error('Google nie zwrócił refresh tokenu. Usuń wcześniejszą zgodę aplikacji w Google Account i połącz konto ponownie.');
     await this.saveTokens(tokens);
-    return { connected: true, scopes: tokens.scope, expiresAt: new Date(tokens.expires_at).toISOString() };
+    return { connected: true, scopes: tokens.scope, expiresAt: new Date(tokens.expires_at).toISOString(), returnOrigin: pending.returnOrigin };
   }
 
   async accessToken(requiredScope: string): Promise<string> {
