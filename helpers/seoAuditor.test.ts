@@ -1,6 +1,26 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { auditPublicSite, getSeoIntegrationStatus, runPageSpeed } from './seoAuditor.ts';
+import { auditPublicSite, getSeoIntegrationStatus, parseRobots, runPageSpeed } from './seoAuditor.ts';
+
+test('robots.txt applies only wildcard user-agent groups and preserves their sitemap directives', () => {
+  const parsed = parseRobots(`User-agent: Googlebot
+Disallow: /private-google/
+
+User-agent: *
+Disallow: /private/
+Disallow: /draft/
+Sitemap: https://example.com/sitemap.xml
+
+User-agent: Bingbot
+Disallow: /bing-only/
+`);
+  assert.deepEqual(parsed.disallow, ['/private/', '/draft/']);
+  assert.deepEqual(parsed.sitemaps, ['https://example.com/sitemap.xml']);
+  assert.equal(parsed.disallowsAll, false);
+
+  const blocked = parseRobots('User-agent: *\\nDisallow: /');
+  assert.equal(blocked.disallowsAll, true);
+});
 
 test('public SEO crawler rejects private, loopback and credential-bearing targets before connecting', async () => {
   await assert.rejects(() => auditPublicSite('http://127.0.0.1'), /lokalny|prywatn|zarezerwowan/i);
