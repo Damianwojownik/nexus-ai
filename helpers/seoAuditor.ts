@@ -26,6 +26,7 @@ export interface SeoPageResult {
   h1Count: number;
   headingOutline: string[];
   wordCount: number;
+  contentExcerpt: string;
   imageCount: number;
   imagesMissingAlt: number;
   internalLinks: number;
@@ -335,8 +336,9 @@ function inspectPage(url: string, status: number, html: string, origin: string, 
       // Ignore non-URL anchors such as mailto:, tel: and fragment links.
     }
   });
-  const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
+  const bodyText = $('main').length ? $('main').text().replace(/\s+/g, ' ').trim() : $('body').text().replace(/\s+/g, ' ').trim();
   const wordCount = bodyText ? bodyText.split(/\s+/).length : 0;
+  const contentExcerpt = bodyText.slice(0, 1800);
   const jsonLdTypes = collectJsonLdTypes($);
   const questionHeadings = headingOutline.filter((heading) => /:\s*.*\?/.test(heading) || /^(h[1-6]):\s*(jak|dlaczego|kiedy|gdzie|co|czy|how|why|when|where|what|can|does)\b/i.test(heading)).length;
   const hasFaqSchema = jsonLdTypes.includes('FAQPage');
@@ -359,7 +361,7 @@ function inspectPage(url: string, status: number, html: string, origin: string, 
   return {
     url, status, title, titleLength: title.length, description, descriptionLength: description.length,
     canonical, robots, h1Count, headingOutline, wordCount, imageCount: images.length,
-    imagesMissingAlt, internalLinks, externalLinks, jsonLdTypes,
+    imagesMissingAlt, internalLinks, externalLinks, jsonLdTypes, contentExcerpt,
     hasFaqSchema, hasLocalBusinessSchema, questionHeadings,
   };
 }
