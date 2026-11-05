@@ -1,0 +1,26 @@
+name: Avatar Cloud CI
+
+on:
+  push:
+    paths:
+      - "services/avatar_cloud/**"
+      - "infra/avatar-cloud/**"
+      - "docker-compose.avatar-cloud.yml"
+      - ".github/workflows/avatar-cloud-ci.yml"
+  pull_request:
+    paths:
+      - "services/avatar_cloud/**"
+      - "infra/avatar-cloud/**"
+      - "docker-compose.avatar-cloud.yml"
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+      - run: python -m py_compile services/avatar_cloud/app.py services/avatar_cloud/engine_registry.py
+      - run: pip install -r services/avatar_cloud/requirements.txt
+      - run: python -c "from pathlib import Path; import sys; sys.path.insert(0,str(Path('services/avatar_cloud').resolve())); import app; print(app.app.title)"
