@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 export type ConnectorTransport = 'github-cli' | 'mcp-http';
@@ -46,6 +47,37 @@ type ConnectorEnv = Record<string, string | undefined>;
 
 const ID_RE = /^[a-z0-9][a-z0-9._-]{1,63}$/i;
 const TOOL_RE = /^[a-zA-Z0-9_.:/-]{1,160}$/;
+
+function isPublicResolvedAddress(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) {
+    const octets = address.split('.').map(Number);
+    const [a, b, c] = octets;
+    return !(a === 0 || a === 10 || a === 127 || a >= 224
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 0)
+      || (a === 192 && b === 168)
+      || (a === 198 && (b === 18 || b === 19))
+      || (a === 203 && b === 0 && c === 113));
+  }
+  if (version === 6) {
+    const normalized = address.toLowerCase().split('%')[0];
+    return /^[23]/.test(normalized) && !normalized.startsWith('2001:db8:') && !normalized.startsWith('2001:10:');
+  }
+  return false;
+}
+
+async function assertPublicConnectorEndpoint(raw: string): Promise<void> {
+  const url = new URL(raw);
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === '127.0.0.1' || host === 'localhost' || host === '::1') return;
+  const resolved = await lookup(host, { all: true, verbatim: true });
+  if (!resolved.length || resolved.some((entry) => !isPublicResolvedAddress(entry.address))) {
+    throw new Error('MCP connector hostname resolves to a private or reserved address');
+  }
+}
 
 function safeUrl(raw: string): URL {
   const url = new URL(raw);
@@ -171,6 +203,7 @@ class McpHttpConnector {
 
   private async rpc(method: string, params?: Record<string, unknown>, notification = false): Promise<any> {
     if (!this.configured()) throw new Error(`Missing environment variable ${this.manifest.tokenEnv}`);
+    await assertPublicConnectorEndpoint(this.manifest.url!);
     const body: Record<string, unknown> = { jsonrpc: '2.0', method };
     if (!notification) body.id = this.requestId++;
     if (params) body.params = params;
