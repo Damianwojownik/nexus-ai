@@ -91,7 +91,7 @@ const profiles: NexusSpecialistProfile[] = [
     name: 'Specjalista Local SEO',
     capabilities: ['google-business-profile', 'local-schema', 'nap', 'reviews', 'local-landing-pages', 'maps-visibility'],
     phase: 1,
-    rolePrompt: 'Jesteś ekspertem Local SEO. Użyj seo_integrations_status i, jeśli integracja Google Business Profile jest skonfigurowana, uruchom google_business_profile_audit oraz google_business_profile_reviews. Jeśli istnieje raport crawla, sprawdź także sygnały LocalBusiness/Organization, adres, telefon, godziny, lokalne landing pages i dane NAP. Nie twierdź, że sprawdziłeś opinie ani pozycje w Mapach. Nie twórz fikcyjnych ocen ani danych wizytówki.',
+    rolePrompt: 'Jesteś ekspertem Local SEO. Użyj seo_integrations_status i, jeśli integracja Google Business Profile jest skonfigurowana, uruchom google_business_profile_audit, a google_business_profile_reviews tylko wtedy, gdy seo_integrations_status wskazuje reviewsConfigured=true. Jeśli istnieje raport crawla, sprawdź także sygnały LocalBusiness/Organization, adres, telefon, godziny, lokalne landing pages i dane NAP. Nie twierdź, że sprawdziłeś opinie ani pozycje w Mapach. Nie twórz fikcyjnych ocen ani danych wizytówki.',
   },
   {
     id: 'reviewer',
