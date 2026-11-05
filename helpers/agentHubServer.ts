@@ -530,6 +530,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         const task = createTask({
           goal: requiredString(body, 'goal'),
           createdBy: requiredString(body, 'createdBy'),
+          parentId: typeof body.parentId === 'string' ? body.parentId : undefined,
           assignedTo: requiredString(body, 'assignedTo'),
           scope: requiredString(body, 'scope'),
           contextRefs: Array.isArray(body.contextRefs) ? body.contextRefs.filter((item): item is string => typeof item === 'string') : [],
