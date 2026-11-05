@@ -8,7 +8,7 @@ import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts'
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
-import { auditPublicSite, getSeoIntegrationStatus, runGa4Report, runPageSpeed, runSearchConsoleReport, runSemrushBacklinksOverview, runSemrushKeywordMetrics } from './seoAuditor.ts';
+import { auditPublicSite, getSeoIntegrationStatus, runGa4Report, runPageSpeed, runSearchConsoleReport, runSemrushBacklinksOverview, runSemrushBacklinkCompetitors, runSemrushKeywordMetrics } from './seoAuditor.ts';
 import { googleOAuthManager } from './googleOAuth.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
@@ -450,6 +450,15 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       if (method === 'POST' && url.pathname === '/api/seo/semrush/backlinks') {
         const body = await readJson(request, 16 * 1024);
         sendJson(response, 200, await runSemrushBacklinksOverview(
+          requiredString(body, 'url'),
+          body.paidQueryApproved === true,
+        ));
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/semrush/competitors') {
+        const body = await readJson(request, 16 * 1024);
+        sendJson(response, 200, await runSemrushBacklinkCompetitors(
           requiredString(body, 'url'),
           body.paidQueryApproved === true,
         ));
