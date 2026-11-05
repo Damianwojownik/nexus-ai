@@ -104,3 +104,11 @@
 .seoSemrush>small{font-size:10px;line-height:1.4;color:var(--muted-foreground)}
 .seoPaidConsent{display:flex;align-items:flex-start;gap:8px;font-size:11px;line-height:1.4;color:var(--foreground)}
 .seoPaidConsent input{margin-top:2px;accent-color:var(--primary)}
+
+
+.workspaceNav{display:flex;align-items:center;gap:6px;overflow-x:auto;padding:8px 24px;border-bottom:1px solid var(--border);background:rgba(8,12,20,.55);scrollbar-width:thin}
+.workspaceNav button{flex:0 0 auto;border:1px solid transparent;background:transparent;color:var(--muted-foreground);border-radius:8px;padding:8px 12px;font:600 12px var(--font-family-base);cursor:pointer;white-space:nowrap}
+.workspaceNav button:hover{color:var(--foreground);background:rgba(124,231,255,.08)}
+.workspaceNav button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.workspaceNav button[aria-pressed="true"]{color:var(--foreground);border-color:rgba(124,231,255,.38);background:rgba(24,95,145,.22)}
+@media(max-width:760px){.workspaceNav{padding:7px 12px;gap:3px}.workspaceNav button{padding:7px 9px;font-size:11px}}
