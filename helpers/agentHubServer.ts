@@ -9,6 +9,7 @@ import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
 import { auditPublicSite, getSeoIntegrationStatus, runGa4Report, runPageSpeed, runSearchConsoleReport } from './seoAuditor.ts';
+import { googleOAuthManager } from './googleOAuth.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -409,7 +410,40 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       }
 
       if (method === 'GET' && url.pathname === '/api/seo/integrations') {
-        sendJson(response, 200, getSeoIntegrationStatus());
+        sendJson(response, 200, await getSeoIntegrationStatus());
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/seo/google-oauth/status') {
+        sendJson(response, 200, await googleOAuthManager.status());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/google-oauth/start') {
+        const returnOrigin = origin && isAllowedOrigin(origin, options.allowedOrigins ?? []) ? origin : undefined;
+        sendJson(response, 200, await googleOAuthManager.startAuthorization(returnOrigin));
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/seo/google-oauth/callback') {
+        const result = await googleOAuthManager.completeAuthorization(url);
+        const targetOrigin = result.returnOrigin ? JSON.stringify(result.returnOrigin) : 'null';
+        const script = result.returnOrigin
+          ? `if(window.opener){window.opener.postMessage({type:'nexus-google-oauth-complete',ok:true},${targetOrigin});window.close();}`
+          : '';
+        sendHtml(response, 200, `<!doctype html><html lang="pl"><meta charset="utf-8"><title>Nexus — Google połączone</title><body style="font-family:system-ui;max-width:38rem;margin:12vh auto;padding:24px;background:#0b1220;color:#eef7ff;border-radius:18px"><h1>Google połączone z Nexusem</h1><p>Autoryzacja zakończona. Możesz wrócić do Nexusa.</p><script>${script}</script></body></html>`);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/google-oauth/disconnect') {
+        await googleOAuthManager.disconnect();
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/google-business-profile') {
+        const { runGoogleBusinessProfileAudit } = await import('./seoAuditor.ts');
+        sendJson(response, 200, await runGoogleBusinessProfileAudit());
         return;
       }
 
