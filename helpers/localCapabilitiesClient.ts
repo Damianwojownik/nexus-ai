@@ -1,3 +1,4 @@
+import { hubEndpoint } from './mobileEndpoints.ts';
 export interface WebSearchResult {
   title: string;
   url: string;
@@ -76,7 +77,7 @@ export class LocalCapabilitiesError extends Error {
 
 const buildEnv = import.meta.env;
 const processEnv = typeof process !== 'undefined' ? process.env : undefined;
-const defaultBaseUrl = buildEnv?.VITE_NEXUS_AGENT_HUB_URL || processEnv?.NEXUS_AGENT_HUB_URL || 'http://127.0.0.1:8788';
+const defaultBaseUrl = hubEndpoint();
 
 export class LocalCapabilitiesClient {
   readonly baseUrl: string;
