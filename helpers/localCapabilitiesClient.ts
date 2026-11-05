@@ -177,6 +177,14 @@ export class LocalCapabilitiesClient {
     });
   }
 
+  async semrushBacklinkCompetitors(url: string, paidQueryApproved: boolean): Promise<any> {
+    return this.request('/api/seo/semrush/competitors', {
+      method: 'POST',
+      body: JSON.stringify({ url, paidQueryApproved }),
+      signal: AbortSignal.timeout(45000),
+    });
+  }
+
   async searchConsoleReport(startDate?: string, endDate?: string): Promise<any> {
     return this.request('/api/seo/search-console', {
       method: 'POST',
