@@ -83,6 +83,9 @@ export default function Home() {
   const [seoPageSpeed,setSeoPageSpeed]=useState<any>(null);
   const [seoIntegrations,setSeoIntegrations]=useState<any>(null);
   const [seoDataReport,setSeoDataReport]=useState<any>(null);
+  const [semrushPaidApproval,setSemrushPaidApproval]=useState(false);
+  const [semrushKeyword,setSemrushKeyword]=useState('');
+  const [semrushCountry,setSemrushCountry]=useState('DE');
   const recognitionRef=useRef<any>(null);
   const attachmentInputRef=useRef<HTMLInputElement|null>(null);
   const hubSseConnectedRef=useRef(false);
@@ -501,6 +504,37 @@ export default function Home() {
     }
   };
 
+  const runSemrushBacklinks = async () => {
+    if (!semrushPaidApproval) { setSeoError('Zaznacz jawną zgodę na koszt 45 jednostek API.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.semrushBacklinksOverview(seoUrl.trim(), true));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się pobrać backlinków z Semrush.');
+    } finally {
+      setSeoBusy(false);
+      setSemrushPaidApproval(false);
+    }
+  };
+
+  const runSemrushKeyword = async () => {
+    if (!semrushPaidApproval) { setSeoError('Zaznacz jawną zgodę na koszt 20 jednostek API.'); return; }
+    if (!semrushKeyword.trim()) { setSeoError('Wpisz słowo kluczowe do analizy.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      setSeoDataReport(await localCapabilitiesClient.semrushKeywordMetrics(semrushKeyword.trim(), semrushCountry.trim(), true));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się pobrać metryk słowa kluczowego z Semrush.');
+    } finally {
+      setSeoBusy(false);
+      setSemrushPaidApproval(false);
+    }
+  };
+
   const refreshSeoIntegrations = async () => {
     setSeoBusy(true);
     setSeoError('');
@@ -638,7 +672,22 @@ export default function Home() {
             {seoIntegrations?<div className={styles.seoIntegrationGrid}>
               <div><b>Google Search Console</b><span>{seoIntegrations.searchConsole.status}</span><small>Wymaga OAuth · webmasters.readonly</small><Button variant="secondary" onClick={()=>void runSeoDataReport('gsc')} disabled={seoBusy||seoIntegrations.searchConsole.status!=='CONFIGURED'}>Pobierz raport GSC</Button></div>
               <div><b>Google Analytics 4</b><span>{seoIntegrations.ga4.status}</span><small>Wymaga OAuth · analytics.readonly</small><Button variant="secondary" onClick={()=>void runSeoDataReport('ga4')} disabled={seoBusy||seoIntegrations.ga4.status!=='CONFIGURED'}>Pobierz raport GA4</Button></div>
-              <div><b>Backlinki · Semrush</b><span>{seoIntegrations.backlinks.status}</span><small>Płatna usługa i jednostki API; zapytania wymagają osobnej zgody.</small></div>
+              <div className={styles.seoSemrush}>
+                <b>Semrush API v4</b>
+                <span>{seoIntegrations.backlinks.status}</span>
+                <small>Backlink Overview: 45 jednostek API. Metryki 1 słowa kluczowego: 20 jednostek API. Każde zapytanie płatne wymaga osobnej zgody.</small>
+                <Input value={semrushKeyword} onChange={event=>setSemrushKeyword(event.target.value)} placeholder="Słowo kluczowe do sprawdzenia"/>
+                <Input value={semrushCountry} onChange={event=>setSemrushCountry(event.target.value.toUpperCase())} placeholder="Kod kraju, np. DE"/>
+                <label className={styles.seoPaidConsent}>
+                  <input type="checkbox" checked={semrushPaidApproval} onChange={event=>setSemrushPaidApproval(event.target.checked)} disabled={seoBusy||seoIntegrations.backlinks.status!=='CONFIGURED'}/>
+                  <span>Zgadzam się na zużycie jednostek Semrush dla jednego klikniętego zapytania.</span>
+                </label>
+                <div className={styles.seoActions}>
+                  <Button variant="secondary" onClick={()=>void runSemrushKeyword()} disabled={seoBusy||!semrushPaidApproval||seoIntegrations.backlinks.status!=='CONFIGURED'||!semrushKeyword.trim()}>Metryki słowa · 20 jednostek</Button>
+                  <Button variant="secondary" onClick={()=>void runSemrushBacklinks()} disabled={seoBusy||!semrushPaidApproval||seoIntegrations.backlinks.status!=='CONFIGURED'||!seoUrl.trim()}>Backlinki · 45 jednostek</Button>
+                </div>
+                {seoIntegrations.backlinks.status!=='CONFIGURED'&&<small>Dodaj SEMRUSH_API_KEY w środowisku serwera. Nexus nie pobiera ani nie rozlicza niczego, dopóki samodzielnie nie włączysz tej integracji i nie zatwierdzisz zapytania.</small>}
+              </div>
               <div><b>Google Business Profile</b><span>{seoIntegrations.localSeo.status}</span><small>Odczyt nazwy, adresu, telefonu, strony i godzin otwarcia.</small><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileAudit()} disabled={seoBusy||seoIntegrations.localSeo.status!=='CONFIGURED'}>Audyt wizytówki</Button></div>
             </div>:<p className={styles.seoMeta}>Status integracji pojawi się po połączeniu z Agent Hub.</p>}
             {seoDataReport&&<div className={styles.seoDataOutput}>
