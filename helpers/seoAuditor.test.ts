@@ -89,6 +89,13 @@ test('integration health reports availability without exposing secret values', a
   assert.equal(status.backlinks.status, 'CONFIGURED');
   assert.equal(status.backlinks.approvalRequiredBeforeQueries, true);
   assert.equal(status.localSeo.status, 'CONFIGURED');
+  assert.equal(status.localSeo.reviewsConfigured, false);
+  const withReviewAccount = await getSeoIntegrationStatus({
+    GOOGLE_BUSINESS_PROFILE_ACCESS_TOKEN: 'secret-gbp-token',
+    GOOGLE_BUSINESS_PROFILE_LOCATION_ID: 'locations/42',
+    GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID: 'accounts/7',
+  } as NodeJS.ProcessEnv);
+  assert.equal(withReviewAccount.localSeo.reviewsConfigured, true);
   assert.equal(JSON.stringify(status).includes('secret-'), false);
 });
 
