@@ -15,7 +15,9 @@
     "test:agent": "node --experimental-strip-types --test helpers/nexusAgent.test.ts",
     "test:team": "node --experimental-strip-types --test helpers/nexusTeam.test.ts",
     "test:seo": "node --experimental-strip-types --test helpers/seoAuditor.test.ts",
-    "test:voice": "node --experimental-strip-types --test helpers/nexusLunaTts.test.ts"
+    "test:voice": "node --experimental-strip-types --test helpers/nexusLunaTts.test.ts",
+    "mobile:build": "npm run build",
+    "mobile:serve": "node scripts/mobile-server.mjs"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
