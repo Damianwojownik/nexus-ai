@@ -117,7 +117,9 @@ function isPrivateIpv6(ip: string): boolean {
   const value = ip.toLowerCase().split('%')[0];
   if (value === '::' || value === '::1' || value.startsWith('fc') || value.startsWith('fd')
     || value.startsWith('fe8') || value.startsWith('fe9') || value.startsWith('fea')
-    || value.startsWith('feb') || value.startsWith('ff')) return true;
+    || value.startsWith('feb') || value.startsWith('ff')
+    || value.startsWith('2001:db8:') || value.startsWith('2001:10:')
+    || value.startsWith('2001:2:')) return true;
 
   if (value.startsWith('::ffff:')) {
     const tail = value.slice(7);
@@ -164,10 +166,11 @@ function normalizeTarget(value: unknown): URL {
 }
 
 async function publicAddresses(hostname: string): Promise<Array<{ address: string; family: number }>> {
-  const literalFamily = isIP(hostname);
+  const normalizedHost = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+  const literalFamily = isIP(normalizedHost);
   const addresses = literalFamily
-    ? [{ address: hostname, family: literalFamily }]
-    : await dnsLookup(hostname, { all: true, verbatim: true });
+    ? [{ address: normalizedHost, family: literalFamily }]
+    : await dnsLookup(normalizedHost, { all: true, verbatim: true });
 
   if (!addresses.length || addresses.some((item) => !isPublicIp(item.address))) {
     throw new Error('Adres wskazuje na sieć prywatną, lokalną lub zarezerwowaną. Żądanie zablokowano.');
