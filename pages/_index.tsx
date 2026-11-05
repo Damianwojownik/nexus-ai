@@ -41,6 +41,27 @@ import { playNativePaulinaStream } from '../helpers/nativeSpeechClient';
 import { AgentHubLiveAvatarClient, NeuralLiveAvatarProvider } from '../helpers/neuralLiveAvatarProvider';
 import type { NeuralAvatarState, NeuralLiveSession } from '../helpers/neuralLiveAvatarProvider';
 
+type NexusChatMessage = { role: 'user' | 'assistant'; content: string };
+
+function chatHistoryKey(profile: CompanyProfile | null): string {
+  return profile ? `nexus-chat-history:${profile.id}` : 'nexus-chat-history:general';
+}
+
+function loadChatHistory(key: string): NexusChatMessage[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is NexusChatMessage =>
+      !!item && typeof item === 'object'
+      && (Reflect.get(item, 'role') === 'user' || Reflect.get(item, 'role') === 'assistant')
+      && typeof Reflect.get(item, 'content') === 'string');
+  } catch {
+    return [];
+  }
+}
+
 const LIBRARIAN_PROFILE = characterProfile('nexus-librarian');
 type ActiveCharacterId = 'nexus-librarian' | 'luna' | 'bear' | 'custom' | 'custom-default';
 const ACTIVE_CHARACTER_IDS: readonly ActiveCharacterId[] = ['nexus-librarian', 'luna', 'bear', 'custom', 'custom-default'];
@@ -174,8 +195,23 @@ export default function Home() {
   const [response,setResponse]=useState('');
   const [generatedImageUrl,setGeneratedImageUrl]=useState('');
   const [isThinking,setIsThinking]=useState(false);
-  const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>([]);
   const [companyProfile,setCompanyProfile]=useState<CompanyProfile|null>(null);
+  const [conversationHistory,setConversationHistory]=useState<NexusChatMessage[]>(()=>loadChatHistory('nexus-chat-history:general'));
+  const activeChatHistoryKey=chatHistoryKey(companyProfile);
+  const chatTranscriptRef=useRef<HTMLDivElement|null>(null);
+
+  useEffect(()=>{
+    try {
+      localStorage.setItem(activeChatHistoryKey,JSON.stringify(conversationHistory));
+    } catch(error) {
+      console.warn('[nexus:chat] Conversation history could not be persisted in browser storage.',error);
+    }
+  },[activeChatHistoryKey,conversationHistory]);
+
+  useEffect(()=>{
+    const transcript=chatTranscriptRef.current;
+    if(transcript) transcript.scrollTop=transcript.scrollHeight;
+  },[conversationHistory,response,isThinking]);
   const nexusOrchestrator=useMemo(()=>{
     if(!companyProfile)return generalOrchestrator;
     const companyMemory=new MemoryStore(new BrowserMemoryBackend(companyMemoryKey(companyProfile),true));
@@ -185,8 +221,8 @@ export default function Home() {
     return new NexusOrchestrator(companyAgent,agentHubClient,companyMemory,localCapabilitiesClient);
   },[companyProfile]);
   const changeCompany=useCallback((profile:CompanyProfile|null)=>{
+    setConversationHistory(loadChatHistory(chatHistoryKey(profile)));
     setCompanyProfile(profile);
-    setConversationHistory([]);
     setResponse('');
     setLastSources([]);
     setWorkflowProgress(null);
@@ -560,7 +596,9 @@ export default function Home() {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
     generatedImageUrlRef.current = '';
     setGeneratedImageUrl('');
-    const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-12);
+    const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }];
+    setConversationHistory(nextHistory);
+    let creationCompletionText = '';
     try {
       if(creation){
         if(creation.kind==='image'){
@@ -569,13 +607,15 @@ export default function Home() {
           setStatus('Generuję obraz na Nexus Image Engine…');
           const generated=await generateNexusImage(agentHubClient.baseUrl,creation.description);
           setCreationUrl(URL.createObjectURL(generated.image));
-          setResponse(`Obraz jest gotowy${generated.model?` — model: ${generated.model}`:''}${generated.seed?`, seed: ${generated.seed}`:''}.`);
+          creationCompletionText = `Obraz jest gotowy${generated.model?` — model: ${generated.model}`:''}${generated.seed?`, seed: ${generated.seed}`:''}.`;
+          setResponse(creationCompletionText);
           setStatus('Obraz wygenerowany przez Nexus Image Engine');
         }else if(creation.kind==='avatar'){
           const image=attachments.find(file=>file.type.startsWith('image/'));
           if(!image)throw new Error('Dodaj zdjęcie przyciskiem „Dodaj zdjęcie / plik”, a następnie powiedz „Ustaw awatara z tego zdjęcia”.');
           await loadPortrait(image);
-          setResponse('Ustawiłam Twoje zdjęcie jako portret awatara. To portret, nie wygenerowany model 3D. Aby zamówić film, powiedz „Animuj awatara: …”.');
+          creationCompletionText = 'Ustawiłam Twoje zdjęcie jako portret awatara. To portret, nie wygenerowany model 3D. Aby zamówić film, powiedz „Animuj awatara: …”.';
+          setResponse(creationCompletionText);
           setStatus('Awatar ustawiony');
         }else if(creation.kind==='website'){
           setStatus('Tworzę lokalny podgląd strony…');
@@ -586,7 +626,8 @@ export default function Home() {
           },publishWorkflowProgress);
           if(result.status!=='DONE')throw new Error('Strona nie została ukończona. Niczego nie opublikowano.');
           setWebsiteHtml(websiteDocument(result.text));
-          setResponse('Gotowy lokalny podgląd strony. Możesz obejrzeć i pobrać HTML. Formularze i sklep są makietą; nie wysyłają danych ani płatności. Niczego nie opublikowano.');
+          creationCompletionText = 'Gotowy lokalny podgląd strony. Możesz obejrzeć i pobrać HTML. Formularze i sklep są makietą; nie wysyłają danych ani płatności. Niczego nie opublikowano.';
+          setResponse(creationCompletionText);
           setStatus('Podgląd strony gotowy');
           void speak('Podgląd strony jest gotowy. Możesz pobrać plik HTML.');
         }else{
@@ -594,8 +635,10 @@ export default function Home() {
           const image=attachments.find(file=>file.type.startsWith('image/'));
           const portrait=image?await loadPortrait(image):undefined;
           if(!await animateAvatar(creation.text,portrait))throw new Error('Animacja nie została wykonana. Szczegóły silnika znajdują się poniżej.');
-          setResponse('Film z chmury jest gotowy do odtworzenia.');
+          creationCompletionText = 'Film z chmury jest gotowy do odtworzenia.';
+          setResponse(creationCompletionText);
         }
+        if(creationCompletionText) setConversationHistory([...nextHistory,{role:'assistant',content:creationCompletionText}]);
         setPrompt('');
         setAttachments([]);
         return;
@@ -618,9 +661,7 @@ export default function Home() {
       }
       setUsedProvider(geminiProxyProvider.lastProvider);
       setLastSources(result.searchResults);
-      setConversationHistory(result.status === 'DONE'
-        ? [...nextHistory, { role: 'assistant' as const, content: result.text }].slice(-12)
-        : nextHistory);
+      setConversationHistory([...nextHistory, { role: 'assistant' as const, content: result.text }]);
       setPrompt('');
       setAttachments([]);
       if (result.status === 'WAITING_FOR_APPROVAL') setApprovalRequest(result.approval);
@@ -629,6 +670,7 @@ export default function Home() {
       console.error('Nexus command failed:',error);
       const message = error instanceof Error ? error.message : 'Nexus nie mógł wykonać zadania';
       setResponse(message);
+      setConversationHistory([...nextHistory,{role:'assistant',content:message}]);
       setStatus('Wystąpił błąd');
       voiceEventBus.emit('ERROR', 'nexus', message, workflowProgress?.taskId, { source: 'orchestrator' });
     } finally {
@@ -647,7 +689,7 @@ export default function Home() {
         setApprovalRequest(result.approval);
       } else {
         setApprovalRequest(null);
-        setConversationHistory((history) => [...history, { role: 'assistant' as const, content: result.text }].slice(-12));
+        setConversationHistory((history) => [...history, { role: 'assistant' as const, content: result.text }]);
         if (result.text.trim()) speak(result.text);
       }
     } catch (error) {
@@ -666,7 +708,7 @@ export default function Home() {
     setApprovalRequest(null);
     setResponse('Anulowałam tę operację.');
     setStatus('Gotowe');
-    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałam tę operację.' }].slice(-12));
+    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałam tę operację.' }]);
   };
 
   const addAttachments = (files: FileList|null) => {
@@ -1257,7 +1299,14 @@ export default function Home() {
                   alt={activeCharacterId==='luna'?'Luna — zapisany portret':activeCharacterId==='bear'?'Miś — zapisany portret':'Wybrana postać — zapisany portret'}
                   onError={()=>setAvatarImageFailed(true)}/>}
         </div></div>
-        {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
+        <section ref={chatTranscriptRef} className={styles.chatTranscript} aria-label="Historia rozmowy" aria-live="polite">
+          {conversationHistory.map((message,index)=><article key={index} className={`${styles.chatMessage} ${message.role==='user'?styles.chatMessageUser:styles.chatMessageAssistant}`}>
+            <span className={styles.chatMessageRole}>{message.role==='user'?'Ty':'Nexus'}</span>
+            <p>{message.content}</p>
+          </article>)}
+          {isThinking&&!response&&<article className={`${styles.chatMessage} ${styles.chatMessageAssistant}`}><span className={styles.chatMessageRole}>Nexus</span><p>Nexus analizuje zadanie…</p></article>}
+        </section>
+        {response&&conversationHistory[conversationHistory.length-1]?.content!==response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
         {creationFlow&&<div className={styles.portraitActions} role="group" aria-label="Opcje bieżącego zadania">
           {creationQuestion(creationFlow).choices.map(choice=><Button key={choice} disabled={isThinking} onClick={()=>void runNexusConversation(choice)}>{choice}</Button>)}
           <Button variant="secondary" onClick={()=>{cancelSpeech();setSpeaking(false);setSpeechPreparing(false);setCreationFlow(null);setResponse('Zadanie anulowane.');setStatus('Gotowa do rozmowy');}}>Anuluj</Button>
