@@ -121,6 +121,38 @@ export class LocalCapabilitiesClient {
     return this.request(`/api/weather?q=${encodeURIComponent(query)}`);
   }
 
+  async auditSeo(url: string, maxPages = 20): Promise<any> {
+    return this.request('/api/seo/audit', {
+      method: 'POST',
+      body: JSON.stringify({ url, maxPages }),
+    });
+  }
+
+  async runPageSpeed(url: string, strategy: 'mobile' | 'desktop' = 'mobile'): Promise<any> {
+    return this.request('/api/seo/pagespeed', {
+      method: 'POST',
+      body: JSON.stringify({ url, strategy }),
+    });
+  }
+
+  async getSeoIntegrations(): Promise<any> {
+    return this.request('/api/seo/integrations');
+  }
+
+  async searchConsoleReport(startDate?: string, endDate?: string): Promise<any> {
+    return this.request('/api/seo/search-console', {
+      method: 'POST',
+      body: JSON.stringify({ startDate, endDate }),
+    });
+  }
+
+  async ga4Report(startDate?: string, endDate?: string): Promise<any> {
+    return this.request('/api/seo/ga4', {
+      method: 'POST',
+      body: JSON.stringify({ startDate, endDate }),
+    });
+  }
+
   async importFile(file: File): Promise<ImportedWorkspaceFile> {
     if (file.size > 10 * 1024 * 1024) throw new LocalCapabilitiesError('Import limit is 10 MB');
     const bytes = new Uint8Array(await file.arrayBuffer());
