@@ -24,7 +24,7 @@ The source of truth is `Damianwojownik/nexus-ai`. The separate `my-friend-ai` Ra
   - `{"type":"final","text":"..."}`
 - At most four model tool calls per turn.
 - Only tools explicitly marked `modelCallable: true`, read-only, non-destructive and permission-free are available to model-driven execution.
-- Current safe tool set: web search, weather, technical SEO crawl, PageSpeed Insights, integration status, Search Console, GA4 and read-only Google Business Profile audit (the latter four return a truthful not-configured error until authorized/configured).
+- Current safe tool set: web search, weather, technical SEO crawl, PageSpeed Insights, integration status, Search Console, GA4, read-only Google Business Profile location audit and read-only Google Business Profile reviews. PageSpeed and public crawl need no user OAuth; private Search Console, GA4 and Business Profile data require Google OAuth and their property/location IDs.
 - Filesystem writes, shell commands, installers and Git mutations are unavailable to model-driven tool calls.
 - The chat transcript is visible and persisted in the current browser's localStorage (last 100 messages); it is not synced across devices or users.
 
@@ -37,7 +37,8 @@ The source of truth is `Damianwojownik/nexus-ai`. The separate `my-friend-ai` Ra
 - Report UI includes issue priorities, recommendations, CSV export and browser print/save-to-PDF.
 - Search Console read-only report support, with OAuth scope `webmasters.readonly`.
 - GA4 read-only report support, with OAuth scope `analytics.readonly`.
-- Google Business Profile read-only location audit with `business.manage`; reads business name, website, phone, address and hours. Does not edit listings, read reviews or measure Maps rankings.
+- Google Business Profile read-only location audit with `business.manage`; reads business name, website, phone, address and hours. It does not edit listings or measure Maps rankings.
+- Google Business Profile read-only reviews audit requires `GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID` and `GOOGLE_BUSINESS_PROFILE_LOCATION_ID`; reads average rating, total count, up to 50 recent reviews, star distribution and reply coverage. It does not post replies, delete reviews or edit listings.
 - Semrush v4 manual integration is implemented for keyword metrics, backlink overview and similar backlink-profile competitors. Each endpoint requires `paidQueryApproved: true`; this approval is surfaced as a checkbox that resets after every request. The AI model cannot invoke these paid tools.
 - Documented request prices: keyword metrics 20 API units per keyword request, backlink overview 45 units per request, backlink competitors 40 units per returned row (UI bounds the response to 5 rows, maximum 200 units). Prices depend on the provider plan and may change.
 - Semrush API access requires a qualifying paid plan/API add-on and available API units. Do not add a key or run queries without the user's separate approval. The backlink competitor endpoint finds backlink-profile competitors; it is not an organic SERP competitor report.
@@ -58,6 +59,7 @@ The server requires these environment variables in its own process (never in bro
 - `GOOGLE_SEARCH_CONSOLE_SITE_URL` — the exact verified GSC property URL or `sc-domain:example.com`
 - `GOOGLE_GA4_PROPERTY_ID` — numeric GA4 property ID
 - `GOOGLE_BUSINESS_PROFILE_LOCATION_ID` — e.g. `locations/123456789`
+- `GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID` — e.g. `accounts/123456789`, required for review-list access
 
 OAuth uses Authorization Code + PKCE with offline access and the read-only GSC/GA4 scopes plus Business Profile `business.manage`. Refresh tokens are stored in a protected local file with restrictive file permissions (default Windows LocalAppData/NexusAI or `~/.nexus-ai`). The local token file is not a multi-user cloud secrets store and is not encrypted at rest. A public hosted runtime must use a proper encrypted secrets manager and tenant-scoped token storage before it can use this design.
 
@@ -69,6 +71,8 @@ OAuth uses Authorization Code + PKCE with offline access and the read-only GSC/G
 - Google OAuth is implemented but needs a Google Cloud OAuth client, authorized redirect URI, consent-screen setup and user authorization. Private GSC/GA4/GBP data is not accessible until these are configured.
 - A public-site crawl is limited and does not execute browser JavaScript, authenticate or submit forms. Lighthouse/CrUX and crawler results are measurements, not ranking guarantees.
 - The image generation bridge exists in the repository, but a production GPU render has not been verified.
+- The workspace UI can import, list and preview safe text/source files. PDF, DOCX, XLSX and PPTX are accepted into the workspace but do not yet have built-in text extraction.
+- Main navigation includes Rozmowa, Projekty i pliki, SEO i AEO, Zespół AI, Integracje and Ustawienia.
 - No account system, multi-user tenant isolation, hosted database, production authentication layer or public Nexus deployment has been completed.
 
 ## Public hosting security gate
