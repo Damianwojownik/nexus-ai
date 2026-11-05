@@ -13,6 +13,8 @@ export type NexusMessageInput = {
   disabledTools?: string[];
   /** Additional operating instructions for a named specialist worker. */
   agentRolePrompt?: string;
+  /** Internal specialist calls leave durable conversation memory writes to the parent orchestrator. */
+  skipMemoryWrite?: boolean;
 };
 
 export type NexusAgentResult = {
@@ -198,29 +200,31 @@ export class NexusAgent {
 
     if (!responseText.trim()) throw new Error('Nexus did not receive a final response from the configured model');
 
-    await this.memoryStore.saveMemory({
-      kind: 'conversation',
-      text: input.text,
-      category: 'user-turn',
-      tags: ['user', 'conversation'],
-      owner: 'nexus',
-      scope: 'chat',
-      source: 'user-input',
-      relevance: 0.6,
-      sensitive: false,
-    });
-
-    await this.memoryStore.saveMemory({
-      kind: 'conversation',
-      text: responseText,
-      category: 'assistant-turn',
-      tags: ['assistant', 'conversation'],
-      owner: 'nexus',
-      scope: 'chat',
-      source: 'agent-output',
-      relevance: 0.7,
-      sensitive: false,
-    });
+    if (!input.skipMemoryWrite) {
+      await this.memoryStore.saveMemory({
+        kind: 'conversation',
+        text: input.text,
+        category: 'user-turn',
+        tags: ['user', 'conversation'],
+        owner: 'nexus',
+        scope: 'chat',
+        source: 'user-input',
+        relevance: 0.6,
+        sensitive: false,
+      });
+  
+      await this.memoryStore.saveMemory({
+        kind: 'conversation',
+        text: responseText,
+        category: 'assistant-turn',
+        tags: ['assistant', 'conversation'],
+        owner: 'nexus',
+        scope: 'chat',
+        source: 'agent-output',
+        relevance: 0.7,
+        sensitive: false,
+      });
+    }
 
     if (usedTools.length) reasoning.push(`Executed safe tools: ${[...new Set(usedTools)].join(', ')}`);
 
