@@ -731,6 +731,28 @@ export async function runSemrushBacklinksOverview(target: unknown, paidQueryAppr
   };
 }
 
+export async function runSemrushBacklinkCompetitors(target: unknown, paidQueryApproved: unknown) {
+  if (paidQueryApproved !== true) throw new Error('Semrush competitor report wymaga jawnej zgody na maksymalnie 200 jednostek API (40 za wiersz, limit 5).');
+  const page = normalizeTarget(target);
+  const endpoint = new URL('https://api.semrush.com/apis/v4/backlinks/v1/competitors');
+  endpoint.searchParams.set('domain', page.hostname);
+  endpoint.searchParams.set('limit', '5');
+  endpoint.searchParams.set('order_by', 'similarity');
+  endpoint.searchParams.set('direction', 'DESC');
+  const data = await semrushGet(endpoint);
+  const rows = Array.isArray(data?.data) ? data.data : [];
+  return {
+    provider: 'Semrush Backlinks Competitors API v4',
+    target: page.hostname,
+    limit: 5,
+    unitCostPerRow: 40,
+    maximumApiUnits: 200,
+    data: rows,
+    metadata: data?.meta,
+    limitations: ['Koszt wynosi 40 jednostek API za każdy zwrócony wiersz, do maksymalnie 5 wierszy (200 jednostek).', 'To konkurenci o podobnym profilu domen odsyłających, nie lista konkurentów organicznych w SERP.'],
+  };
+}
+
 export async function runSemrushKeywordMetrics(input: { keyword?: unknown; country?: unknown; paidQueryApproved?: unknown }) {
   if (input.paidQueryApproved !== true) throw new Error('Metryki Semrush wymagają jawnej zgody na koszt 20 jednostek API za jedno słowo kluczowe.');
   if (typeof input.keyword !== 'string' || !input.keyword.trim() || input.keyword.trim().length > 255) {
