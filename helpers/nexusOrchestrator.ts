@@ -76,6 +76,16 @@ const installationPatterns: Array<{ pattern: RegExp; id: string }> = [
   { pattern: /\bgit\b/i, id: 'Git.Git' },
 ];
 
+/** Quick conversation uses the normal Nexus AI model and memory, without workflow bookkeeping. */
+export function isQuickLunaConversation(text: string, attachmentCount = 0): boolean {
+  if (attachmentCount || text.length > 240) return false;
+  const value = text.trim().toLowerCase();
+  if (!value) return false;
+  // Only explicit small talk; don't skip tools or specialist orchestration for work requests.
+  return /^(?:(?:cześć|czesc|hej|halo|witaj|dzień dobry|dzien dobry|dobry wieczór|siema|hello|hi|hey)[!,.? ]*)+$/.test(value)
+    || /^(?:(?:cześć|czesc|hej|witaj|halo)[,! ]*)?(?:(?:luna|nexus)[,! ]*)?(?:jak się masz|jak sie masz|co u ciebie|kim jesteś|kim jestes|przedstaw się|przedstaw sie|powiedz coś o sobie|powiedz cos o sobie|co potrafisz|jakie masz możliwości|jakie masz mozliwosci)[?.! ]*$/.test(value);
+}
+
 export function buildNexusPlan(text: string, attachments: NexusAttachmentContext[] = []): NexusPlanStep[] {
   const plan: NexusPlanStep[] = [
     { id: 'understand', label: 'Rozpoznaję cel', state: 'PENDING' },
@@ -217,6 +227,19 @@ export class NexusOrchestrator {
     let repairedPath: string | undefined;
 
     try {
+      if (isQuickLunaConversation(input.text, input.attachments?.length ?? 0)) {
+        emit('WORKING', 'Luna odpowiada…');
+        const result = await this.agent.send({
+          text: input.text,
+          mode: 'AUTO',
+          history: input.history,
+          projectContext: input.projectContext,
+          disabledTools: this.agent.listToolNames(),
+        });
+        await this.saveTaskMemory(input.text, result.text, []);
+        emit('DONE', 'Gotowe');
+        return { status: 'DONE', taskId: localTaskId, text: result.text, plan: [...plan], searchResults: [] };
+      }
       emit('THINKING', 'Rozpoznaję cel i układam plan');
       try {
         task = await this.hub.submitTask({
