@@ -10,6 +10,7 @@ import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
 import { auditPublicSite, getSeoIntegrationStatus, runGa4Report, runPageSpeed, runSearchConsoleReport, runSemrushBacklinksOverview, runSemrushBacklinkCompetitors, runSemrushKeywordMetrics } from './seoAuditor.ts';
 import { googleOAuthManager } from './googleOAuth.ts';
+import { synthesizeLunaVoice } from './nexusLunaTts.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -273,6 +274,18 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
             'weather',
           ],
         });
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/voice/luna') {
+        const body = await readJson(request, 4096);
+        const audio = await synthesizeLunaVoice(body.text);
+        response.writeHead(200, {
+          'Content-Type': 'audio/mpeg',
+          'Content-Length': audio.length,
+          'Cache-Control': 'no-store',
+        });
+        response.end(audio);
         return;
       }
 
