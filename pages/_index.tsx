@@ -647,6 +647,66 @@ export default function Home() {
     }
   };
 
+  const renderSeoDataTables = () => {
+    if (!seoDataReport) return null;
+    const rows = Array.isArray(seoDataReport.rows) ? seoDataReport.rows : [];
+    const reviewRows = Array.isArray(seoDataReport.reviews) ? seoDataReport.reviews : [];
+    const dimensionHeaders = Array.isArray(seoDataReport.dimensionHeaders)
+      ? seoDataReport.dimensionHeaders.map((item: any) => String(item.name ?? 'Wymiar'))
+      : rows[0]?.keys?.map((_item: string, index: number) => ['Zapytanie', 'Strona', 'Urządzenie', 'Kraj'][index] ?? 'Wymiar') ?? [];
+    const metricHeaders = Array.isArray(seoDataReport.metricHeaders)
+      ? seoDataReport.metricHeaders.map((item: any) => String(item.name ?? 'Metryka'))
+      : rows[0] && ('clicks' in rows[0] || 'impressions' in rows[0])
+        ? ['clicks', 'impressions', 'ctr', 'position'].filter((key) => key in rows[0]).map((key) => ({
+            clicks: 'Kliknięcia', impressions: 'Wyświetlenia', ctr: 'CTR', position: 'Śr. pozycja',
+          }[key]))
+        : [];
+    const dimensionsForRow = (row: any) => Array.isArray(row.keys)
+      ? row.keys
+      : Array.isArray(row.dimensionValues) ? row.dimensionValues.map((item: any) => item.value) : [];
+    const metricsForRow = (row: any) => Array.isArray(row.metricValues)
+      ? row.metricValues.map((item: any) => item.value)
+      : ['clicks', 'impressions', 'ctr', 'position'].filter((key) => key in row).map((key) => row[key]);
+    const formatCell = (value: unknown, header: string) => {
+      if (typeof value === 'string' && header.toLowerCase() === 'ctr') {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? (numeric * 100).toFixed(2) + '%' : value;
+      }
+      return String(value ?? '—');
+    };
+    return <div className={styles.seoStructuredData}>
+      {seoDataReport.averageRating!==undefined&&<div className={styles.seoMetrics}>
+        <div><b>{Number(seoDataReport.averageRating).toFixed(2)}</b><span>Średnia ocena</span></div>
+        <div><b>{seoDataReport.totalReviewCount??'—'}</b><span>Wszystkie opinie</span></div>
+        <div><b>{seoDataReport.returnedReviewCount??reviewRows.length}</b><span>Pobrane opinie</span></div>
+        <div><b>{seoDataReport.unansweredInReturnedPage??'—'}</b><span>Bez odpowiedzi</span></div>
+      </div>}
+      {reviewRows.length>0&&<div className={styles.seoIssues}>
+        <b>Ostatnie opinie Google</b>
+        {reviewRows.map((review:any,index:number)=><article key={review.reviewId||index}>
+          <div><b>{review.reviewer}</b><span>{String(review.starRating||'').replace('STARS','')}</span><span>{review.hasReply?'Odpowiedź dodana':'Bez odpowiedzi'}</span></div>
+          <small>{review.updateTime||review.createTime||''}</small>
+          <p>{review.comment||'Brak tekstu opinii.'}</p>
+        </article>)}
+      </div>}
+      {rows.length>0&&<div className={styles.seoDataTableWrap}>
+        <table className={styles.seoDataTable}>
+          <thead><tr>{[...dimensionHeaders,...metricHeaders].map((header:string,index:number)=><th key={index}>{header}</th>)}</tr></thead>
+          <tbody>{rows.slice(0,30).map((row:any,index:number)=>{
+            const dimensions=dimensionsForRow(row);
+            const metrics=metricsForRow(row);
+            return <tr key={index}>
+              {dimensions.map((value:unknown,cell:number)=><td key={'d'+cell}>{String(value??'—')}</td>)}
+              {metrics.map((value:unknown,cell:number)=><td key={'m'+cell}>{formatCell(value,metricHeaders[cell]||'')}</td>)}
+            </tr>;
+          })}</tbody>
+        </table>
+        <small>Wyświetlono maksymalnie 30 wierszy z {rows.length} zwróconych.</small>
+      </div>}
+      {reviewRows.length===0&&rows.length===0&&<pre className={styles.seoDataOutputPre}>{JSON.stringify(seoDataReport.data??seoDataReport,null,2)}</pre>}
+    </div>;
+  };
+
   const exportSeoCsv = () => {
     if (!seoReport?.issues?.length) return;
     const columns = ['severity', 'code', 'page', 'title', 'detail', 'recommendation'];
@@ -826,8 +886,9 @@ export default function Home() {
               <div><b>Google Business Profile</b><span>{seoIntegrations.localSeo.status}</span><small>Odczyt nazwy, adresu, telefonu, strony i godzin otwarcia.</small><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileAudit()} disabled={seoBusy||seoIntegrations.localSeo.status!=='CONFIGURED'}>Audyt wizytówki</Button><Button variant="secondary" onClick={()=>void runGoogleBusinessProfileReviews()} disabled={seoBusy||seoIntegrations.localSeo.status!=='CONFIGURED'||!seoIntegrations.localSeo.reviewsConfigured}>Analiza opinii</Button>{!seoIntegrations.localSeo.reviewsConfigured&&<small>Do opinii dodaj GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID oraz GOOGLE_BUSINESS_PROFILE_LOCATION_ID.</small>}</div>
             </div>:<p className={styles.seoMeta}>Status integracji pojawi się po połączeniu z Agent Hub.</p>}
             {seoDataReport&&<div className={styles.seoDataOutput}>
-              <b>{seoDataReport.provider||'Raport integracji'}</b>
-              <pre>{JSON.stringify(seoDataReport,null,2)}</pre>
+              <div className={styles.seoReportHeader}><b>{seoDataReport.provider||'Raport integracji'}</b><Button variant="secondary" onClick={()=>window.print()}>Drukuj / PDF</Button></div>
+              {renderSeoDataTables()}
+              <p className={styles.seoMeta}>{seoDataReport.limitations?.join(' ')}</p>
             </div>}
             <p className={styles.seoMeta}>Tokeny OAuth i klucze API są odczytywane wyłącznie po stronie serwera. Nie wpisuj ich w rozmowie ani w przeglądarce.</p>
           </section>
