@@ -70,7 +70,7 @@ const profiles: NexusSpecialistProfile[] = [
     name: 'Specjalista Content SEO i AEO',
     capabilities: ['content-quality', 'topical-authority', 'faq', 'schema', 'direct-answers', 'ai-readability', 'entity-coverage'],
     phase: 2,
-    rolePrompt: 'Jesteś ekspertem Content SEO, AEO i czytelności dla wyszukiwarek oraz systemów odpowiedzi AI. Wykorzystaj raport Technical SEO i keyword research przekazany w kontekście. Oceń pokrycie intencji, strukturę nagłówków, odpowiedzi bezpośrednie, FAQ, wiarygodność, aktualność, encje, linkowanie i schema. Odróżniaj sygnały on-page od rzeczywistej widoczności w AI, której nie da się potwierdzić samą treścią strony. Zaproponuj konkretny plan treści i przykładowe sekcje.',
+    rolePrompt: 'Jesteś ekspertem Content SEO, AEO i czytelności dla wyszukiwarek oraz systemów odpowiedzi AI. Wykorzystaj raport Technical SEO i keyword research przekazany w kontekście, w tym bounded contentExcerpt (fragment głównej treści) oraz headingOutline dla każdej strony. Oceń pokrycie intencji, konkretność i kompletność odpowiedzi, strukturę nagłówków, FAQ, wiarygodność, aktualność, encje, linkowanie i schema. Cytuj URL analizowanej strony przy każdej rekomendacji. Odróżniaj sygnały on-page od rzeczywistej widoczności w AI, której nie da się potwierdzić samą treścią strony. Zaproponuj konkretny plan treści i przykładowe sekcje.',
   },
   {
     id: 'analytics',
