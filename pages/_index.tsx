@@ -10,6 +10,7 @@ import { NexusOrchestrator } from '../helpers/nexusOrchestrator';
 import type { NexusApprovalRequest, NexusWorkflowProgress, NexusWorkflowState } from '../helpers/nexusOrchestrator';
 import { MemoryStore } from '../helpers/memoryStore';
 import { ToolRegistry, registerDefaultTools } from '../helpers/toolRegistry';
+import { registerConversationTools } from '../helpers/nexusConversationTools';
 import { VoiceEventBus } from '../helpers/voiceEventBus';
 import { HubCloudProvider } from '../helpers/hubCloudProvider';
 import { AgentHubClient, AgentHubClientError } from '../helpers/agentHubClient';
@@ -25,15 +26,16 @@ const ollamaClient = new OllamaClient();
 const memoryStore = new MemoryStore();
 const toolRegistry = new ToolRegistry();
 registerDefaultTools(toolRegistry);
+const agentHubClient = new AgentHubClient();
+const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
+registerConversationTools(toolRegistry, localCapabilitiesClient);
 const ollamaProvider = new OllamaProvider(ollamaClient);
 const cloudProvider = new HubCloudProvider();
 const modelRouter = new ModelRouter('AUTO', [ollamaProvider], cloudProvider);
 const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
-  systemPrompt: 'You are Nexus, a local-first AI assistant for product work, coding, analysis and agentic task planning.',
+  systemPrompt: 'You are Nexus, a Polish-first independent AI assistant. You coordinate tools safely, explain limitations honestly, and never claim actions that were not verified.',
 });
 const voiceEventBus = new VoiceEventBus();
-const agentHubClient = new AgentHubClient();
-const localCapabilitiesClient = new LocalCapabilitiesClient(agentHubClient.baseUrl);
 const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
 
 export default function Home() {
@@ -59,7 +61,20 @@ export default function Home() {
   const [response,setResponse]=useState('');
   const [generatedImageUrl,setGeneratedImageUrl]=useState('');
   const [isThinking,setIsThinking]=useState(false);
-  const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>([]);
+  const [conversationHistory,setConversationHistory]=useState<Array<{role:'user'|'assistant';content:string}>>(()=>{
+    if(typeof window==='undefined') return [];
+    try {
+      const saved=window.localStorage.getItem('nexus-chat-history-v1');
+      const parsed=saved?JSON.parse(saved):[];
+      return Array.isArray(parsed)
+        ? parsed.filter((item):item is {role:'user'|'assistant';content:string} =>
+            item && (item.role==='user'||item.role==='assistant') && typeof item.content==='string'
+          ).slice(-100)
+        : [];
+    } catch {
+      return [];
+    }
+  });
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
   const recognitionRef=useRef<any>(null);
   const attachmentInputRef=useRef<HTMLInputElement|null>(null);
@@ -75,6 +90,14 @@ export default function Home() {
   useEffect(() => () => {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('nexus-chat-history-v1', JSON.stringify(conversationHistory.slice(-100)));
+    } catch {
+      // Local history is best-effort; chat remains usable when storage is unavailable.
+    }
+  }, [conversationHistory]);
 
   useEffect(()=>{
     const saved=localStorage.getItem('nexus-avatar');
@@ -206,11 +229,12 @@ export default function Home() {
     if (generatedImageUrlRef.current) URL.revokeObjectURL(generatedImageUrlRef.current);
     generatedImageUrlRef.current = '';
     setGeneratedImageUrl('');
-    const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-12);
+    const nextHistory = [...conversationHistory, { role: 'user' as const, content: messageText }].slice(-100);
+    setConversationHistory(nextHistory);
     try {
       const result = await nexusOrchestrator.start({
         text: messageText,
-        history: conversationHistory.slice(-10),
+        history: conversationHistory.slice(-20),
         projectContext: 'Nexus local-first workspace. Route through available local capabilities; do not claim unavailable access.',
         attachments,
       }, publishWorkflowProgress);
@@ -222,7 +246,7 @@ export default function Home() {
       }
       setLastSources(result.searchResults);
       setConversationHistory(result.status === 'DONE'
-        ? [...nextHistory, { role: 'assistant' as const, content: result.text }].slice(-12)
+        ? [...nextHistory, { role: 'assistant' as const, content: result.text }].slice(-100)
         : nextHistory);
       setPrompt('');
       setAttachments([]);
@@ -231,6 +255,7 @@ export default function Home() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Nexus nie mógł wykonać zadania';
       setResponse(message);
+      setConversationHistory([...nextHistory, { role: 'assistant' as const, content: message }].slice(-100));
       setStatus('Wystąpił błąd');
       voiceEventBus.emit('ERROR', 'nexus', message, workflowProgress?.taskId, { source: 'orchestrator' });
     } finally {
@@ -248,7 +273,7 @@ export default function Home() {
         setApprovalRequest(result.approval);
       } else {
         setApprovalRequest(null);
-        setConversationHistory((history) => [...history, { role: 'assistant' as const, content: result.text }].slice(-12));
+        setConversationHistory((history) => [...history, { role: 'assistant' as const, content: result.text }].slice(-100));
         if (result.text.trim()) speak(result.text);
       }
     } catch (error) {
@@ -267,7 +292,7 @@ export default function Home() {
     setApprovalRequest(null);
     setResponse('Anulowałem tę operację.');
     setStatus('Gotowe');
-    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałem tę operację.' }].slice(-12));
+    setConversationHistory((history) => [...history, { role: 'assistant' as const, content: 'Anulowałem tę operację.' }].slice(-100));
   };
 
   const addAttachments = (files: FileList|null) => {
@@ -360,7 +385,18 @@ export default function Home() {
       <div className={styles.stage}><div className={styles.avatarWrap}><div className={styles.orbit}/><div className={styles.particles}><i/><i/><i/><i/><i/><i/></div>
         <div ref={avatarRef} onPointerMove={trackPointer} onPointerLeave={resetPointer} className={styles.avatar+' '+(speaking?styles.speaking:'')+' '+(listening?styles.listening:'')}><div className={styles.scan}/><img key={avatars[avatar].src} className={styles.person} src={avatars[avatar].src} alt={'Nexus — '+avatars[avatar].name} onError={event=>{event.currentTarget.style.display='none'}}/><div className={styles.faceRig} aria-hidden="true"><span className={styles.eye+' '+styles.eyeLeft}><i/></span><span className={styles.eye+' '+styles.eyeRight}><i/></span><span className={styles.mouthRig}/></div><div className={styles.wave}><i/><i/><i/><i/><i/></div></div></div>
         <div className={styles.speech}><Sparkles size={16}/> Cześć. Powiedz mi, co mam dla Ciebie zbudować.</div>
-        {response&&<div className={styles.response} role="status" aria-live="polite">{response}</div>}
+        {(conversationHistory.length>0||response||isThinking)&&<section className={styles.chatTranscript} role="log" aria-live="polite" aria-relevant="additions text">
+          {conversationHistory.map((message,index)=><article key={`${index}-${message.role}`} className={styles.chatMessage} data-role={message.role}>
+            <span>{message.role==='user'?'TY':'NEXUS'}</span>
+            <p>{message.content}</p>
+          </article>)}
+          {response&&!conversationHistory.some(message=>message.role==='assistant'&&message.content===response)&&<article className={styles.chatMessage} data-role="assistant">
+            <span>NEXUS</span><p>{response}</p>
+          </article>}
+          {isThinking&&<article className={styles.chatMessage} data-role="assistant" data-pending="true">
+            <span>NEXUS</span><p>{workflowProgress?.message||'Analizuję Twoje polecenie…'}</p>
+          </article>}
+        </section>}
         {generatedImageUrl&&<img className={styles.generatedImage} src={generatedImageUrl} alt="Obraz wygenerowany przez Nexus Image Engine"/>}
         <div className={styles.status}>{status}</div>
         <input ref={attachmentInputRef} type="file" multiple hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.xlsx,.pptx" onChange={event=>{addAttachments(event.target.files);event.currentTarget.value=''}}/>
