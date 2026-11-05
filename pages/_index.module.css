@@ -112,3 +112,22 @@
 .workspaceNav button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .workspaceNav button[aria-pressed="true"]{color:var(--foreground);border-color:rgba(124,231,255,.38);background:rgba(24,95,145,.22)}
 @media(max-width:760px){.workspaceNav{padding:7px 12px;gap:3px}.workspaceNav button{padding:7px 9px;font-size:11px}}
+
+
+.workspaceFilesPanel{margin:16px 24px 24px;border:1px solid var(--border);border-radius:14px;padding:16px;background:rgba(8,12,20,.66);color:var(--foreground)}
+.workspaceFilesHeader{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.workspaceFilesHeader h2{margin:0 0 5px;font:650 18px var(--font-family-display)}
+.workspaceFilesHeader p{margin:0;font-size:12px;color:var(--muted-foreground);line-height:1.5;max-width:620px}
+.workspaceFilesGrid{display:grid;grid-template-columns:minmax(180px,280px) minmax(0,1fr);gap:12px;min-height:360px}
+.workspaceFileList,.workspaceFilePreview{border:1px solid var(--border);border-radius:10px;background:var(--card);min-width:0;overflow:hidden}
+.workspaceFileList{display:flex;flex-direction:column;gap:5px;padding:10px}
+.workspaceFileList>div,.workspaceFilePreview>div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 6px 9px;border-bottom:1px solid var(--border);font-size:12px}
+.workspaceFileList>div>span,.workspaceFilePreview>div>span{font-size:10px;color:var(--muted-foreground)}
+.workspaceFileList>button{border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted-foreground);text-align:left;padding:7px 8px;font:11px var(--font-family-monospace);overflow-wrap:anywhere;cursor:pointer}
+.workspaceFileList>button:hover{background:rgba(124,231,255,.07);color:var(--foreground)}
+.workspaceFileList>button[aria-pressed="true"]{border-color:rgba(124,231,255,.32);background:rgba(24,95,145,.2);color:var(--foreground)}
+.workspaceFileList>p{font-size:11px;color:var(--muted-foreground);line-height:1.5}
+.workspaceFilePreview{display:flex;flex-direction:column}
+.workspaceFilePreview>div{justify-content:flex-start;flex-wrap:wrap;padding:11px}
+.workspaceFilePreview>pre{margin:0;padding:12px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 var(--font-family-monospace);max-height:65vh}
+@media(max-width:760px){.workspaceFilesPanel{margin:12px 16px 18px;padding:12px}.workspaceFilesGrid{grid-template-columns:1fr;min-height:unset}.workspaceFileList{max-height:220px;overflow-y:auto}.workspaceFilePreview{min-height:260px}.workspaceFilePreview>pre{max-height:45vh}}
