@@ -76,7 +76,7 @@ export default function Home() {
     }
   });
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
-  const [activeWorkspace,setActiveWorkspace]=useState<'chat'|'seo'|'team'|'integrations'|'settings'>('chat');
+  const [activeWorkspace,setActiveWorkspace]=useState<'chat'|'projects'|'seo'|'team'|'integrations'|'settings'>('chat');
   const [seoUrl,setSeoUrl]=useState('');
   const [seoBusy,setSeoBusy]=useState(false);
   const [seoError,setSeoError]=useState('');
@@ -87,8 +87,14 @@ export default function Home() {
   const [semrushPaidApproval,setSemrushPaidApproval]=useState(false);
   const [semrushKeyword,setSemrushKeyword]=useState('');
   const [semrushCountry,setSemrushCountry]=useState('DE');
+  const [workspaceFiles,setWorkspaceFiles]=useState<string[]>([]);
+  const [workspaceSelectedFile,setWorkspaceSelectedFile]=useState('');
+  const [workspaceFileContent,setWorkspaceFileContent]=useState('');
+  const [workspaceError,setWorkspaceError]=useState('');
+  const [workspaceBusy,setWorkspaceBusy]=useState(false);
   const recognitionRef=useRef<any>(null);
   const attachmentInputRef=useRef<HTMLInputElement|null>(null);
+  const workspaceUploadInputRef=useRef<HTMLInputElement|null>(null);
   const hubSseConnectedRef=useRef(false);
   const avatarRef=useRef<HTMLDivElement | null>(null);
   const motionStateRef=useRef<VoiceEventType>('IDLE');
@@ -120,6 +126,10 @@ export default function Home() {
   useEffect(() => {
     if (activeWorkspace === 'seo') document.getElementById('nexus-seo-audit')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (activeWorkspace === 'integrations') document.getElementById('nexus-integrations')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [activeWorkspace]);
+
+  useEffect(() => {
+    if (activeWorkspace === 'projects') void refreshWorkspaceFiles();
   }, [activeWorkspace]);
 
   useEffect(() => {
@@ -419,6 +429,61 @@ export default function Home() {
     r.onend=()=>{setListening(false); emitVoiceEvent('IDLE','Voice input ended');}; r.start();
   };
 
+  const refreshWorkspaceFiles = async () => {
+    setWorkspaceBusy(true);
+    setWorkspaceError('');
+    try {
+      const files = await localCapabilitiesClient.listWorkspaceFiles();
+      setWorkspaceFiles(files);
+      if (workspaceSelectedFile && files.includes(workspaceSelectedFile)) {
+        const file = await localCapabilitiesClient.readWorkspaceFile(workspaceSelectedFile);
+        setWorkspaceFileContent(file.content);
+      } else if (files.length) {
+        setWorkspaceSelectedFile(files[0]);
+        const file = await localCapabilitiesClient.readWorkspaceFile(files[0]);
+        setWorkspaceFileContent(file.content);
+      } else {
+        setWorkspaceSelectedFile('');
+        setWorkspaceFileContent('');
+      }
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Nie udało się odczytać workspace.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const selectWorkspaceFile = async (path: string) => {
+    setWorkspaceSelectedFile(path);
+    setWorkspaceBusy(true);
+    setWorkspaceError('');
+    try {
+      const file = await localCapabilitiesClient.readWorkspaceFile(path);
+      setWorkspaceFileContent(file.content);
+    } catch (error) {
+      setWorkspaceFileContent('');
+      setWorkspaceError(error instanceof Error ? error.message : 'Nie udało się otworzyć pliku.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const importWorkspaceFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setWorkspaceBusy(true);
+    setWorkspaceError('');
+    try {
+      for (const file of Array.from(files).slice(0, 8)) {
+        await localCapabilitiesClient.importFile(file);
+      }
+      await refreshWorkspaceFiles();
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Nie udało się zaimportować plików.');
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
   const runSeoAudit = async () => {
     if (!seoUrl.trim()) { setSeoError('Wpisz adres strony do audytu.'); return; }
     setSeoBusy(true);
@@ -587,6 +652,7 @@ export default function Home() {
     <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
       <nav className={styles.workspaceNav} aria-label="Główna nawigacja Nexusa">
         <button type="button" aria-pressed={activeWorkspace==='chat'} className={activeWorkspace==='chat'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('chat')}>Rozmowa</button>
+        <button type="button" aria-pressed={activeWorkspace==='projects'} className={activeWorkspace==='projects'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('projects')}>Projekty i pliki</button>
         <button type="button" aria-pressed={activeWorkspace==='seo'} className={activeWorkspace==='seo'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('seo')}>SEO i AEO</button>
         <button type="button" aria-pressed={activeWorkspace==='team'} className={activeWorkspace==='team'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('team')}>Zespół AI</button>
         <button type="button" aria-pressed={activeWorkspace==='integrations'} className={activeWorkspace==='integrations'?styles.workspaceActive:''} onClick={()=>setActiveWorkspace('integrations')}>Integracje</button>
@@ -615,7 +681,31 @@ export default function Home() {
         {approvalRequest&&<section className={styles.approvalCard} role="alertdialog" aria-labelledby="approval-title"><h3 id="approval-title">Potrzebuję Twojej zgody</h3><p>{approvalRequest.message}</p><div><Button variant="secondary" disabled={approvalBusy} onClick={()=>void cancelNexusRequest()}>Anuluj</Button><Button disabled={approvalBusy} onClick={()=>void approveNexusRequest()}>{approvalBusy?'Wykonuję…':approvalRequest.kind==='INSTALLER_SETUP'?'Otwórz Microsoft Store':'Zainstaluj '+approvalRequest.app.name}</Button></div></section>}
         <div className={styles.voiceRow}><Button variant="secondary" onClick={startVoice}><Mic size={18}/> {listening?'Zatrzymaj':'Rozmawiaj'}</Button></div>
       </div>
-      <details className={styles.nexusDetails} open={activeWorkspace==='team'||activeWorkspace==='settings'} style={{display:activeWorkspace==='team'||activeWorkspace==='settings'?'block':'none'}}>
+            <section className={styles.workspaceFilesPanel} style={{display:activeWorkspace==='projects'?'block':'none'}}>
+        <div className={styles.workspaceFilesHeader}>
+          <div><h2>Projekty i pliki</h2><p>Bezpieczny workspace Nexusa. Importowane pliki są kopiowane do katalogu workspace; pliki źródłowe na komputerze pozostają bez zmian.</p></div>
+          <div className={styles.seoActions}>
+            <Button variant="secondary" onClick={()=>void refreshWorkspaceFiles()} disabled={workspaceBusy}>Odśwież</Button>
+            <Button onClick={()=>workspaceUploadInputRef.current?.click()} disabled={workspaceBusy}>Dodaj pliki</Button>
+          </div>
+        </div>
+        <input ref={workspaceUploadInputRef} type="file" multiple hidden accept=".txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.sql,.toml,.yaml,.yml,.pdf,.doc,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp" onChange={event=>{void importWorkspaceFiles(event.target.files);event.currentTarget.value=''}}/>
+        {workspaceError&&<p role="alert" className={styles.capabilityError}>{workspaceError}</p>}
+        <div className={styles.workspaceFilesGrid}>
+          <aside className={styles.workspaceFileList}>
+            <div><b>Pliki workspace</b><span>{workspaceFiles.length}</span></div>
+            {workspaceBusy&&!workspaceFiles.length?<p>Wczytuję…</p>:workspaceFiles.length
+              ? workspaceFiles.map(path=><button type="button" key={path} aria-pressed={workspaceSelectedFile===path} className={workspaceSelectedFile===path?styles.workspaceFileActive:''} onClick={()=>void selectWorkspaceFile(path)}>{path}</button>)
+              : <p>Workspace jest pusty. Dodaj pliki projektu, aby Nexus mógł je przeglądać.</p>}
+          </aside>
+          <section className={styles.workspaceFilePreview}>
+            <div><b>{workspaceSelectedFile||'Podgląd pliku'}</b><span>Odczyt tylko dla dozwolonych typów tekstowych · maks. 128 KB</span></div>
+            <pre>{workspaceBusy?'Wczytuję plik…':workspaceFileContent||'Wybierz plik z listy, aby zobaczyć jego zawartość.'}</pre>
+          </section>
+        </div>
+        <p className={styles.seoMeta}>Import blokuje pliki wykonywalne i instalatory, nie uruchamia plików i nie nadpisuje istniejących plików. Podgląd nie obsługuje jeszcze ekstrakcji treści z PDF/DOCX/XLSX/PPTX.</p>
+      </section>
+<details className={styles.nexusDetails} open={activeWorkspace==='team'||activeWorkspace==='settings'} style={{display:activeWorkspace==='team'||activeWorkspace==='settings'?'block':'none'}}>
         <summary>{activeWorkspace==='settings'?'Ustawienia i diagnostyka':'Zespół AI · agenci, zadania i postęp'}</summary>
         <summary>Co robi Nexus</summary>
         <div className={styles.workflowSummary}>
