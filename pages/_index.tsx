@@ -409,6 +409,9 @@ export default function Home() {
     window.speechSynthesis.cancel();
     const u=new SpeechSynthesisUtterance(text);
     u.lang='pl-PL'; u.rate=1; u.pitch=1.05;
+    const polishVoices=window.speechSynthesis.getVoices().filter(voice=>voice.lang.toLowerCase().startsWith('pl'));
+    const preferred=polishVoices.find(voice=>/zofia|agnieszka|paulina|maja|kasia/i.test(voice.name)) ?? polishVoices.find(voice=>/natural|neural/i.test(voice.name)) ?? polishVoices[0];
+    if(preferred) u.voice=preferred;
     speechVisemePlanRef.current=estimateVisemePlan(text,{charactersPerSecond:14/u.rate});
     u.onstart=()=>{speechStartedAtRef.current=performance.now();setSpeaking(true);setStatus('Nexus mówi…')};
     u.onboundary=(event:any)=>{const span=Math.max(1,event.charLength||1);speechBoundaryRef.current={at:performance.now(),intensity:Math.min(1,.42+span*.035)};};
