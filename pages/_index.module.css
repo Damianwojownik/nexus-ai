@@ -97,3 +97,10 @@
 .seoGoogleOAuth{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border:1px solid var(--border);border-radius:9px;padding:12px;background:var(--card)}
 .seoGoogleOAuth>div:first-child{display:grid;gap:4px}.seoGoogleOAuth small{font-size:11px;color:var(--muted-foreground)}
 .seoDataOutput pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.45 var(--font-family-monospace)}
+
+
+.seoSemrush{display:grid;align-content:start;gap:8px;border:1px solid var(--border);border-radius:9px;padding:11px;min-width:0}
+.seoSemrush>b{font-size:12px}.seoSemrush>span{font:600 10px var(--font-family-monospace);color:var(--muted-foreground)}
+.seoSemrush>small{font-size:10px;line-height:1.4;color:var(--muted-foreground)}
+.seoPaidConsent{display:flex;align-items:flex-start;gap:8px;font-size:11px;line-height:1.4;color:var(--foreground)}
+.seoPaidConsent input{margin-top:2px;accent-color:var(--primary)}
