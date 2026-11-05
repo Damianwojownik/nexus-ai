@@ -131,3 +131,13 @@
 .workspaceFilePreview>div{justify-content:flex-start;flex-wrap:wrap;padding:11px}
 .workspaceFilePreview>pre{margin:0;padding:12px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 var(--font-family-monospace);max-height:65vh}
 @media(max-width:760px){.workspaceFilesPanel{margin:12px 16px 18px;padding:12px}.workspaceFilesGrid{grid-template-columns:1fr;min-height:unset}.workspaceFileList{max-height:220px;overflow-y:auto}.workspaceFilePreview{min-height:260px}.workspaceFilePreview>pre{max-height:45vh}}
+
+
+/* Independent local copy of Luna's original layered portrait; animation uses
+   the existing Nexus speech visemes and blink signal, without Ezostylia APIs. */
+.lunaLayers{position:absolute;inset:0;pointer-events:none;transform:translateY(calc(var(--nexus-breath,0) * -2px)) rotate(var(--nexus-shoulder-sway,0deg));transform-origin:50% 65%}
+.lunaLayers img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:50% 100%;user-select:none;pointer-events:none}
+.lunaBlink{opacity:clamp(0,var(--nexus-blink,0),1)}
+.lunaOo{opacity:clamp(0,calc(var(--nexus-mouth,0) * 2.2),1)}
+.lunaAh{opacity:clamp(0,calc((var(--nexus-mouth,0) - .3) * 2.2),1)}
+@media(prefers-reduced-motion:reduce){.lunaLayers{transform:none}}
