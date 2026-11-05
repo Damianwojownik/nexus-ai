@@ -135,7 +135,7 @@ export class NexusTeamOrchestrator {
 
   async run(
     input: { text: string; history?: Array<{ role: 'user' | 'assistant'; content: string }>; projectContext?: string },
-    onEvent: (event: NexusTeamEvent) => void = () => undefined,
+    onEvent: (event: NexusTeamEvent) => void | Promise<void> = () => undefined,
   ): Promise<NexusTeamResult> {
     const plan = buildSeoTeamPlan(input.text);
     if (!plan.length) throw new Error('No specialist team is registered for this task.');
@@ -147,7 +147,7 @@ export class NexusTeamOrchestrator {
     const execute = async (task: NexusSpecialistTask, dependencies: string): Promise<NexusSpecialistReport> => {
       const profile = profileById.get(task.id)!;
       const startedAt = Date.now();
-      onEvent({ agentId: task.agentId, name: profile.name, status: 'STARTED', message: profile.name + ' rozpoczyna pracę.' });
+      await onEvent({ agentId: task.agentId, name: profile.name, status: 'STARTED', message: profile.name + ' rozpoczyna pracę.' });
       try {
         const result: NexusAgentResult = await this.agent.send({
           text: input.text,
@@ -169,7 +169,7 @@ export class NexusTeamOrchestrator {
           durationMs: Date.now() - startedAt,
         };
         reportById.set(task.id, report);
-        onEvent({ agentId: task.agentId, name: profile.name, status: 'DONE', message: profile.name + ' zakończył analizę.' });
+        await onEvent({ agentId: task.agentId, name: profile.name, status: 'DONE', message: profile.name + ' zakończył analizę.' });
         return report;
       } catch (error) {
         const report: NexusSpecialistReport = {
@@ -181,7 +181,7 @@ export class NexusTeamOrchestrator {
           durationMs: Date.now() - startedAt,
         };
         reportById.set(task.id, report);
-        onEvent({ agentId: task.agentId, name: profile.name, status: 'FAILED', message: profile.name + ' nie zakończył pracy: ' + report.text });
+        await onEvent({ agentId: task.agentId, name: profile.name, status: 'FAILED', message: profile.name + ' nie zakończył pracy: ' + report.text });
         return report;
       }
     };
