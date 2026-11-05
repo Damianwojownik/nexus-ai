@@ -49,20 +49,18 @@ const TOOL_RE = /^[a-zA-Z0-9_.:/-]{1,160}$/;
 
 function safeUrl(raw: string): URL {
   const url = new URL(raw);
-  const loopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '::1' || url.hostname === '[::1]';
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
     throw new Error('Connector URL must use HTTPS, except loopback HTTP is allowed');
   }
   if (url.username || url.password) throw new Error('Connector URL must not embed credentials');
   if (!loopback) {
-    const host = url.hostname.toLowerCase().replace(/^\\[|\\]$/g, '');
-    const privateIpv4 = /^(10\\.|127\\.|169\\.254\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)/.test(host);
     const reservedName = host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')
-      || host.endsWith('.internal') || host === 'metadata.google.internal';
-    const ipVersion = isIP(host);
-    const nonPublicIpv6 = ipVersion === 6 && !/^2|^3/.test(host.split(':')[0]);
-    if (privateIpv4 || reservedName || (ipVersion === 4 && privateIpv4) || nonPublicIpv6) {
-      throw new Error('Connector URL must not target a private or reserved network address');
+      || host.endsWith('.internal') || host.endsWith('.test') || host.endsWith('.invalid')
+      || host.endsWith('.example') || host === 'metadata.google.internal';
+    if (reservedName || isIP(host) !== 0 || !host.includes('.')) {
+      throw new Error('Connector URL must use a public DNS hostname, not a private, reserved or literal IP address');
     }
   }
   return url;
@@ -182,6 +180,7 @@ class McpHttpConnector {
       headers: this.headers(),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30000),
+      redirect: 'error',
     });
     const sessionId = response.headers.get('mcp-session-id');
     if (sessionId) this.sessionId = sessionId;
