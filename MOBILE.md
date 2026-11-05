@@ -20,7 +20,7 @@ Bramka mobilna nasłuchuje **tylko na 127.0.0.1:5190**; dostęp z telefonu odbyw
 4. Przygotuj aplikację:
 
        npm ci
-       npm run mobile:build
+       npm run build
 
 5. Uruchom Ollamę na Windows i sprawdź ją poleceniem ollama ps.
 6. Jeśli Agent Hub nie działa jeszcze na porcie 8789, uruchom go w terminalu 1:
@@ -31,7 +31,7 @@ Bramka mobilna nasłuchuje **tylko na 127.0.0.1:5190**; dostęp z telefonu odbyw
 7. Uruchom mobilną bramkę w terminalu 2:
 
        $env:NEXUS_AGENT_HUB_PORT="8789"
-       npm run mobile:serve
+       node scripts/mobile-server.mjs
 
    Terminal wyświetli **kod parowania** oraz adres http://127.0.0.1:5190. Zostaw go otwarty.
 8. Na Windows, gdy Tailscale jest połączony, wykonaj w terminalu 3:
