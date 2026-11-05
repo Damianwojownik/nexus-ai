@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { auditPublicSite, getSeoIntegrationStatus, parseRobots, runPageSpeed, runSemrushBacklinksOverview, runSemrushKeywordMetrics } from './seoAuditor.ts';
+import { auditPublicSite, getSeoIntegrationStatus, parseRobots, runPageSpeed, runSemrushBacklinksOverview, runSemrushBacklinkCompetitors, runSemrushKeywordMetrics } from './seoAuditor.ts';
 
 test('robots.txt applies only wildcard user-agent groups and preserves their sitemap directives', () => {
   const parsed = parseRobots(`User-agent: Googlebot
@@ -30,6 +30,10 @@ test('Semrush paid endpoints reject requests before network access unless explic
   await assert.rejects(
     () => runSemrushKeywordMetrics({ keyword: 'seo tools', country: 'DE', paidQueryApproved: false }),
     /20 jednostek API/i,
+  );
+  await assert.rejects(
+    () => runSemrushBacklinkCompetitors('https://example.com', false),
+    /200 jednostek API/i,
   );
   await assert.rejects(
     () => runSemrushKeywordMetrics({ keyword: 'seo tools', country: 'DE', paidQueryApproved: true }),
