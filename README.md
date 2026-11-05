@@ -42,9 +42,15 @@ To use the user's eligible ChatGPT plan as the primary model, open Nexus, connec
 - ChatGPT OAuth credentials are stored only in the local NexusAI app-data directory; Floot does not receive them.
 - The ChatGPT plan connection starts new Nexus conversations. It does not import existing ChatGPT conversation history or native ChatGPT memory; durable continuity is owned by Nexus memory.
 
-## Next task
+## Independent-core delivery status
 
-Configure and verify the same frontend/runtime values in the hosted Floot deployment if that environment is required. The local end-to-end path is documented in `docs/AGENT-HUB.md`.
+The standalone Nexus work is maintained in the draft pull request [#13 — Build the independent Nexus chat core](https://github.com/Damianwojownik/nexus-ai/pull/13). It includes the chat/tool-call core, specialist SEO/AEO coordinator, safe website crawler, PageSpeed and read-only Google/Business Profile integrations, manual Semrush endpoints with per-query cost consent, workspace UI and tests.
+
+Latest verified CI: `npm ci`, build, all six test suites and `npm audit` passed; the audit reported zero known vulnerabilities after upgrading Vite to 7.3.7 and Undici to 7.30.1.
+
+The draft is not merged into `main` or deployed. The Agent Hub still needs a proper authentication/session layer, per-user isolation, production secrets management, strict CORS/rate limits and a persistent hosted database before public hosting is safe. Do not expose the local Hub by changing its bind address to `0.0.0.0`. No paid hosting or API usage has been provisioned.
+
+See [docs/INDEPENDENT-NEXUS.md](docs/INDEPENDENT-NEXUS.md) for the implemented scope, external integration requirements and production security gates.
 
 
 ## Independent application direction
