@@ -25,6 +25,7 @@ import { LocalSpeech, validateSpeechText } from './localSpeech.ts';
 import { PaulinaSpeechStream } from './paulinaSpeechStream.ts';
 import { OllamaHttpProvider } from './ollamaHttpProvider.ts';
 import { CapabilityRegistry, GitHubConnector } from './capabilityRegistry.ts';
+import { ConnectorRegistry } from './connectorRegistry.ts';
 import type { ToolConnector } from './capabilityRegistry.ts';
 import { HeadroomLocalConnector, OmniRouteLocalConnector, TaskObserverConnector } from './localTooling.ts';
 import { LlamaCppProvider } from './llamaCppProvider.ts';
@@ -307,6 +308,7 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
   ], undefined, { freeOnly });
   if (freeOnly) aiRouter.enableFreeMode();
   const capabilityRegistry = options.capabilityRegistry ?? createDefaultCapabilityRegistry(localCapabilities, options.connectors, hub);
+  const externalConnectors = new ConnectorRegistry();
   const fasterLivePortraitDir = resolve(process.env.FASTER_LIVE_PORTRAIT_DIR ?? join(homedir(), 'FasterLivePortrait'));
   const avatarPortraitsDir = join(fasterLivePortraitDir, 'checkpoints', 'nexus_user_portraits');
   const avatarJobs = new Map<string, AvatarAnimationJob>();
@@ -854,6 +856,27 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
           request.off('aborted', abortIfDisconnected);
           response.off('close', abortIfDisconnected);
         }
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/connectors') {
+        sendJson(response, 200, { connectors: await externalConnectors.health() });
+        return;
+      }
+
+      if (method === 'GET' && segments.length === 4 && segments[0] === 'api' && segments[1] === 'connectors' && segments[3] === 'tools') {
+        sendJson(response, 200, { connector: segments[2], tools: await externalConnectors.listTools(segments[2]) });
+        return;
+      }
+
+      if (method === 'POST' && segments.length === 4 && segments[0] === 'api' && segments[1] === 'connectors' && segments[3] === 'call') {
+        if (origin && !isLoopbackOrigin(origin)) throw new HttpError(403, 'External connector actions are available only from the local Nexus frontend');
+        const body = await readJson(request, 2 * 1024 * 1024);
+        const tool = requiredString(body, 'tool');
+        const args = body.args === undefined ? {} : body.args;
+        if (!isRecord(args)) throw new HttpError(400, 'args must be a JSON object');
+        const result = await externalConnectors.callTool(segments[2], tool, args, body.confirmed === true);
+        sendJson(response, 200, { connector: segments[2], tool, result });
         return;
       }
 
