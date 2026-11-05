@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { load } from 'cheerio';
+import { googleOAuthManager } from './googleOAuth.ts';
 
 export interface SeoIssue {
   severity: 'critical' | 'high' | 'medium' | 'low';
@@ -594,17 +595,28 @@ export async function runPageSpeed(target: unknown, strategyValue: unknown = 'mo
   };
 }
 
-export function getSeoIntegrationStatus(env: NodeJS.ProcessEnv = process.env) {
+export async function getSeoIntegrationStatus(env: NodeJS.ProcessEnv = process.env) {
+  const oauth = await googleOAuthManager.status();
   const connected = (keys: string[]) => keys.every((key) => Boolean((env[key] ?? '').trim()));
-  const hasGsc = connected(['GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN', 'GOOGLE_SEARCH_CONSOLE_SITE_URL']);
-  const hasGa4 = connected(['GOOGLE_GA4_ACCESS_TOKEN', 'GOOGLE_GA4_PROPERTY_ID']);
+  const siteUrl = (env.GOOGLE_SEARCH_CONSOLE_SITE_URL ?? '').trim();
+  const propertyId = (env.GOOGLE_GA4_PROPERTY_ID ?? '').trim();
+  const locationId = (env.GOOGLE_BUSINESS_PROFILE_LOCATION_ID ?? '').trim();
+  const hasGsc = (Boolean((env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN ?? '').trim())
+    || (oauth.connected && oauth.scopes.includes('https://www.googleapis.com/auth/webmasters.readonly')))
+    && Boolean(siteUrl);
+  const hasGa4 = (Boolean((env.GOOGLE_GA4_ACCESS_TOKEN ?? '').trim())
+    || (oauth.connected && oauth.scopes.includes('https://www.googleapis.com/auth/analytics.readonly')))
+    && /^\d+$/.test(propertyId);
   const hasSemrush = connected(['SEMRUSH_API_KEY']);
-  const hasGbp = connected(['GOOGLE_BUSINESS_PROFILE_ACCESS_TOKEN', 'GOOGLE_BUSINESS_PROFILE_LOCATION_ID']);
+  const hasGbp = (Boolean((env.GOOGLE_BUSINESS_PROFILE_ACCESS_TOKEN ?? '').trim())
+    || (oauth.connected && oauth.scopes.includes('https://www.googleapis.com/auth/business.manage')))
+    && Boolean(locationId);
   return {
-    searchConsole: { status: hasGsc ? 'CONFIGURED' : 'NOT_CONFIGURED', requiresOAuth: true, configKeys: ['GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN', 'GOOGLE_SEARCH_CONSOLE_SITE_URL'] },
-    ga4: { status: hasGa4 ? 'CONFIGURED' : 'NOT_CONFIGURED', requiresOAuth: true, configKeys: ['GOOGLE_GA4_ACCESS_TOKEN', 'GOOGLE_GA4_PROPERTY_ID'] },
+    googleOAuth: oauth,
+    searchConsole: { status: hasGsc ? 'CONFIGURED' : 'NOT_CONFIGURED', requiresOAuth: true, siteConfigured: Boolean(siteUrl), configKeys: ['GOOGLE_SEARCH_CONSOLE_SITE_URL'] },
+    ga4: { status: hasGa4 ? 'CONFIGURED' : 'NOT_CONFIGURED', requiresOAuth: true, propertyConfigured: /^\d+$/.test(propertyId), configKeys: ['GOOGLE_GA4_PROPERTY_ID'] },
     backlinks: { status: hasSemrush ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Semrush', paidProvider: true, approvalRequiredBeforeQueries: true, configKeys: ['SEMRUSH_API_KEY'] },
-    localSeo: { status: hasGbp ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Google Business Profile', requiresOAuth: true, configKeys: ['GOOGLE_BUSINESS_PROFILE_ACCESS_TOKEN', 'GOOGLE_BUSINESS_PROFILE_LOCATION_ID'] },
+    localSeo: { status: hasGbp ? 'CONFIGURED' : 'NOT_CONFIGURED', provider: 'Google Business Profile', requiresOAuth: true, locationConfigured: Boolean(locationId), configKeys: ['GOOGLE_BUSINESS_PROFILE_LOCATION_ID'] },
   };
 }
 
@@ -616,9 +628,10 @@ function isoDate(value: unknown, fallback: string): string {
 }
 
 export async function runSearchConsoleReport(input: { startDate?: unknown; endDate?: unknown } = {}) {
-  const token = (process.env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN ?? '').trim();
   const siteUrl = (process.env.GOOGLE_SEARCH_CONSOLE_SITE_URL ?? '').trim();
-  if (!token || !siteUrl) throw new Error('Search Console nie jest podłączony. Wymagane są token OAuth i GOOGLE_SEARCH_CONSOLE_SITE_URL.');
+  if (!siteUrl) throw new Error('Wymagane jest GOOGLE_SEARCH_CONSOLE_SITE_URL dla zweryfikowanej usługi Search Console.');
+  const token = (process.env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN ?? '').trim()
+    || await googleOAuthManager.accessToken('https://www.googleapis.com/auth/webmasters.readonly');
   const today = new Date();
   const endFallback = new Date(today.getTime() - 3 * 86_400_000).toISOString().slice(0, 10);
   const startFallback = new Date(today.getTime() - 31 * 86_400_000).toISOString().slice(0, 10);
@@ -638,9 +651,10 @@ export async function runSearchConsoleReport(input: { startDate?: unknown; endDa
 }
 
 export async function runGa4Report(input: { startDate?: unknown; endDate?: unknown } = {}) {
-  const token = (process.env.GOOGLE_GA4_ACCESS_TOKEN ?? '').trim();
   const propertyId = (process.env.GOOGLE_GA4_PROPERTY_ID ?? '').trim();
-  if (!token || !/^\d+$/.test(propertyId)) throw new Error('GA4 nie jest podłączony. Wymagane są token OAuth i numeryczny GOOGLE_GA4_PROPERTY_ID.');
+  if (!/^\d+$/.test(propertyId)) throw new Error('Wymagany jest numeryczny GOOGLE_GA4_PROPERTY_ID.');
+  const token = (process.env.GOOGLE_GA4_ACCESS_TOKEN ?? '').trim()
+    || await googleOAuthManager.accessToken('https://www.googleapis.com/auth/analytics.readonly');
   const today = new Date();
   const endFallback = new Date(today.getTime() - 1 * 86_400_000).toISOString().slice(0, 10);
   const startFallback = new Date(today.getTime() - 28 * 86_400_000).toISOString().slice(0, 10);
@@ -663,3 +677,45 @@ export async function runGa4Report(input: { startDate?: unknown; endDate?: unkno
   if (!response.ok) throw new Error(data?.error?.message || 'GA4 Data API HTTP ' + response.status);
   return { provider: 'Google Analytics 4', propertyId, startDate, endDate, dimensionHeaders: data.dimensionHeaders ?? [], metricHeaders: data.metricHeaders ?? [], rows: Array.isArray(data.rows) ? data.rows : [] };
 }
+
+export async function runGoogleBusinessProfileAudit() {
+  const locationResource = (process.env.GOOGLE_BUSINESS_PROFILE_LOCATION_ID ?? '').trim();
+  if (!locationResource) throw new Error('Wymagane jest GOOGLE_BUSINESS_PROFILE_LOCATION_ID, np. locations/123456789.');
+  const normalizedResource = locationResource.startsWith('locations/') ? locationResource : 'locations/' + locationResource;
+  if (!/^locations\/[A-Za-z0-9_-]+$/.test(normalizedResource)) throw new Error('Niepoprawny GOOGLE_BUSINESS_PROFILE_LOCATION_ID.');
+  const token = (process.env.GOOGLE_BUSINESS_PROFILE_ACCESS_TOKEN ?? '').trim()
+    || await googleOAuthManager.accessToken('https://www.googleapis.com/auth/business.manage');
+  const endpoint = new URL('https://mybusinessbusinessinformation.googleapis.com/v1/' + normalizedResource);
+  endpoint.searchParams.set('readMask', 'name,title,storeCode,websiteUri,phoneNumbers,regularHours,specialHours,storefrontAddress,metadata,profile');
+  const response = await fetch(endpoint, {
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+    signal: AbortSignal.timeout(30_000),
+  });
+  const data = await response.json().catch(() => ({})) as any;
+  if (!response.ok) throw new Error(data?.error?.message || 'Google Business Profile API HTTP ' + response.status);
+  const missing: string[] = [];
+  if (!data.title) missing.push('Nazwa firmy');
+  if (!data.websiteUri) missing.push('Adres strony');
+  if (!data.phoneNumbers?.primaryPhone) missing.push('Telefon główny');
+  if (!data.storefrontAddress?.locality || !data.storefrontAddress?.addressLines?.length) missing.push('Pełny adres lokalizacji');
+  if (!data.regularHours?.periods?.length) missing.push('Godziny otwarcia');
+  return {
+    provider: 'Google Business Profile',
+    resource: normalizedResource,
+    location: {
+      title: data.title,
+      websiteUri: data.websiteUri,
+      primaryPhone: data.phoneNumbers?.primaryPhone,
+      storefrontAddress: data.storefrontAddress,
+      regularHours: data.regularHours,
+      metadata: data.metadata,
+      profile: data.profile,
+    },
+    missingProfileFields: missing,
+    limitations: [
+      'To jest odczyt danych wizytówki, nie audyt pozycji w Mapach ani opinii klientów.',
+      'Nexus nie zmienił żadnego pola wizytówki. Aktualizacje wymagają osobnej, jawnej zgody.',
+    ],
+  };
+}
+
