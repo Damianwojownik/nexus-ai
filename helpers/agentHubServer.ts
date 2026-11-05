@@ -447,6 +447,12 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
         return;
       }
 
+      if (method === 'POST' && url.pathname === '/api/seo/google-business-profile/reviews') {
+        const { runGoogleBusinessProfileReviews } = await import('./seoAuditor.ts');
+        sendJson(response, 200, await runGoogleBusinessProfileReviews());
+        return;
+      }
+
       if (method === 'POST' && url.pathname === '/api/seo/semrush/backlinks') {
         const body = await readJson(request, 16 * 1024);
         sendJson(response, 200, await runSemrushBacklinksOverview(
