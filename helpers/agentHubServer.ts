@@ -8,6 +8,7 @@ import { LocalCapabilities, LocalCapabilityError } from './localCapabilities.ts'
 import { SelfHostedAvatarServerClient } from './selfHostedAvatarServer.ts';
 import { SelfHostedImageServerClient } from './selfHostedImageServer.ts';
 import { NexusCloudRouter } from './cloudProviders.ts';
+import { auditPublicSite, getSeoIntegrationStatus, runGa4Report, runPageSpeed, runSearchConsoleReport } from './seoAuditor.ts';
 
 const taskStatuses: AgentTaskStatus[] = ['TODO', 'WORKING', 'BLOCKED', 'DONE'];
 const agentKinds: AgentKind[] = ['orchestrator', 'primary', 'codex', 'ollama', 'reviewer', 'researcher', 'memory', 'tool'];
@@ -404,6 +405,39 @@ export function createAgentHubServer(hub: AgentHub, options: AgentHubServerOptio
       if (method === 'GET' && segments.length === 2 && segments[0] === 'api' && segments[1] === 'weather') {
         const query = url.searchParams.get('q') ?? '';
         sendJson(response, 200, await localCapabilities.getWeather(query));
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/api/seo/integrations') {
+        sendJson(response, 200, getSeoIntegrationStatus());
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/audit') {
+        const body = await readJson(request, 16 * 1024);
+        const result = await auditPublicSite(requiredString(body, 'url'), typeof body.maxPages === 'number' ? body.maxPages : 20);
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/pagespeed') {
+        const body = await readJson(request, 16 * 1024);
+        const result = await runPageSpeed(requiredString(body, 'url'), body.strategy);
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/search-console') {
+        const body = await readJson(request, 16 * 1024);
+        const result = await runSearchConsoleReport({ startDate: body.startDate, endDate: body.endDate });
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/api/seo/ga4') {
+        const body = await readJson(request, 16 * 1024);
+        const result = await runGa4Report({ startDate: body.startDate, endDate: body.endDate });
+        sendJson(response, 200, result);
         return;
       }
 
