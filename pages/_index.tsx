@@ -76,6 +76,13 @@ export default function Home() {
     }
   });
   const [lastSources,setLastSources]=useState<Array<{title:string;url:string;snippet:string}>>([]);
+  const [seoUrl,setSeoUrl]=useState('');
+  const [seoBusy,setSeoBusy]=useState(false);
+  const [seoError,setSeoError]=useState('');
+  const [seoReport,setSeoReport]=useState<any>(null);
+  const [seoPageSpeed,setSeoPageSpeed]=useState<any>(null);
+  const [seoIntegrations,setSeoIntegrations]=useState<any>(null);
+  const [seoDataReport,setSeoDataReport]=useState<any>(null);
   const recognitionRef=useRef<any>(null);
   const attachmentInputRef=useRef<HTMLInputElement|null>(null);
   const hubSseConnectedRef=useRef(false);
@@ -98,6 +105,12 @@ export default function Home() {
       // Local history is best-effort; chat remains usable when storage is unavailable.
     }
   }, [conversationHistory]);
+
+  useEffect(() => {
+    void localCapabilitiesClient.getSeoIntegrations()
+      .then(setSeoIntegrations)
+      .catch(() => setSeoIntegrations(null));
+  }, []);
 
   useEffect(()=>{
     const saved=localStorage.getItem('nexus-avatar');
@@ -379,6 +392,78 @@ export default function Home() {
     r.onerror=(e:any)=>{emitVoiceEvent('ERROR', e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu':'Błąd mikrofonu — spróbuj ponownie'); setStatus(e.error==='not-allowed'?'Zezwól Nexusowi na dostęp do mikrofonu':'Błąd mikrofonu — spróbuj ponownie');};
     r.onend=()=>{setListening(false); emitVoiceEvent('IDLE','Voice input ended');}; r.start();
   };
+
+  const runSeoAudit = async () => {
+    if (!seoUrl.trim()) { setSeoError('Wpisz adres strony do audytu.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoReport(null);
+    try {
+      const result = await localCapabilitiesClient.auditSeo(seoUrl.trim(), 30);
+      setSeoReport(result);
+      setSeoIntegrations(await localCapabilitiesClient.getSeoIntegrations().catch(() => seoIntegrations));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się wykonać audytu SEO.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const runSeoPageSpeed = async () => {
+    if (!seoUrl.trim()) { setSeoError('Wpisz adres strony do pomiaru.'); return; }
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoPageSpeed(null);
+    try {
+      setSeoPageSpeed(await localCapabilitiesClient.runPageSpeed(seoUrl.trim(), 'mobile'));
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się uruchomić PageSpeed.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const runSeoDataReport = async (provider: 'gsc' | 'ga4') => {
+    setSeoBusy(true);
+    setSeoError('');
+    setSeoDataReport(null);
+    try {
+      const result = provider === 'gsc'
+        ? await localCapabilitiesClient.searchConsoleReport()
+        : await localCapabilitiesClient.ga4Report();
+      setSeoDataReport(result);
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się pobrać raportu analitycznego.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const refreshSeoIntegrations = async () => {
+    setSeoBusy(true);
+    setSeoError('');
+    try {
+      setSeoIntegrations(await localCapabilitiesClient.getSeoIntegrations());
+    } catch (error) {
+      setSeoError(error instanceof Error ? error.message : 'Nie udało się sprawdzić integracji.');
+    } finally {
+      setSeoBusy(false);
+    }
+  };
+
+  const exportSeoCsv = () => {
+    if (!seoReport?.issues?.length) return;
+    const columns = ['severity', 'code', 'page', 'title', 'detail', 'recommendation'];
+    const quote = (value: unknown) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const csv = [columns.join(','), ...seoReport.issues.map((issue: any) => columns.map((key) => quote(issue[key])).join(','))].join('\\r\\n');
+    const url = URL.createObjectURL(new Blob(['\\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'nexus-seo-audit.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   const run = runNexusConversation;
   return <main className={styles.shell}>
     <section className={styles.main}><header><div className={styles.brand}><div className={styles.mark}>N</div><div><b>NEXUS</b><span>ASYSTENT</span></div></div><div className={styles.model}><span className={styles.dot}/> {status}</div></header>
@@ -426,6 +511,69 @@ export default function Home() {
             <div><h4>Zdarzenia</h4>{hubEvents.slice(0,6).map(event=><p key={event.id}>{event.type} · {event.agentId}: {event.message}</p>)}</div>
           </section>
           {hubError&&<p role="alert" className={styles.capabilityError}>{hubError}</p>}
+        </div>
+
+      </details>
+      <details className={styles.seoPanel}>
+        <summary>SEO i AEO · audyt strony, PageSpeed i integracje</summary>
+        <div className={styles.seoPanelBody}>
+          <div className={styles.seoControls}>
+            <Input value={seoUrl} onChange={event=>setSeoUrl(event.target.value)} placeholder="https://twoja-domena.pl"/>
+            <div className={styles.seoActions}>
+              <Button onClick={()=>void runSeoAudit()} disabled={seoBusy||!seoUrl.trim()}>{seoBusy?'Pracuję…':'Audyt SEO/AEO · do 30 stron'}</Button>
+              <Button variant="secondary" onClick={()=>void runSeoPageSpeed()} disabled={seoBusy||!seoUrl.trim()}>PageSpeed mobile</Button>
+            </div>
+          </div>
+          {seoError&&<p role="alert" className={styles.capabilityError}>{seoError}</p>}
+          {seoReport&&<section className={styles.seoReport}>
+            <div className={styles.seoReportHeader}>
+              <div><b>Raport techniczny</b><small>{seoReport.site} · {seoReport.pagesScanned}/{seoReport.maxPages} stron · {new Date(seoReport.crawledAt).toLocaleString('pl-PL')}</small></div>
+              <div className={styles.seoActions}>
+                <Button variant="secondary" onClick={exportSeoCsv} disabled={!seoReport.issues?.length}>Eksport CSV</Button>
+                <Button variant="secondary" onClick={()=>window.print()}>Drukuj / PDF</Button>
+              </div>
+            </div>
+            <div className={styles.seoMetrics}>
+              <div><b>{seoReport.summary.critical}</b><span>Krytyczne</span></div>
+              <div><b>{seoReport.summary.high}</b><span>Wysokie</span></div>
+              <div><b>{seoReport.summary.medium}</b><span>Średnie</span></div>
+              <div><b>{seoReport.summary.low}</b><span>Niskie</span></div>
+            </div>
+            <div className={styles.seoReportHeader}><b>AEO / gotowość treści</b><small>{seoReport.aeo.directAnswerReadiness.toUpperCase()} · średnio {seoReport.aeo.averageWordsPerPage} słów / stronę</small></div>
+            <div className={styles.seoMeta}>{seoReport.aeo.notes?.map((note:string,index:number)=><p key={index}>{note}</p>)}</div>
+            <div className={styles.seoIssues}>
+              <b>Problemy i zalecenia</b>
+              {seoReport.issues?.length
+                ? seoReport.issues.slice(0,30).map((issue:any,index:number)=><article key={issue.code+'-'+index}>
+                    <div><span data-severity={issue.severity}>{issue.severity.toUpperCase()}</span><b>{issue.title}</b></div>
+                    <small>{issue.page}</small><p>{issue.detail}</p><p>{issue.recommendation}</p>
+                  </article>)
+                : <p>Nie wykryto problemów w zakresie tej próbki crawla.</p>}
+            </div>
+            <p className={styles.seoMeta}>{seoReport.limitations?.join(' ')}</p>
+          </section>}
+          {seoPageSpeed&&<section className={styles.seoReport}>
+            <div className={styles.seoReportHeader}><b>Google PageSpeed Insights · {seoPageSpeed.strategy}</b><small>{seoPageSpeed.url}</small></div>
+            <div className={styles.seoMetrics}>
+              {Object.entries(seoPageSpeed.scores||{}).map(([key,value]:[string,any])=><div key={key}><b>{value}</b><span>{key}</span></div>)}
+            </div>
+            <div className={styles.seoMeta}><p>Laboratorium Lighthouse: LCP {seoPageSpeed.lab.lcpMs??'—'} ms · FCP {seoPageSpeed.lab.fcpMs??'—'} ms · CLS {seoPageSpeed.lab.cls??'—'} · TBT {seoPageSpeed.lab.tbtMs??'—'} ms</p>
+              <p>Dane terenowe: {seoPageSpeed.field?.source||'niedostępne'} {seoPageSpeed.field?.overallCategory||''}</p>
+            </div>
+            <div className={styles.seoIssues}><b>Najważniejsze możliwości poprawy</b>{seoPageSpeed.opportunities?.map((item:any)=><article key={item.id}><div><b>{item.title}</b><span>{item.savingsMs===undefined?'':item.savingsMs+' ms potencjalnej oszczędności'}</span></div><p>{item.description}</p></article>)}</div>
+            <p className={styles.seoMeta}>{seoPageSpeed.limitations?.join(' ')}</p>
+          </section>}
+          <section className={styles.seoIntegrations}>
+            <div className={styles.seoReportHeader}><b>Integracje danych</b><Button variant="secondary" onClick={()=>void refreshSeoIntegrations()} disabled={seoBusy}>Odśwież statusy</Button></div>
+            {seoIntegrations?<div className={styles.seoIntegrationGrid}>
+              <div><b>Google Search Console</b><span>{seoIntegrations.searchConsole.status}</span><small>Wymaga OAuth · webmasters.readonly</small><Button variant="secondary" size="sm" onClick={()=>void runSeoDataReport('gsc')} disabled={seoBusy||seoIntegrations.searchConsole.status!=='CONFIGURED'}>Pobierz raport GSC</Button></div>
+              <div><b>Google Analytics 4</b><span>{seoIntegrations.ga4.status}</span><small>Wymaga OAuth · analytics.readonly</small><Button variant="secondary" size="sm" onClick={()=>void runSeoDataReport('ga4')} disabled={seoBusy||seoIntegrations.ga4.status!=='CONFIGURED'}>Pobierz raport GA4</Button></div>
+              <div><b>Backlinki · Semrush</b><span>{seoIntegrations.backlinks.status}</span><small>Płatna usługa i jednostki API; zapytania wymagają osobnej zgody.</small></div>
+              <div><b>Google Business Profile</b><span>{seoIntegrations.localSeo.status}</span><small>Wymaga OAuth i uprawnień do profilu.</small></div>
+            </div>:<p className={styles.seoMeta}>Status integracji pojawi się po połączeniu z Agent Hub.</p>}
+            {seoDataReport&&<pre className={styles.seoDataOutput}>{JSON.stringify(seoDataReport,null,2)}</pre>}
+            <p className={styles.seoMeta}>Tokeny OAuth i klucze API są odczytywane wyłącznie po stronie serwera. Nie wpisuj ich w rozmowie ani w przeglądarce.</p>
+          </section>
         </div>
       </details>
     </section>
