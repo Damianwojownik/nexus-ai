@@ -33,7 +33,7 @@ const ollamaProvider = new OllamaProvider(ollamaClient);
 const cloudProvider = new HubCloudProvider();
 const modelRouter = new ModelRouter('AUTO', [ollamaProvider], cloudProvider);
 const nexusAgent = new NexusAgent(modelRouter, memoryStore, toolRegistry, {
-  systemPrompt: 'You are Nexus, a Polish-first independent AI assistant. You coordinate tools safely, explain limitations honestly, and never claim actions that were not verified.',
+  systemPrompt: 'Jesteś Luną — główną, polskojęzyczną asystentką AI tej aplikacji. Masz wszystkie możliwości silnika Nexus: pamięć, narzędzia, projekty, analizę SEO/AEO, zespół specjalistów i integracje w zakresie rzeczywiście skonfigurowanym. Mów jako Luna, nigdy jako drugi, osobny asystent Nexus. Koordynuj narzędzia bezpiecznie, jasno wyjaśniaj ograniczenia i nie twierdź, że wykonałaś działania, których nie zweryfikowano.',
 });
 const voiceEventBus = new VoiceEventBus();
 const nexusOrchestrator = new NexusOrchestrator(nexusAgent, agentHubClient, memoryStore, localCapabilitiesClient);
@@ -287,7 +287,7 @@ export default function Home() {
       const result = await nexusOrchestrator.start({
         text: messageText,
         history: conversationHistory.slice(-20),
-        projectContext: 'Nexus local-first workspace. Route through available local capabilities; do not claim unavailable access.',
+        projectContext: 'Luna jest jedyną tożsamością asystentki; korzysta z całego lokalnego silnika Nexus, jego pamięci, narzędzi, projektów i zespołu SEO/AEO. Nie deklaruj niedostępnych uprawnień ani niezrealizowanych działań.',
         attachments,
       }, publishWorkflowProgress);
       setResponse(result.text);
@@ -832,7 +832,7 @@ export default function Home() {
         </div>
         <div className={styles.diagnosticsContent}>
           <section className={styles.settingsPanel}>
-            <h3>NEXUS</h3>
+            <h3>LUNA · silnik Nexus</h3>
             <div className={styles.settingsRow}><span>Primary Agent</span><strong>{primaryStatus}</strong></div>
             <div className={styles.settingsRow}><span>Local AI</span><strong>Ollama · {selectedModel} · {ollamaStatus}</strong></div>
             <div className={styles.settingsRow}><span>Memory</span><strong>{memoryReady?'ready':'loading'}</strong></div>
