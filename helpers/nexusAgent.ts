@@ -175,13 +175,13 @@ export class NexusAgent {
         break;
       }
 
+      toolCallCount += 1;
       const tool = availableTools.find((candidate) => candidate.name === action.name);
       if (!tool) {
         observations.push(`Tool request rejected: "${action.name}" is not in the safe tool list.`);
         continue;
       }
 
-      toolCallCount += 1;
       try {
         const result = await this.toolRegistry.execute(tool.name, action.arguments, { invokedByModel: true });
         usedTools.push(tool.name);
