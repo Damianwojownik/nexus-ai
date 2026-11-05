@@ -47,6 +47,12 @@ To use the user's eligible ChatGPT plan as the primary model, open Nexus, connec
 Configure and verify the same frontend/runtime values in the hosted Floot deployment if that environment is required. The local end-to-end path is documented in `docs/AGENT-HUB.md`.
 
 
+## Independent application direction
+
+Nexus is being developed as a standalone AI chat application. It has no runtime dependency on Ezostylia and does not modify the Ezostylia project. See [docs/INDEPENDENT-NEXUS.md](docs/INDEPENDENT-NEXUS.md) for the current architecture, implemented capabilities, security gates and staged roadmap.
+
+The independent core branch adds controlled model-driven tool calls (currently public web search and weather), permission filtering, tests and a browser-persisted chat transcript. It is not yet a public hosted deployment; the Agent Hub needs authentication and user isolation before it can be exposed to the Internet.
+
 ## Continue in a new AI session
 
 Read `docs/NEXUS-HANDOFF.md` first. It records the current architecture, provider fallback, internet endpoints, memory behavior and avatar work so a new session can resume without relying on chat history.
